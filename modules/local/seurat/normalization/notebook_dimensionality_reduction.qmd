@@ -1,0 +1,245 @@
+---
+title: "Module - Normalization and Dimensionality Reduction"
+description: | 
+  Description
+execute:
+  freeze: auto
+  cache: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    df-print: paged
+    fig-format: png
+    fig-dpi: 300
+    fig-responsive: true
+    fig-align: center
+lightbox:
+    match: auto
+    effect: zoom
+    loop: true
+params:
+  project_name: 'Test'
+  seurat_object: './data/ovarian_qc_merged_object.RDS'
+  thr_n_features: 2000
+  thr_n_dimensions: 100
+  n_threads: 8
+  n_memory: 8
+  work_directory: !expr here::here()
+  auto_save: TRUE
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r setup, include = FALSE, message = FALSE, warning = FALSE, echo = FALSE}
+
+# Project parameters 
+project_name <- params$project_name
+seurat_object <- params$seurat_object
+
+# Inputs and thresholds
+thr_n_features <- params$thr_n_features
+thr_n_dimensions <- params$thr_n_dimensions
+
+# Optional parameters
+
+# Dataflow/Computational parameters
+n_threads <- params$n_threads
+n_memory <- params$n_memory
+
+# Output parameters
+work_directory <- params$work_directory
+timestamp <- params$timestamp
+auto_save <- params$auto_save
+
+# Knitr options
+knitr::opts_knit$set(
+  root.dir = work_directory
+  )
+
+```
+
+## Loading library
+
+```{r library}
+#| output: false
+#| code-fold: true
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(Seurat)
+
+```
+
+## Folder structure
+
+```{r project_directory}
+#| output: false
+#| code-fold: true
+
+if(!dir.exists(work_directory)) {
+  dir.create(work_directory, recursive = T)
+}
+
+for(sub_directory in c('data', 'figures')) {
+  dir.create(paste0(work_directory, '/', sub_directory))
+}
+
+```
+
+## Loading Seurat object
+
+```{r loading_rds}
+
+# Reading seurat object
+seurat_object <- readRDS(file = seurat_object)
+
+# Setting random seed
+random_seed <- 2203
+set.seed(random_seed)
+
+```
+
+## Unifying sample layers
+
+```{r seurat_rejoin}
+#| code-fold: true
+
+if(length(seurat_object@assays$RNA@layers) > 1) {
+  
+  seurat_object <- JoinLayers(seurat_object)  
+
+}
+
+```
+
+## Counts normalization
+
+```{r normalization, message = FALSE, warning = FALSE, echo = TRUE}
+
+seurat_object <- NormalizeData(
+  object = seurat_object, 
+  normalization.method = "LogNormalize",
+  scale.factor = 10000)
+
+seurat_object <- FindVariableFeatures(
+  seurat_object, selection.method = "vst", nfeatures = thr_n_features)
+
+seurat_object <- ScaleData(seurat_object)
+
+```
+
+## Dimensionality Reduction
+
+```{r dimensionality_reduction}
+#| warning: false
+
+# Running PCA and printing out dimensions
+seurat_object <- RunPCA(seurat_object, verbose = FALSE, npcs = thr_n_dimensions)
+print(seurat_object[["pca"]], dims = 1:5, nfeatures = 5)
+
+```
+
+### PCA Loadings
+
+```{r pca_loading_plot, fig.height = 14}
+#| label: fig-loadings
+#| fig-cap: 'PCA Loadings'
+#| fig-cap-location: top
+#| fig-height: 14
+#| fig-width: 10
+
+VizDimLoadings(seurat_object, dims = 1:5, reduction = "pca")
+
+```
+
+:::{.callout-tip}
+The @fig-loadings visualizes dimensionality reduction loadings in a Seurat object. It displays the contribution of each gene to the principal components or other reduced dimensions, aiding in the interpretation of underlying biological variation.
+:::
+
+### Features Plot
+
+```{r variable_plot}
+#| label: fig-variable-plot
+#| fig-cap: 'VariableFeaturePlot (TOP 10)'
+#| fig-cap-location: top
+#| warning: false
+
+# Identify the 10 most highly variable genes
+variable_top10 <- head(VariableFeatures(seurat_object), 10)
+
+# plot variable features with and without labels
+variable_plot <- VariableFeaturePlot(seurat_object)
+variable_plot <- LabelPoints(
+  plot = variable_plot, points = variable_top10, repel = TRUE)
+
+variable_plot
+
+```
+
+:::{.callout-tip}
+The @fig-variable-plot displays the variability of features across cells. It highlights genes with high variance, providing insights into the heterogeneity of gene expression within a dataset.
+:::
+
+### Elbow Plot
+
+```{r elbow_plot}
+#| label: fig-elbow
+#| fig-cap: 'ElbowPlot'
+#| fig-cap-location: top
+
+elbow_plot <- ElbowPlot(object = seurat_object, ndims = 100)
+elbow_plot
+
+```
+
+:::{.callout-tip}
+The @fig-elbow illustrates the elbow point of the variance explained by principal components. It helps in determining the optimal number of principal components to retain for downstream analysis, such as dimensionality reduction or clustering.
+:::
+
+## Saving Seurat object
+
+```{r object_dump}
+
+if(auto_save) {
+  
+  saveRDS(seurat_object, file = paste0('data/', project_name, '_reduction_object.RDS'))
+  
+}
+
+```
+
+## Parameters log
+
+```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
+
+print(params)
+
+```
+
+## Session info
+
+```{r session_info, message = FALSE, warning = FALSE, echo = FALSE}
+
+sessionInfo()
+
+```

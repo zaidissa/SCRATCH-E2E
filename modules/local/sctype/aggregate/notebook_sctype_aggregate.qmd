@@ -1,0 +1,304 @@
+---
+title: "Module - Sctype Aggregate annotation"
+description: | 
+  Description
+execute:
+  freeze: auto
+  cache: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    df-print: paged
+    fig-format: png
+    fig-dpi: 300
+    fig-responsive: true
+    fig-align: center
+lightbox:
+    match: auto
+    effect: zoom
+    loop: true
+params:
+  project_name: 'Project'
+  seurat_object: 'data/Project_major_annotation_object.RDS'
+  cell_annotation_files: 'data/Project_T_Cells_annotation.csv;data/Project_Myeloid_annotation.csv;data/Project_Endothelial_Cells_annotation.csv;data/Project_B_Plasma_Cells_annotation.csv'
+  n_threads: 8
+  n_memory: 16
+  work_directory: !expr here::here()
+  auto_save: TRUE
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r setup}
+#| include: false
+
+# Project parameters 
+project_name <- params$project_name
+seurat_object <- params$seurat_object
+
+# Inputs and thresholds
+cell_annotation_files <- strsplit(
+  params$cell_annotation_files, split = ';')[[1]]
+
+# Optional parameters
+
+# Dataflow/Computational parameters
+n_threads <- params$n_threads
+n_memory <- params$n_memory
+
+# Output parameters
+work_directory <- params$work_directory
+timestamp <- params$timestamp
+auto_save <- params$auto_save
+
+# Rmarkdown options
+knitr::opts_knit$set(
+  root.dir = work_directory
+  )
+
+knitr::opts_chunk$set(
+  fig.path = "figures/",   
+  dev      = "png",
+  dpi      = 300
+)
+
+```
+
+:::{.callout-important collapse="true"}
+Here we will print the parameters
+:::
+
+## Loading library
+
+```{r}
+#| output: false
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(Seurat)
+library(HGNChelper)
+
+```
+
+## Folder structure
+
+```{r project_directory}
+#| output: false
+
+if(!dir.exists(work_directory)) {
+  dir.create(work_directory, recursive = T)
+}
+
+for(sub_directory in c('data', 'figures')) {
+  dir.create(paste0(work_directory, '/', sub_directory))
+}
+
+```
+
+## Loading Seurat object
+
+```{r}
+
+# Reading seurat object
+seurat_object <- readRDS(file = seurat_object)
+# seurat_object = project_major_annotation_object
+# Setting random seed
+random_seed <- 2203
+set.seed(random_seed)
+
+```
+
+## Adding metadata
+
+```{r}
+#| output: false
+
+# Read and combine all data files into a single data frame
+# cell_annotation_files_aggregate = "../major/../../../../data-Final/SCRATCH_ANNOTATION:SCYTPE_MAJOR_ANNOTATION/data/project_major_annotation.csv"
+cell_annotation_files_aggregate <- purrr::map_df(
+    cell_annotation_files, read_csv
+  )
+
+```
+
+```{r}
+
+cell_annotation_files_aggregate <- cell_annotation_files_aggregate[
+  !is.na(cell_annotation_files_aggregate$sctype),]
+
+cell_annotation_files_aggregate <- cell_annotation_files_aggregate %>%
+  tibble::column_to_rownames(var = "barcode") %>%
+  dplyr::rename(
+    scytpe_subset = sctype
+  )
+
+```
+
+
+```{r}
+
+seurat_object <- AddMetaData(
+  seurat_object,
+  cell_annotation_files_aggregate
+)
+
+seurat_object$scytpe_subset <- ifelse(
+  is.na(seurat_object$scytpe_subset), seurat_object$sctype, seurat_object$scytpe_subset
+)
+
+seurat_object$predicted_labels <- seurat_object$scytpe_subset
+
+```
+
+## Data Visualization
+
+```{r annotation_umap}
+#| label: fig-sctype-final
+#| fig-cap: 'UMAP'
+#| fig-width: 15
+#| fig-height: 10
+#| fig-align: center
+#| layout-nrow: 2
+
+SCP::CellDimPlot(
+  srt = seurat_object, 
+  group.by = "scytpe_subset",
+  reduction = "umap",
+  label = TRUE, 
+  label_repel = TRUE,
+  show_stat = TRUE,
+  theme_use = "theme_blank"
+) +
+  theme(
+    legend.position = "top"
+  )
+
+```
+
+:::{.callout-tip}
+The @fig-sctype-final displays the final annotation after the hierarchical approach. Major cell types are shown when not further informantion is available on the cell annotation database.
+:::
+
+## scType dendrogram
+
+```{r annotation_tree}
+#| warning: false
+
+# # Aggregate data by annotations
+# cell_average <- AverageExpression(
+#   seurat_object,
+#   assay = 'RNA',
+#   slot = 'scale.data',
+#   return.seurat = FALSE,
+#   group.by = "scytpe_subset")
+# Aggregate data by annotations (Seurat 5 syntax)
+cell_average <- AverageExpression(
+  seurat_object,
+  assay        = 'RNA',
+  layer        = 'scale.data',    # use `layer`
+  return.seurat = FALSE,
+  group.by     = "scytpe_subset")
+
+
+cell_average <- cell_average$RNA
+
+# Compute distance matrix on aggregated data
+cell_dist_matrix <- as.matrix(cell_average)
+cell_dist_matrix <- stats::cor(cell_dist_matrix, method = "pearson")
+
+# Convert correlation matrix to a distance matrix
+cell_dist_matrix <- stats::as.dist(1 - cell_dist_matrix)
+
+# Perform hierarchical clustering
+cell_hierarchical <- stats::hclust(cell_dist_matrix)
+
+```
+
+```{r}
+#| label: fig-dendrogram-final
+#| fig-cap: 'Dendrogram'
+#| fig-width: 10
+#| fig-height: 12
+#| fig-align: center
+
+# Printing dendrogram
+
+plot(cell_hierarchical, main = "Dendrogram", xlab = "Index", ylab = "Height")
+
+```
+
+:::{.callout-tip}
+[Beta] The @fig-dendrogram-final displays the hierarchical clustering across the cell types based on average normalized expression from `scale.data`. The average expression per cell population is correlated based on Pearson. Therefore, correlated cells should display closet distances, i.e., clustering into near branches.
+:::
+
+## Cell composition
+
+```{r barplot_composition}
+#| label: fig-bar-composition
+#| fig-cap: 'Barplot'
+#| fig-width: 18
+#| fig-height: 10
+#| fig-align: center
+
+# Boxplot
+SCP::CellStatPlot(
+  seurat_object,
+  stat.by = "seurat_clusters", 
+  group.by = "scytpe_subset", 
+  label = TRUE
+)
+
+```
+
+:::{.callout-tip}
+The @fig-bar-composition provides an overall view of cell composition across distinct clusters on the dataset.
+:::
+
+## Saving Seurat object
+
+```{r object_dump}
+#| cache: false
+
+if(auto_save) {
+
+  saveRDS(seurat_object, file = paste0("data/", project_name, "_sctype_agg_annotation_object.RDS"))
+
+}
+
+```
+
+## Parameters log
+
+```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
+
+print(params)
+
+```
+
+## Session info
+
+```{r session_info, message = FALSE, warning = FALSE, echo = FALSE}
+
+sessionInfo()
+
+```

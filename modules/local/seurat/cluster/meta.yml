@@ -1,0 +1,85 @@
+name: seurat_cluster
+description: Executes a comprehensive clustering analysis on single-cell RNA-seq data using Seurat. The process includes data normalization, principal component analysis, neighbor finding, and UMAP visualization. Outputs include a detailed report and figures depicting various aspects of the data.
+keywords:
+  - single-cell
+  - clustering
+  - UMAP
+tools:
+  - quarto:
+      description: Quarto is a scientific and technical publishing system built on Pandoc.
+      homepage: https://quarto.org/
+      documentation: https://quarto.org/docs/
+      tool_dev_url: https://github.com/quarto-dev/quarto-cli
+      licence: "GPL-3.0"
+  - seurat:
+      description: Seurat is an R package designed for QC, analysis, and exploration of single-cell RNA-seq data.
+      homepage: https://satijalab.org/seurat/
+      documentation: https://satijalab.org/seurat/articles/get_started.html
+      tool_dev_url: https://github.com/satijalab/seurat
+      licence: "GPL-3.0"
+  - readr:
+      description: readr is an R package to read text data quickly and efficiently.
+      homepage: https://readr.tidyverse.org/
+      documentation: https://readr.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/readr
+  - dplyr:
+      description: dplyr is an R package for data manipulation operations.
+      homepage: https://dplyr.tidyverse.org/
+      documentation: https://dplyr.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/dplyr
+  - ggplot2:
+      description: ggplot2 is an R package for creating complex visualizations.
+      homepage: https://ggplot2.tidyverse.org/
+      documentation: https://ggplot2.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/ggplot2
+  - patchwork:
+      description: patchwork is an R package that combines multiple ggplot2 plots into a single plot.
+      homepage: https://patchwork.data-imaginist.com/
+      documentation: https://patchwork.data-imaginist.com/
+      tool_dev_url: https://github.com/thomasp85/patchwork
+      licence: "MIT"
+  - ROGUE:
+      description: ROGUE is an R package for assessing clustering quality and robustness in single-cell RNA-seq data.
+      homepage: "N/A"
+      documentation: "N/A"
+      tool_dev_url: "N/A"
+input:
+  - seurat_object:
+      type: file
+      description: Seurat object file that contains preprocessed single-cell RNA-seq data.
+      pattern: "*.RDS"
+  - notebook_clustering:
+      type: file
+      description: Quarto notebook file (.qmd) used for the clustering analysis, including detailed parameters and visualizations.
+      pattern: "*.qmd"
+      parameters:
+        project_name: 'Test'
+        seurat_object: './data/project_reduction_object-5.RDS'
+        input_features_plot: 'LYZ;CCL5;IL32;PTPRCAP;FCGR3A;PF4;PTPRC'
+        input_group_plot: 'patient_id;timepoint'
+        input_integration_dimension: 'auto'
+        thr_quantile: 'q01'
+        thr_npc: 'auto'
+        thr_resolution: 0.25
+        thr_proportion: 0.25
+  - page_config:
+      type: file
+      description: Configuration file that may contain additional settings or parameters for the notebook rendering.
+      pattern: "*.{yml,yaml,json}"
+output:
+  - seurat_rds:
+      type: file
+      description: Updated Seurat RDS file containing the clustered single-cell data.
+      pattern: "data/${params.project_name}_cluster_object.RDS"
+  - html:
+      type: file
+      description: The rendered HTML report of the clustering process summarized in the Quarto notebook.
+      pattern: "report/${notebook_clustering.baseName}.html"
+  - figures:
+      type: file
+      description: Figures generated during the clustering process, saved as PNG files.
+      pattern: "_freeze/**/figure-html/*.png"
+authors:
+  - Andre Fonseca (@oandrefonseca)
+maintainers:
+  - Andre Fonseca (@oandrefonseca)

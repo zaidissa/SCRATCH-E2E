@@ -1,0 +1,65 @@
+name: helper_summarize
+description: Generates an HTML report summarizing project metrics, focusing on data aggregation and interactive visualization using a Quarto-rendered notebook.
+keywords:
+  - single-cell
+  - quality report
+tools:
+  - quarto:
+      description: Quarto is a scientific and technical publishing system built on Pandoc.
+      homepage: https://quarto.org/
+      documentation: https://quarto.org/docs/
+      tool_dev_url: https://github.com/quarto-dev/quarto-cli
+      licence: "GPL-3.0"
+  - R:
+      description: R is a programming language and environment for statistical computing and graphics.
+      homepage: https://www.r-project.org/
+      documentation: https://www.r-project.org/manuals.html
+      tool_dev_url: https://github.com/wch/r-source
+      licence: "GPL-2.0 or later"
+  - readr:
+      description: readr is an R package to read text data quickly and efficiently.
+      homepage: https://readr.tidyverse.org/
+      documentation: https://readr.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/readr
+  - dplyr:
+      description: dplyr is an R package for data manipulation operations.
+      homepage: https://dplyr.tidyverse.org/
+      documentation: https://dplyr.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/dplyr
+  - ggplot2:
+      description: ggplot2 is an R package for creating complex visualizations.
+      homepage: https://ggplot2.tidyverse.org/
+      documentation: https://ggplot2.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/ggplot2
+  - DT:
+      description: DT is an R package that provides an interface to the DataTables library for interactive displays of data frames.
+      homepage: https://rstudio.github.io/DT/
+      documentation: https://rstudio.github.io/DT/
+      tool_dev_url: https://github.com/rstudio/DT
+input:
+  - project_metrics:
+      type: file
+      description: CSV or similar file format containing the metrics data for the project.
+      pattern: "*.csv"
+  - notebook_summarize:
+      type: file
+      description: Quarto notebook file (.qmd) that is used to generate the report, including parameters for project configuration.
+      pattern: "*.qmd"
+      parameters:
+        project_name: 'Test'
+        input_metrics_report: './data/Test_metrics_report.csv'
+        n_threads: 8
+        n_memory: 16
+  - page_config:
+      type: file
+      description: Configuration file that may contain additional settings or parameters for the notebook rendering.
+      pattern: "*.{yml,yaml,json}"
+output:
+  - html:
+      type: file
+      description: The rendered HTML report of the project metrics summarized in the Quarto notebook.
+      pattern: "report/${notebook_summarize.baseName}.html"
+authors:
+  - Andre Fonseca (@oandrefonseca)
+maintainers:
+  - Andre Fonseca (@oandrefonseca)

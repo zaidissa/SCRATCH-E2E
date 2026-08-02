@@ -1,0 +1,102 @@
+With the comprehensive details from the Quarto notebook for the `SCYTPE_MAJOR_ANNOTATION` module, here’s the revised YAML documentation that captures the specifics of the module's operations:
+
+name: sctype_major_annotation
+description: This module performs major cell type annotations by integrating external marker databases with a given Seurat object. It involves differential expression analysis to identify top markers, annotates major cell types, and provides visualization through UMAP plots, dendrograms, and violin plots to display the annotated cell types and their distribution.
+keywords:
+  - single-cell
+  - major cell types
+  - annotation
+  - visualization
+  - differential expression
+tools:
+  - quarto:
+      description: Quarto is a scientific and technical publishing system built on Pandoc.
+      homepage: https://quarto.org/
+      documentation: https://quarto.org/docs/
+      tool_dev_url: https://github.com/quarto-dev/quarto-cli
+      licence: "GPL-3.0"
+  - seurat:
+      description: Seurat is an R package designed for QC, analysis, and exploration of single-cell RNA-seq data.
+      homepage: https://satijalab.org/seurat/
+      documentation: https://satijalab.org/seurat/articles/get_started.html
+      tool_dev_url: https://github.com/satijalab/seurat
+      licence: "GPL-3.0"
+  - readr:
+      description: readr is an R package to read text data quickly and efficiently.
+      homepage: https://readr.tidyverse.org/
+      documentation: https://readr.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/readr
+  - dplyr:
+      description: dplyr is an R package for data manipulation operations.
+      homepage: https://dplyr.tidyverse.org/
+      documentation: https://dplyr.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/dplyr
+  - ggplot2:
+      description: ggplot2 is an R package for creating complex visualizations.
+      homepage: https://ggplot2.tidyverse.org/
+      documentation: https://ggplot2.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/ggplot2
+  - HGNChelper:
+      description: An R package designed to check and correct gene symbols for compatibility with the HGNC database.
+      homepage: "https://bioconductor.org/packages/release/bioc/html/HGNChelper.html"
+      documentation: "https://bioconductor.org/packages/release/bioc/vignettes/HGNChelper/inst/doc/HGNChelper.html"
+  - future:
+      description: Provides simple, cross-platform solutions for asynchronous programming in R.
+      homepage: "https://cran.r-project.org/web/packages/future/index.html"
+      documentation: "https://cran.r-project.org/web/packages/future/future.pdf"
+input:
+  - notebook_major:
+      type: file
+      description: Quarto notebook file (.qmd) that specifies the major cell type annotation logic.
+      pattern: "*.qmd"
+      parameters:
+        project_name: 'Project'
+        seurat_object: 'data/Yost_main_cluster_object.RDS'
+        input_cell_markers_db: 'assets/cell_markers_database.csv'
+        input_parent_level: 'Lineage_markers'
+        input_deg_method: 'wilcox'
+        input_top_deg: 20
+        input_n_features: 2000
+        thr_fold_change: 0.25
+        thr_min_percentage: 0.1
+  - seurat_object:
+      type: file
+      description: Seurat object file containing pre-annotated single-cell RNA-seq data.
+      pattern: "*.RDS"
+  - cell_annotation:
+      type: file
+      description: CSV file containing cell marker definitions used to annotate the major cell types.
+      pattern: "*.csv"
+  - config:
+      type: file
+      description: Configuration file that may contain additional settings or parameters for the notebook rendering.
+      pattern: "*.{yml,yaml,json}"
+output:
+  - cache:
+      type: directory
+      description: Caches intermediate data and settings used during the rendering process.
+      pattern: "_freeze/${notebook.baseName}"
+  - seurat_rds:
+      type: file
+      description: Updated Seurat RDS file containing annotations of major cell types.
+      pattern: "data/${params.project_name}_major_annotation_object.RDS"
+  - annotation:
+      type: file
+      description: CSV file containing detailed annotations of major cell types.
+      pattern: "data/${params.project_name}_major_annotation.csv"
+  - major_list:
+      type: file
+      description: Text file listing the major cell types identified during the annotation process.
+      pattern: "data/${params.project_name}_major_annotation.list.txt"
+  - html:
+      type: file
+      description: The rendered HTML report of the major cell type annotation process summarized in the Quarto notebook.
+      pattern: "report/${notebook.baseName}.html"
+  - figures:
+      type: file
+      description: Diagnostic and informative figures generated during the annotation process, saved as PNG files.
+      pattern: "_freeze/**/figure-html/*.png"
+authors:
+  - Andre Fonseca (@oandrefonseca)
+maintainers:
+  - Andre Fonseca (@oandrefonseca)

@@ -1,0 +1,96 @@
+---
+title: "Module - CellTypist"
+author: "Andre Fonseca"
+execute:
+  cache: true
+  freeze: auto
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    code-fold: show
+    code-tools: true
+    default-image-extension: svg
+  ipynb: default
+format-links: [ipynb]
+params:
+    project_name: "Project"
+---
+
+```{python scratch-viz-setup}
+#| include: false
+# Publication figure system (python side): rcParams, the same validated palette
+# the R notebooks use, and vector output. Guarded — absent library is a no-op.
+import os, sys
+for _p in (".", "assets/viz", os.environ.get("SCRATCH_VIZ_DIR", ".")):
+    if os.path.exists(os.path.join(_p, "scratch_viz.py")):
+        sys.path.insert(0, _p)
+        try:
+            import scratch_viz as sv
+        except Exception as _e:
+            print("scratch_viz unavailable:", _e)
+        break
+```
+
+# Project Name: `r params$project_name`
+
+## Loading library
+
+```{python library}
+
+import sys
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+plt.rcParams['figure.dpi'] = 200
+import seaborn as sns
+import scanpy as sc
+
+import importlib as imp
+import metatime
+import matplotlib
+import matplotlib.pyplot as plt
+
+from metatime import config
+from metatime import loaddata
+from metatime import mecmapper
+from metatime import mecs
+from metatime import annotator
+from metatime import plmapper
+from metatime import dmec
+import matplotlib
+
+```
+
+```{python}
+#| echo: False
+#| include: False
+
+project_name = "Project"
+count_matrix = "/Users/affaustino/Projects/SCRATCH-Annotation/test/melanoma_yost_2018.csv"
+
+work_directory = "/Users/affaustino/Projects/SCRATCH-Annotation/test"
+
+```
+
+## Loading data
+
+```{python}
+
+```
+
+## Setting models
+
+```{python}
+
+```
+
+## Saving Data object
+
+```{python}
+
+adata.write_csvs("{work_directory}/{cell_model}".format(work_directory = work_directory, cell_model = cell_model.strip(".pkl")))
+
+```

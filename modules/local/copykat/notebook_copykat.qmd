@@ -1,0 +1,160 @@
+---
+title: "Module - CopyKAT"
+author: "SCRATCH-SyedZaidi"
+execute:
+  freeze: auto
+  cache: false
+  warning: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    fig-format: png
+    fig-dpi: 300
+    fig-responsive: true
+    fig-align: center
+lightbox:
+  match: auto
+  effect: zoom
+  loop: true
+params:
+  project_name: "Test"
+  project_object: "input_seurat.rds"
+  input_model: "human"
+  n_threads: 4
+  n_memory: 16
+  workdir: "./"
+  auto_save: true
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r setup, include = FALSE, message = FALSE, warning = FALSE, echo = FALSE}
+
+# Project parameters 
+project_name <- params$project_name
+project_object <- params$project_object
+
+# Inputs and thresholds
+input_model <- params$input_model
+
+# Dataflow/Computational parameters
+n_threads <- params$n_threads
+n_memory <- params$n_memory
+
+# Output parameters
+work_directory <- params$workdir
+auto_save <- params$auto_save
+
+```
+
+
+```{r setup}
+library(copykat)
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(cowplot)
+
+```
+
+## Folder structure
+
+```{r project_directory}
+
+if(!dir.exists(work_directory)) {
+  dir.create(work_directory, recursive = T)
+}
+
+for(sub_directory in c('data', 'figures')) {
+  dir.create(paste0(work_directory, '/', sub_directory))
+}
+
+```
+
+
+```{r loading_rds}
+
+# Reading seurat object
+seurat_object <- readRDS(file = seurat_object)
+
+# Extract normalized expression matrix
+expr_mat <- as.matrix(GetAssayData(seurat_obj, slot = "data"))
+```
+
+```{r running copykat}
+copykat_result <- copykat(rawmat = expr_mat,
+                          id.type = "S",         # Ensembl gene symbols
+                          ngene.chr = 5,
+                          win.size = 25,
+                          distance = "euclidean",
+                          norm.cell.names = NULL,
+                          n.cores = 4)
+
+write.csv(copykat_result$prediction, "copykat_prediction.csv")
+saveRDS(copykat_result, "copykat_result.rds")
+```
+
+```{r Annotate Seurat Object}
+seurat_obj$copykat_prediction <- copykat_result$prediction[colnames(seurat_obj), "copykat.pred"]
+saveRDS(seurat_obj, "seurat_copykat_annotated.rds")
+```
+
+```{r UMAP}
+p_umap <- DimPlot(seurat_obj, group.by = "copykat_prediction", pt.size = 0.4) +
+  ggtitle("CopyKAT CNV Prediction") +
+  theme_minimal(base_size = 14)
+p_umap
+ggsave("umap_copykat.png", plot = p_umap, width = 6, height = 5, dpi = 300)
+```
+
+
+```{r CNV Class Barplot}
+cnv_counts <- seurat_obj@meta.data %>%
+  count(copykat_prediction)
+
+p_bar <- ggplot(cnv_counts, aes(x = copykat_prediction, y = n, fill = copykat_prediction)) +
+  geom_bar(stat = "identity") +
+  labs(title = "CNV Class Distribution", x = "CNV Class", y = "Cell Count") +
+  theme_minimal(base_size = 14)
+p_bar
+ggsave("barplot_copykat.png", plot = p_bar, width = 5, height = 4, dpi = 300)
+
+```
+
+------------------------------------------------------------------------
+
+## Parameters log
+
+```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
+
+print(params)
+
+```
+
+## Session info
+
+```{r session_info, message = FALSE, warning = FALSE, echo = FALSE}
+
+sessionInfo()
+
+```
+

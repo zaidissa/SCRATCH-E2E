@@ -1,0 +1,21 @@
+[gene-expression]
+reference,/path/to/SCRATCH-QC-main_CR9/refdata/refdata-gex-GRCh38-2024-A
+check-library-compatibility,false
+create-bam,true
+
+[feature]
+reference,/path/to/SCRATCH-QC-main_CR9/assets/feature_reference_multi_MSK1.csv
+
+[libraries]
+fastq_id,fastqs,feature_types
+GBM1-MSK1-CSF1to6-Cells-1_IGO_16518_1,/path/to/SCRATCH-QC-main_CR9/Demux_Data,Gene Expression
+GBM1-MSK1-CSF1to6-Cells-1_FB_IGO_16518_C_1,/path/to/SCRATCH-QC-main_CR9/Demux_Data/CITE,Multiplexing Capture
+
+[samples]
+sample_id,cmo_ids
+GBM1_MSK1_S1_CSF,C0251
+GBM1_MSK1_S2_CSF,C0252
+GBM1_MSK1_S3_CSF,C0253
+GBM1_MSK1_S4_CSF,C0254
+GBM1_MSK1_S5_CSF,C0255
+GBM1_MSK1_S6_CSF,C0256

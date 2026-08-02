@@ -1,0 +1,84 @@
+name: seurat_quality
+description: Assesses the quality of single-cell RNA-seq data by applying a series of quality control checks at the sample and cell level.
+keywords:
+  - single-cell
+  - quality control
+  - cell filtering
+tools:
+  - quarto:
+      description: Quarto is a scientific and technical publishing system built on Pandoc.
+      homepage: https://quarto.org/
+      documentation: https://quarto.org/docs/
+      tool_dev_url: https://github.com/quarto-dev/quarto-cli
+      licence: "GPL-3.0"
+  - seurat:
+      description: Seurat is an R package designed for QC, analysis, and exploration of single-cell RNA-seq data.
+      homepage: https://satijalab.org/seurat/
+      documentation: https://satijalab.org/seurat/articles/get_started.html
+      tool_dev_url: https://github.com/satijalab/seurat
+      licence: "GPL-3.0"
+  - readr:
+      description: readr is an R package to read text data quickly and efficiently.
+      homepage: https://readr.tidyverse.org/
+      documentation: https://readr.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/readr
+  - dplyr:
+      description: dplyr is an R package for data manipulation operations.
+      homepage: https://dplyr.tidyverse.org/
+      documentation: https://dplyr.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/dplyr
+  - ggplot2:
+      description: ggplot2 is an R package for creating complex visualizations.
+      homepage: https://ggplot2.tidyverse.org/
+      documentation: https://ggplot2.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/ggplot2
+input:
+  - sample_id:
+      type: string
+      description: Unique identifier for the sample being processed.
+  - csv_metrics:
+      type: file
+      description: CSV file containing metrics or parameters relevant to the analysis.
+      pattern: "*.csv"
+  - matrices:
+      type: file
+      description: File containing the single-cell RNA-seq data matrix.
+      pattern: "*.h5"
+  - notebook_quality:
+      type: file
+      description: Quarto notebook file (.qmd) that is used to assess the quality of single-cell data and generate the report.
+      pattern: "*.qmd"
+      parameters:
+        project_name: 'Project'
+        sample_name: 'Sample_001'
+        input_gex_matrices: 'path/to/filtered_feature_bc_matrix'
+        csv_metrics: 'path/to/metrics_summary.csv'
+        thr_estimate_n_cells: 300
+        thr_mean_reads_per_cells: 25000
+        thr_median_genes_per_cell: 900
+        thr_median_umi_per_cell: 1000
+        thr_n_feature_rna_min: 300
+        thr_n_feature_rna_max: 7500
+        thr_percent_mito: 25
+        thr_n_observed_cells: 300
+  - page_config:
+      type: file
+      description: Configuration file that may contain additional settings or parameters for the notebook rendering.
+      pattern: "*.{yml,yaml,json}"
+output:
+  - status:
+      type: file
+      description: Various output files including quality control logs and updated Seurat objects indicating the assessment results.
+      pattern: "objects/*, log/*.txt"
+  - metrics:
+      type: file
+      description: CSV file containing upgraded metrics after quality control checks.
+      pattern: "${sample_id}_metrics_upgrade.csv"
+  - html:
+      type: file
+      description: The rendered HTML report of the quality assessment process summarized in the Quarto notebook.
+      pattern: "report/notebook_${sample_id}.html"
+authors:
+  - Andre Fonseca (@oandrefonseca)
+maintainers:
+  - Andre Fonseca (@oandrefonseca)

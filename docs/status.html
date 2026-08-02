@@ -1,0 +1,446 @@
+<title>SCRATCH-E2E — capability &amp; roadmap</title>
+
+<style>
+  /* Same tokens as the pipeline flow chart — one product, one design system. */
+  :root {
+    color-scheme: light;
+    --paper:#f5f6f7; --surface:#ffffff; --sunk:#eef1f3;
+    --ink:#0f1417; --ink-2:#4e5a60; --ink-3:#7d888d;
+    --rule:#dfe3e6; --rule-2:#ccd3d8;
+    --backbone:#2a78d6; --branch:#eb6834; --integrate:#1baf7a;
+    /* Status palette — reserved, never reused as a series colour. */
+    --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b; --none:#8a9095;
+    --good-w:#0ca30c14; --warn-w:#fab21914; --none-w:#8a909514;
+    --shadow:0 1px 2px rgba(15,20,23,.05),0 8px 24px -16px rgba(15,20,23,.28);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])){
+    color-scheme:dark;
+    --paper:#0f1113; --surface:#171b1e; --sunk:#121618;
+    --ink:#eef1f3; --ink-2:#a6b0b5; --ink-3:#727d82;
+    --rule:#262c30; --rule-2:#333b40;
+    --backbone:#3987e5; --branch:#d95926; --integrate:#199e70;
+    --good-w:#0ca30c1f; --warn-w:#fab2191f; --none-w:#8a90951f;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -16px rgba(0,0,0,.7);
+  }}
+  :root[data-theme="dark"]{
+    color-scheme:dark;
+    --paper:#0f1113; --surface:#171b1e; --sunk:#121618;
+    --ink:#eef1f3; --ink-2:#a6b0b5; --ink-3:#727d82;
+    --rule:#262c30; --rule-2:#333b40;
+    --backbone:#3987e5; --branch:#d95926; --integrate:#199e70;
+    --good-w:#0ca30c1f; --warn-w:#fab2191f; --none-w:#8a90951f;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -16px rgba(0,0,0,.7);
+  }
+
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);
+       font-size:16px;line-height:1.62;margin:0;padding:0 20px 96px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto}
+  .prose{max-width:68ch}
+  h1,h2,h3{text-wrap:balance;margin:0}
+  h1{font-family:var(--mono);font-size:clamp(1.7rem,3.4vw,2.3rem);font-weight:600;letter-spacing:-.02em;line-height:1.15}
+  h2{font-family:var(--mono);font-size:1.1rem;font-weight:600}
+  h3{font-family:var(--mono);font-size:.86rem;font-weight:600;letter-spacing:.03em}
+  p{margin:0}
+  code{font-family:var(--mono);font-size:.855em;background:var(--sunk);
+       border:1px solid var(--rule);border-radius:4px;padding:.08em .34em}
+  .eyebrow{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;
+           text-transform:uppercase;color:var(--ink-3)}
+  .lede{color:var(--ink-2);font-size:1.05rem}
+  .note{color:var(--ink-2);font-size:.9rem}
+
+  header.mast{display:flex;flex-direction:column;gap:16px;padding:56px 0 30px;
+              border-bottom:1px solid var(--rule)}
+  .stats{display:flex;flex-wrap:wrap;gap:8px;font-family:var(--mono);font-size:.74rem}
+  .stat{display:inline-flex;align-items:baseline;gap:6px;border:1px solid var(--rule-2);
+        border-radius:4px;padding:4px 9px;background:var(--surface)}
+  .stat b{font-weight:600;font-variant-numeric:tabular-nums}
+  .stat span{color:var(--ink-3)}
+
+  section{padding-top:52px}
+  .sec-head{display:flex;flex-direction:column;gap:8px;margin-bottom:22px}
+
+  /* ── Verification ladder ─────────────────────────────────────────────── */
+  .ladder{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+  .rung{background:var(--surface);border:1px solid var(--rule);border-radius:9px;padding:14px 16px;
+        display:flex;flex-direction:column;gap:5px}
+  .rung .lvl{font-family:var(--mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+  .rung .name{font-family:var(--mono);font-size:.9rem;font-weight:650}
+  .rung .what{font-size:.82rem;color:var(--ink-2)}
+  .rung.r1{border-left:3px solid var(--none)}
+  .rung.r2{border-left:3px solid var(--warn)}
+  .rung.r3{border-left:3px solid var(--good)}
+  .rung.r4{border-left:3px solid var(--crit)}
+
+  /* ── Capability rows ─────────────────────────────────────────────────── */
+  .layer{margin-bottom:26px}
+  .layer-head{display:flex;align-items:baseline;gap:12px;margin:0 0 10px;
+              padding-bottom:7px;border-bottom:1px solid var(--rule)}
+  .layer-head .tag{font-family:var(--mono);font-size:.64rem;letter-spacing:.12em;
+                   text-transform:uppercase;color:var(--ink-3)}
+  .cap{display:grid;grid-template-columns:130px 1fr 190px;gap:14px;align-items:start;
+       padding:11px 0;border-bottom:1px solid var(--rule)}
+  .cap:last-child{border-bottom:0}
+  .cap .st{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);
+           font-size:.68rem;letter-spacing:.04em;padding:3px 8px;border-radius:999px;
+           border:1px solid currentColor;white-space:nowrap;justify-self:start}
+  .st.ok{color:var(--good)} .st.part{color:var(--warn)} .st.no{color:var(--none)}
+  .cap .body b{font-family:var(--mono);font-size:.85rem;font-weight:650;color:var(--ink)}
+  .cap .body p{font-size:.85rem;color:var(--ink-2);margin-top:2px}
+  .cap .ev{font-family:var(--mono);font-size:.7rem;color:var(--ink-3);line-height:1.5}
+
+  /* ── Roadmap ─────────────────────────────────────────────────────────── */
+  .road{display:flex;flex-direction:column;gap:11px}
+  .item{background:var(--surface);border:1px solid var(--rule);border-radius:9px;
+        padding:15px 17px;display:flex;flex-direction:column;gap:7px}
+  .item.p1{border-left:3px solid var(--crit)}
+  .item.p2{border-left:3px solid var(--warn)}
+  .item.p3{border-left:3px solid var(--backbone)}
+  .item-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:9px 14px}
+  .item-head .n{font-family:var(--mono);font-size:.7rem;color:var(--ink-3);
+                border:1px solid var(--rule-2);border-radius:4px;padding:1px 7px}
+  .item-head .t{font-family:var(--mono);font-size:.92rem;font-weight:650}
+  .item-head .eff{margin-left:auto;font-family:var(--mono);font-size:.68rem;color:var(--ink-3)}
+  .item p{font-size:.88rem;color:var(--ink-2)}
+  .why{font-size:.84rem;color:var(--ink-2);border-left:2px solid var(--rule-2);padding-left:10px}
+
+  .callout{border:1px solid var(--rule);border-left:3px solid var(--crit);
+           background:#d03b3b0f;border-radius:8px;padding:15px 17px;
+           display:flex;flex-direction:column;gap:7px}
+  .callout b{font-family:var(--mono);font-size:.86rem}
+
+  .tbl{overflow-x:auto;border:1px solid var(--rule);border-radius:8px;background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-size:.86rem;font-variant-numeric:tabular-nums}
+  th,td{text-align:left;padding:9px 14px;border-bottom:1px solid var(--rule);vertical-align:top}
+  thead th{font-family:var(--mono);font-size:.65rem;letter-spacing:.12em;text-transform:uppercase;
+           color:var(--ink-3);font-weight:500;background:var(--sunk);white-space:nowrap}
+  tbody tr:last-child td{border-bottom:0}
+  td.m{font-family:var(--mono);font-size:.78rem;white-space:nowrap}
+  td.dim{color:var(--ink-2)}
+
+  footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--rule);
+         font-family:var(--mono);font-size:.72rem;color:var(--ink-3);
+         display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}
+  @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+  @media (max-width:720px){.cap{grid-template-columns:1fr;gap:6px}.cap .ev{font-size:.72rem}}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <div class="eyebrow">Status · 2026-08-01</div>
+  <h1>SCRATCH-E2E — what it does, and what is left</h1>
+  <p class="lede prose">
+    Eight standalone pipelines merged into one DAG, with a compartment split, a publication
+    figure system, per-stage smart reports and an offline interpretation agent. The
+    engineering is done and verified. <strong>The science is not — nothing has yet run on
+    real data.</strong> That distinction is what this page is for.
+  </p>
+  <div class="stats">
+    <span class="stat"><b>14</b><span>stages</span></span>
+    <span class="stat"><b>57</b><span>processes</span></span>
+    <span class="stat"><b>41</b><span>notebooks</span></span>
+    <span class="stat"><b>55</b><span>tasks, stub-verified</span></span>
+    <span class="stat"><b>14</b><span>profiles</span></span>
+    <span class="stat"><b>0</b><span>real-data runs</span></span>
+  </div>
+</header>
+
+<!-- ───────────────────────────── LADDER ───────────────────────────── -->
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">How to read the status column</div>
+    <h2>Levels of evidence</h2>
+    <p class="note prose">
+      Every claim below is tagged with how it was checked. These are not equivalent, and
+      conflating them is how a pipeline gets called "working" when it has never seen a cell.
+    </p>
+  </div>
+  <div class="ladder">
+    <div class="rung r1">
+      <span class="lvl">Level 0</span>
+      <span class="name">Written</span>
+      <span class="what">Code exists. Nothing has executed it.</span>
+    </div>
+    <div class="rung r2">
+      <span class="lvl">Level 1</span>
+      <span class="name">Stub-verified</span>
+      <span class="what">The DAG runs end to end. Channels, joins, gating and config are correct. No computation happened.</span>
+    </div>
+    <div class="rung r3">
+      <span class="lvl">Level 2</span>
+      <span class="name">Executed</span>
+      <span class="what">Real R / JS / Quarto ran and the output was inspected. True of the figure system, reports and agent.</span>
+    </div>
+    <div class="rung r4">
+      <span class="lvl">Level 3</span>
+      <span class="name">Scientifically validated</span>
+      <span class="what">Run on your data, results checked by a person who knows the biology. <strong>Nothing has reached this.</strong></span>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────────── CAPABILITY ───────────────────────────── -->
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">Current capability</div>
+    <h2>What the pipeline can do today</h2>
+  </div>
+
+  <div class="layer">
+    <div class="layer-head"><h3>Orchestration</h3><span class="tag">the part that is genuinely finished</span></div>
+
+    <div class="cap">
+      <span class="st ok">&#10003; level 2</span>
+      <div class="body"><b>One DAG, 14 stages</b>
+        <p>Alignment → QC → clustering → annotation → CNV → compartment split, then the malignant and microenvironment arms, TCR, and cross-stage integration.</p></div>
+      <div class="ev">55-task stub run, all COMPLETED. Stage inputs checked file-by-file.</div>
+    </div>
+
+    <div class="cap">
+      <span class="st ok">&#10003; level 2</span>
+      <div class="body"><b>Run any subset</b>
+        <p><code>--from</code> / <code>--to</code> for a range, <code>--only</code> for one stage or a comma-set, <code>--run_&lt;stage&gt;</code> to override. Enter at any stage from an existing object.</p></div>
+      <div class="ev">Gating matrix verified across 11 invocations.</div>
+    </div>
+
+    <div class="cap">
+      <span class="st ok">&#10003; level 2</span>
+      <div class="body"><b>Resume from existing CellRanger output</b>
+        <p>Skips alignment. Incomplete or VDJ-only sample directories are dropped with a named reason instead of a null-pointer crash.</p></div>
+      <div class="ev">Tested on a 4 GEX + 2 VDJ tree; correct 4 samples processed.</div>
+    </div>
+
+    <div class="cap">
+      <span class="st ok">&#10003; level 2</span>
+      <div class="body"><b>Portable execution</b>
+        <p>14 profiles: docker / singularity / apptainer / podman × local / LSF / Slurm / AWS Batch / Cirro, plus a Seadragon site profile. One resource model, retry escalation on OOM.</p></div>
+      <div class="ev">All profiles resolve. Images centralised and registry-overridable.</div>
+    </div>
+  </div>
+
+  <div class="layer">
+    <div class="layer-head"><h3>Analysis</h3><span class="tag">wired and stub-verified · never computed</span></div>
+
+    <div class="cap">
+      <span class="st part">&#9888; level 1</span>
+      <div class="body"><b>Compartment split</b>
+        <p>CNV consensus (inferCNV / SCEVAN / CopyKAT / Numbat) with a lineage gate, per-sample inferCNV thresholds, and an empirical false-positive rate from gate overrides.</p></div>
+      <div class="ev">Logic reviewed line-by-line. Never run against a real CNV call.</div>
+    </div>
+
+    <div class="cap">
+      <span class="st part">&#9888; level 1</span>
+      <div class="body"><b>Python NMF engine</b>
+        <p>Default for metaprograms; <code>r</code> and <code>both</code> also available. Emits R-compatible basis matrices.</p></div>
+      <div class="ev">Ran on synthetic data — recovered the planted rank. <strong>Never compared to the R engine on real data.</strong></div>
+    </div>
+
+    <div class="cap">
+      <span class="st part">&#9888; level 1</span>
+      <div class="body"><b>Numbat, allele-aware CNV</b>
+        <p>Opt-in. Three processes; sees copy-neutral LOH that the expression callers cannot.</p></div>
+      <div class="ev">DAG and joins verified. <strong>The two R scripts have never touched a real BAM.</strong> Container tag unconfirmed.</div>
+    </div>
+
+    <div class="cap">
+      <span class="st part">&#9888; level 1</span>
+      <div class="body"><b>TME characterisation</b>
+        <p>New stage: composition, differential abundance on per-sample proportions, 8 functional programmes, diversity.</p></div>
+      <div class="ev">Written and stub-verified. Abundance testing is not compositional-aware — see roadmap #2.</div>
+    </div>
+
+    <div class="cap">
+      <span class="st part">&#9888; level 1</span>
+      <div class="body"><b>The 11 inherited analysis stages</b>
+        <p>QC, clustering, annotation, batch correction, CNV, metaprograms, trajectory, cell communication, TCR — the validated science from your original pipelines, unmodified.</p></div>
+      <div class="ev">Vendored as-is; wiring verified. Their internals were deliberately not touched.</div>
+    </div>
+  </div>
+
+  <div class="layer">
+    <div class="layer-head"><h3>Figures &amp; reporting</h3><span class="tag">executed and inspected</span></div>
+
+    <div class="cap">
+      <span class="st ok">&#10003; level 2</span>
+      <div class="body"><b>Publication figure system</b>
+        <p>Colour-vision-validated palette locked per category, house theme, journal widths, 400 dpi, and a vector PDF beside every raster — applied globally, so existing plot code needed no edits.</p></div>
+      <div class="ev">Real Quarto render: palette confirmed in output, PDF twin auto-emitted.</div>
+    </div>
+
+    <div class="cap">
+      <span class="st ok">&#10003; level 2</span>
+      <div class="body"><b>Smart report framework</b>
+        <p>Verdict bar, KPI tiles, computed findings, crosstalk dropdown filters, hover reporting value + cohort median + deviation, searchable exportable tables, figure browser.</p></div>
+      <div class="ev">Rendered exemplar; 232 hover templates, 25 filters, 50 table refs.</div>
+    </div>
+
+    <div class="cap">
+      <span class="st ok">&#10003; level 2</span>
+      <div class="body"><b>Per-stage reports, automatically</b>
+        <p>A generic report stage builds each stage's report from its published outputs — no edits to the validated notebooks.</p></div>
+      <div class="ev">8 stage reports + 8 findings.json produced in the stub run; template rendered against realistic inputs.</div>
+    </div>
+
+    <div class="cap">
+      <span class="st ok">&#10003; level 2</span>
+      <div class="body"><b>Offline interpretation agent</b>
+        <p>Answers from data embedded in the page — outliers, rankings, comparisons, per-entity detail. Uses a local model only to phrase computed facts, never to supply a number.</p></div>
+      <div class="ev">Headless run of every intent. <strong>The local-model path is untested — no endpoint was available.</strong></div>
+    </div>
+
+    <div class="cap">
+      <span class="st part">&#9888; level 1</span>
+      <div class="body"><b>Domain-aware findings</b>
+        <p>Reports currently understand <em>structure</em> — status columns, outliers, table shapes — not biology. A CNV report cannot yet say "this subclone is confined to one patient".</p></div>
+      <div class="ev"><strong>1 of 40 notebooks</strong> emits biological findings. The mechanism exists and is inherited automatically.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────────────────────── THE GAP ───────────────────────────── -->
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">The honest position</div>
+    <h2>What "done" does and does not mean</h2>
+  </div>
+  <div class="callout">
+    <b>&#10007; Nothing in this pipeline has processed a real cell.</b>
+    <p class="note">
+      Every analysis claim is Level 1: the DAG is correct, the channels join, the config
+      resolves, the stubs pass. That is a real and necessary result — it is what makes a
+      first real run debuggable rather than a guessing game — but it is not evidence that
+      the biology is right. The first run on your data is a shakedown, and should be
+      treated as one: one cohort, inspected stage by stage.
+    </p>
+  </div>
+  <div style="margin-top:16px" class="tbl">
+    <table>
+      <thead><tr><th>Gap</th><th>Why it matters</th><th class="m">Closes when</th></tr></thead>
+      <tbody>
+        <tr><td class="m">No real-data run</td><td class="dim">Container tags, tool arguments and object schemas are all unconfirmed against real inputs.</td><td class="m">one cohort, <code>--to stratify</code></td></tr>
+        <tr><td class="m">Reports are structural</td><td class="dim">Findings surface outliers, not biology. The reader still has to interpret.</td><td class="m">1 → 13 notebooks emit findings</td></tr>
+        <tr><td class="m">Notebooks not redesigned</td><td class="dim">2 of 40 use the new components; 4 still stack plots vertically.</td><td class="m">per-notebook editorial pass</td></tr>
+        <tr><td class="m">NMF engines uncompared</td><td class="dim">Python is the default but has never been checked against R on real tumour matrices.</td><td class="m"><code>--metaprog_nmf_engine both</code></td></tr>
+        <tr><td class="m">Numbat unexercised</td><td class="dim">Argument names and output schema may differ in your Numbat version.</td><td class="m">one solid-tumour sample</td></tr>
+        <tr><td class="m">Local-model path untested</td><td class="dim">Agent works deterministically; the phrasing layer has never reached a live endpoint.</td><td class="m">Ollama on the HPC node</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ───────────────────────────── ROADMAP ───────────────────────────── -->
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">What to do next</div>
+    <h2>Ranked by what actually unblocks progress</h2>
+    <p class="note prose">
+      Ordering is deliberate: nothing below #1 is worth much until #1 has happened, because
+      a real run is what turns Level 1 into evidence — and it is also what will expose the
+      problems no amount of stub-running can.
+    </p>
+  </div>
+
+  <div class="road">
+
+    <div class="item p1">
+      <div class="item-head"><span class="n">1</span><span class="t">First real run — one cohort, to the compartment split</span><span class="eff">days · shakedown</span></div>
+      <p><code>--to stratify</code> on one GBM or ovarian cohort. Stop there and inspect: does the CNV evidence separate, does the lineage gate override a sensible number of cells, is the false-positive rate credible?</p>
+      <p class="why">This is the only step that converts the whole build from "wired" to "working". Everything else is speculation until it runs.</p>
+    </div>
+
+    <div class="item p1">
+      <div class="item-head"><span class="n">2</span><span class="t">Compositional analysis done correctly</span><span class="eff">~1 day</span></div>
+      <p>Cell-type proportions sum to one, so a tumour compartment expanding mechanically shrinks every other population. The TME stage currently tests per-sample proportions with a rank-sum test, which will report spurious "myeloid depletion".</p>
+      <p class="why">A correctness bug in analysis you are already running — not a new feature. scCODA or a Dirichlet-multinomial model fixes it.</p>
+    </div>
+
+    <div class="item p2">
+      <div class="item-head"><span class="n">3</span><span class="t">Biological findings per stage</span><span class="eff">~1 day per 3 stages</span></div>
+      <p>Each stage emits its own <code>findings.json</code>: "subclone 3 is confined to patient 04", "metaprogram 7 recurs in 9 of 12 samples". Inherited automatically by the stage report and the agent.</p>
+      <p class="why">This is what turns the reports from competent to genuinely useful — and it is what gives the agent something worth asking about.</p>
+    </div>
+
+    <div class="item p2">
+      <div class="item-head"><span class="n">4</span><span class="t">Metaprogram &times; CNV subclone linkage</span><span class="eff">~1 day</span></div>
+      <p>Both per-cell inputs already exist and are joined in the master object; nothing yet tests whether a programme is clone-intrinsic (genetically driven) or plastic (shared across clones).</p>
+      <p class="why">Usually the biological headline in this kind of study, and the data is already there.</p>
+    </div>
+
+    <div class="item p2">
+      <div class="item-head"><span class="n">5</span><span class="t">Notebook editorial pass</span><span class="eff">~2 days</span></div>
+      <p>Convert the 4 remaining stacking loops to filtered views, add verdict/tiles to the major reports, and give each figure a lede. 2 of 40 notebooks use the components today.</p>
+      <p class="why">Mechanical for QC-like stages; genuinely editorial for CNV, metaprograms and TCR, where deciding the headline is the work.</p>
+    </div>
+
+    <div class="item p3">
+      <div class="item-head"><span class="n">6</span><span class="t">Validate the NMF engines against each other</span><span class="eff">hours</span></div>
+      <p><code>--metaprog_nmf_engine both</code> on one cohort, then read the concordance off the Jaccard heatmap PostNMF already produces.</p>
+      <p class="why">Python is the default on a structural argument. Confirm it before it drives a publication.</p>
+    </div>
+
+    <div class="item p3">
+      <div class="item-head"><span class="n">7</span><span class="t">TCR clonotype &times; phenotype transition</span><span class="eff">~1 day</span></div>
+      <p>Clonotypes and pseudotime are already joined, but only a Spearman correlation is computed. Proper clonal-transition analysis — which phenotypic states share clonotypes — is the standard readout.</p>
+      <p class="why">Uses data already being produced; currently under-analysed.</p>
+    </div>
+
+    <div class="item p3">
+      <div class="item-head"><span class="n">8</span><span class="t">Cell-communication differential testing</span><span class="eff">~half day</span></div>
+      <p>LIANA and CellChat describe interactions; nothing compares them between conditions. CellChat's own differential analysis answers "which signalling changes in Case vs Control".</p>
+      <p class="why">A descriptive stage becomes a comparative one.</p>
+    </div>
+
+    <div class="item p3">
+      <div class="item-head"><span class="n">9</span><span class="t">Local model + CI</span><span class="eff">~1 day</span></div>
+      <p>Point the agent at an Ollama endpoint on the HPC node and confirm the phrasing layer. Add a CI job running the stub DAG on every change.</p>
+      <p class="why">The stub suite already exists and catches real breakage — it should run automatically.</p>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <div class="eyebrow">Explicitly out of scope</div>
+    <h2>Not being built</h2>
+  </div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th class="m">Item</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td class="m">Microbiome stage</td><td class="dim">Dropped at your request. All 8 modules were absent from the source repositories anyway; the BAM channel and stage slot remain wired should you want it later.</td></tr>
+        <tr><td class="m">Rewriting the vendored science</td><td class="dim">
+          <b>40 of 41 notebooks have no analysis logic changed.</b> 26 carry only the injected
+          figure-system chunk (<code>+16 / &minus;0</code> lines); the rest are presentation only —
+          raster DPI raised to 400, two <code>viridis_d</code> scales swapped for the validated
+          categorical palette, one figure stack turned into tabs, and one missing
+          <code>results: asis</code> fixed.
+          <br><br>
+          The single exception is <code>Metaprog_PostNMF.qmd</code>, which had to learn to read the
+          Python engine's basis matrices.
+          <br><br>
+          The reason is not caution for its own sake: these notebooks cannot be executed here, so
+          any edit to them is unverifiable, and the failure mode is a run that completes with
+          subtly wrong numbers. That risk is real — a two-line colour swap in GLIPH2 left an
+          <code>option = "turbo"</code> argument on a scale that has no such formal, which would
+          have crashed the render; it was caught only by inspecting the substituted lines.
+          <br><br>
+          Hence <code>STAGE_REPORT</code> reads each stage's <em>published outputs</em> rather than
+          living inside its notebook. The cost: reports see only what a stage writes to disk, which
+          is exactly why findings are structural rather than biological. A test dataset and working
+          containers would invert this trade — edits become verifiable, and going inside the
+          notebooks becomes the better option.
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <span>SCRATCH-E2E v1.0.0 · 57 processes · 55-task stub suite</span>
+  <span>status as verified on this machine, 2026-08-01</span>
+</footer>
+
+</div>

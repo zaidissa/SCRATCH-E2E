@@ -1,0 +1,278 @@
+---
+title: "Module - META PROGRAM & DIFFERENTIAL EXPRESSION — NMF (per-sample)"
+author: "Syed Shujaat Ali Zaidi"
+execute:
+  freeze: auto
+  cache: false
+  warning: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    fig-format: png
+    fig-dpi: 300
+    fig-responsive: true
+    fig-align: center
+params:
+  # I/O
+  preprocessed_matrix: null      # ONE file like data/per_sample_mat/<sample>_preprocessed.rds
+  work_directory: "."            # Nextflow passes $PWD
+  project_name: "project"
+
+  # NMF settings
+  rank_lb: 3
+  rank_ub: 5
+  nrun: 2
+  seed: 1234
+  nmf_method: "snmf/r"
+
+  # Feature selection
+  hvg_keep: 7000
+
+  # Cell count guards
+  min_cells: 100
+  max_cells: 0                   # 0 = no downsampling; >0 = cap to this many cells
+
+  # Threads (hint to backends; autodetect if null)
+  n_threads: null
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+
+
+``` {r library & parameters}
+suppressPackageStartupMessages({
+  library(NMF)
+  library(Matrix)
+  library(ggplot2)
+  library(tools)
+  library(BiocParallel)
+})
+
+# --- working dir (from Nextflow) ---
+if (!is.null(params$work_directory) && dir.exists(params$work_directory)) {
+  setwd(params$work_directory)
+}
+
+# --- threads ---
+# guess_threads <- function() {
+#   envs <- c("OMP_NUM_THREADS","OPENBLAS_NUM_THREADS","MKL_NUM_THREADS","R_PARALLEL_NUM_THREADS")
+#   for (e in envs) {
+#     v <- Sys.getenv(e, unset = "")
+#     if (nzchar(v)) {
+#       n <- suppressWarnings(as.integer(v))
+#       if (!is.na(n) && n > 0) return(n)
+#     }
+#   }
+#   n <- parallel::detectCores()
+#   if (is.na(n) || n < 1) n <- 1L
+#   n
+# }
+# n_threads <- if (is.null(params$n_threads)) guess_threads() else as.integer(params$n_threads)
+# if (is.na(n_threads) || n_threads < 1) n_threads <- 1L
+# 
+# ## threads: prefer task-level parallelism over BLAS threads
+# cpus <- n_threads
+# # Prevent oversubscription when we spawn workers:
+# Sys.setenv(OPENBLAS_NUM_THREADS = "1", MKL_NUM_THREADS = "1", OMP_NUM_THREADS = "1")
+# options(mc.cores = cpus)
+# BiocParallel::register(BiocParallel::MulticoreParam(workers = cpus))
+# 
+# ## NMF package parallel options:
+# # "p" = parallel, "t" = track timings, "v" = verbose (optional)
+# nmf.options(nrun = params$nrun, .options = "p")
+# 
+# --- threads ---
+guess_threads <- function() {
+  envs <- c("R_PARALLEL_NUM_THREADS","OMP_NUM_THREADS","OPENBLAS_NUM_THREADS","MKL_NUM_THREADS")
+  for (e in envs) {
+    v <- Sys.getenv(e, unset = "")
+    if (nzchar(v)) {
+      n <- suppressWarnings(as.integer(v))
+      if (!is.na(n) && n > 0) return(n)
+    }
+  }
+  n <- parallel::detectCores()
+  if (is.na(n) || n < 1) n <- 1L
+  n
+}
+
+n_threads <- if (is.null(params$n_threads)) guess_threads() else as.integer(params$n_threads)
+if (is.na(n_threads) || n_threads < 1) n_threads <- 1L
+cpus <- n_threads
+
+## Prefer task-level parallelism over BLAS threads (avoid oversubscription)
+Sys.setenv(OPENBLAS_NUM_THREADS = "1",
+           MKL_NUM_THREADS      = "1",
+           OMP_NUM_THREADS      = "1")
+options(mc.cores = cpus)
+
+## BiocParallel backend: Multicore on Linux, fallback to Snow/Serial otherwise
+suppressWarnings({
+  if (cpus > 1 && .Platform$OS.type == "unix") {
+    # forked workers (fast; Linux containers)
+    BiocParallel::register(BiocParallel::MulticoreParam(workers = cpus))
+  } else if (cpus > 1) {
+    # portable sockets
+    BiocParallel::register(BiocParallel::SnowParam(workers = cpus))
+  } else {
+    BiocParallel::register(BiocParallel::SerialParam())
+  }
+})
+
+## Optional: tell NMF to use BiocParallel and be quiet
+NMF::nmf.options(.options = "p")   # "p" enables parallel; add "v" for verbose
+
+## Log config (useful for provenance)
+message(sprintf("[threads] workers=%d | OPENBLAS=1 MKL=1 OMP=1", cpus))
+
+
+
+# NMF options / seed
+NMF::nmf.options(nrun = params$nrun)
+set.seed(params$seed)
+
+# ---- bind params to locals used later ----
+min_cells <- params$min_cells
+max_cells <- params$max_cells
+nrun      <- params$nrun
+hvg_keep  <- params$hvg_keep
+seed      <- params$seed
+
+# Output layout (consistent with PREP/NF expectations)
+fit_dir <- file.path("data", "per_sample_mat", "nmf_fit")
+dir.create(fit_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create("figures/metaprog", recursive = TRUE, showWarnings = FALSE)
+
+
+```
+
+
+``` {r Input}
+# ---- inputs ----
+stopifnot(!is.null(params$preprocessed_matrix))
+in_path <- normalizePath(params$preprocessed_matrix, mustWork = TRUE)
+
+sample_id <- sub("_preprocessed\\.rds$", "", basename(in_path))
+fit_path  <- file.path(fit_dir, paste0(sample_id, "_nmf_fit.rds"))
+
+cat("Sample:", sample_id, "\n")
+cat("Input :", in_path, "\n")
+cat("Output:", fit_path, "\n")
+
+mat <- readRDS(in_path)
+# Accept base matrix or any 'Matrix' subclass; coerce once if needed
+if (!(is.matrix(mat) || inherits(mat, "Matrix"))) {
+  stop(sprintf("Expected a matrix/Matrix, got: %s", paste(class(mat), collapse = ", ")))
+}
+if (!is.matrix(mat)) {
+  # coerce Matrix (e.g., dgeMatrix/dgCMatrix) to base matrix for NMF
+  mat <- as.matrix(mat)
+}
+
+# sanity checks (PREP already did QC; we just avoid cryptic errors)
+# stopifnot(is.matrix(mat) || inherits(mat, "dgCMatrix"))
+nc <- ncol(mat); nr <- nrow(mat)
+if (is.null(nc) || is.null(nr) || nc < 2 || nr < 2) {
+  stop(sprintf("Preprocessed matrix looks too small (nr=%s, nc=%s): %s", nr, nc, in_path))
+}
+if (any(mat < 0)) stop("Preprocessed matrix contains negative values; NMF requires nonnegative input.")
+
+# min cells guard (usually already enforced in PREP)
+if (nc < min_cells) {
+  stop(sprintf("Sample %s has only %d cells (< min_cells=%d)", sample_id, nc, min_cells))
+}
+
+# Optional downsampling
+if (!is.null(max_cells) && max_cells != 0 && nc > max_cells) {
+  message(sprintf("Downsampling %s: %d -> %d cells", sample_id, nc, max_cells))
+  set.seed(seed)
+  mat <- mat[, sample(colnames(mat), max_cells)]
+}
+
+```
+
+
+``` {r HVG Selection}
+# simple variance-based HVG (matches your PREP/Leiden style)
+N   <- ncol(mat)
+s1  <- rowSums(mat)
+s2  <- rowSums(mat^2)
+vars <- (s2 - (s1^2)/N) / (N - 1)
+
+hvg <- names(sort(vars, decreasing = TRUE))[1:min(hvg_keep, length(vars))]
+mat_hvg <- mat[hvg, , drop = FALSE]
+cat("HVGs kept:", nrow(mat_hvg), "\n")
+
+
+
+```
+
+``` {r NMF Fit}
+ranks <- params$rank_lb:params$rank_ub
+
+fit <- nmf(
+  as.matrix(mat_hvg),
+  rank   = ranks,
+  nrun   = nrun,
+  method = params$nmf_method,
+  .opt   = list(parallel = TRUE, verbose = FALSE)
+)
+
+saveRDS(fit, file = fit_path)
+
+
+```
+
+``` {r}
+# Plot RSS by rank if available
+try({
+  rss <- sapply(fit@fit, NMF::rss)
+  df  <- data.frame(rank = as.integer(names(fit@fit)), rss = as.numeric(rss))
+  p   <- ggplot(df, aes(rank, rss)) +
+    geom_line() + geom_point() +
+    theme_bw(base_size = 12) +
+    ggtitle(paste("RSS vs. rank —", sample_id))
+    ggsave(file.path("figures", "metaprog", paste0(sample_id, "_nmf_rss.png")), ...)
+    saveRDS(fit, file = file.path("data", "per_sample_mat", "nmf_fit", paste0(sample_id, "_nmf_fit.rds")))
+  print(p)
+  ggsave(file.path("figures", "metaprog", paste0(sample_id, "_nmf_rss.png")),
+         p, width = 7, height = 4, dpi = 400)
+}, silent = TRUE)
+
+```
+
+## Parameters log
+
+```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
+
+print(params)
+
+```
+
+## Session info
+
+```{r session_info, message = FALSE, warning = FALSE, echo = FALSE}
+
+sessionInfo()
+
+```

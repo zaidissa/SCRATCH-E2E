@@ -1,0 +1,70 @@
+name: seurat_normalize
+description: Conducts normalization and dimensionality reduction on Seurat objects to prepare single-cell RNA-seq data for downstream analysis. The process involves logarithmic normalization, variable feature selection, PCA, and generation of diagnostic plots to assess data quality and feature variability.
+keywords:
+  - single-cell
+  - normalization
+  - PCA
+  - dimensionality reduction
+tools:
+  - quarto:
+      description: Quarto is a scientific and technical publishing system built on Pandoc.
+      homepage: https://quarto.org/
+      documentation: https://quarto.org/docs/
+      tool_dev_url: https://github.com/quarto-dev/quarto-cli
+      licence: "GPL-3.0"
+  - seurat:
+      description: Seurat is an R package designed for QC, analysis, and exploration of single-cell RNA-seq data.
+      homepage: https://satijalab.org/seurat/
+      documentation: https://satijalab.org/seurat/articles/get_started.html
+      tool_dev_url: https://github.com/satijalab/seurat
+      licence: "GPL-3.0"
+  - readr:
+      description: readr is an R package to read text data quickly and efficiently.
+      homepage: https://readr.tidyverse.org/
+      documentation: https://readr.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/readr
+  - dplyr:
+      description: dplyr is an R package for data manipulation operations.
+      homepage: https://dplyr.tidyverse.org/
+      documentation: https://dplyr.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/dplyr
+  - ggplot2:
+      description: ggplot2 is an R package for creating complex visualizations.
+      homepage: https://ggplot2.tidyverse.org/
+      documentation: https://ggplot2.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/ggplot2
+input:
+  - seurat_object:
+      type: file
+      description: Seurat object file that contains single-cell RNA-seq data prepped for normalization.
+      pattern: "*.RDS"
+  - notebook_normalize:
+      type: file
+      description: Quarto notebook file (.qmd) used to guide the normalization and dimensionality reduction processes, including the creation of diagnostic plots.
+      pattern: "*.qmd"
+      parameters:
+        project_name: 'Test'
+        seurat_object: './data/ovarian_qc_merged_object.RDS'
+        thr_n_features: 2000
+        thr_n_dimensions: 100
+  - page_config:
+      type: file
+      description: Configuration file that may contain additional settings or parameters for the notebook rendering.
+      pattern: "*.{yml,yaml,json}"
+output:
+  - seurat_rds:
+      type: file
+      description: Updated Seurat RDS file containing normalized and dimensionality-reduced data.
+      pattern: "data/${params.project_name}_reduction_object.RDS"
+  - html:
+      type: file
+      description: The rendered HTML report of the normalization and dimensionality reduction process summarized in the Quarto notebook.
+      pattern: "report/${notebook_normalize.baseName}.html"
+  - figures:
+      type: file
+      description: Diagnostic and informative figures generated during the process, including PCA loadings and variability plots.
+      pattern: "_freeze/**/figure-html/*.png"
+authors:
+  - Andre Fonseca (@oandrefonseca)
+maintainers:
+  - Andre Fonseca (@oandrefonseca)

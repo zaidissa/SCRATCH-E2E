@@ -1,0 +1,310 @@
+---
+title: "`r params$stage_title`"
+subtitle: "`r params$project_name`"
+format:
+  html:
+    theme: cosmo
+    embed-resources: true
+    toc: true
+    toc-location: left
+    toc-depth: 2
+    page-layout: full
+    fig-format: png
+    fig-dpi: 400
+    code-fold: true
+    code-summary: "code"
+    link-external-icon: false
+execute: { warning: false, message: false, echo: false }
+params:
+  stage: "stage"
+  stage_title: "Stage"
+  project_name: "project"
+  stage_dir: "stage_input"
+  work_directory: "."
+  celltype_col: "azimuth_labels"
+  sample_col: "sample_id"
+  status_col: "status"
+  max_interactive_rows: 6000
+  seed: 1234
+---
+
+```{r setup, include=FALSE}
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) { p <- file.path(r, lib); if (file.exists(p)) { source(p, local = FALSE); break } }
+  }
+})
+suppressPackageStartupMessages({
+  library(data.table); library(ggplot2)
+})
+set.seed(params$seed)
+if (!is.null(params$work_directory) && dir.exists(params$work_directory)) setwd(params$work_directory)
+dir.create("data", showWarnings = FALSE, recursive = TRUE)
+
+HAVE <- function(p) requireNamespace(p, quietly = TRUE)
+SD_ROOT <- params$stage_dir
+
+# ---------------------------------------------------------------------------
+# Discover what this stage produced. The report is generic on purpose: it reads
+# the stage's published outputs rather than reaching into its notebook, so it
+# works for every stage and cannot break the validated analysis code.
+# ---------------------------------------------------------------------------
+find_all <- function(pat) {
+  if (!dir.exists(SD_ROOT)) return(character(0))
+  list.files(SD_ROOT, pattern = pat, recursive = TRUE, full.names = TRUE, ignore.case = TRUE)
+}
+csvs  <- find_all("\\.(csv|tsv)$")
+figs  <- find_all("\\.(png|jpe?g|svg)$")
+pdfs  <- find_all("\\.pdf$")
+rds   <- find_all("\\.(rds|RDS)$")
+jsons <- find_all("findings\\.json$")
+
+read_any <- function(p) tryCatch({
+  d <- data.table::fread(p, showProgress = FALSE)
+  if (!nrow(d) || !ncol(d)) NULL else d
+}, error = function(e) NULL)
+
+tabs <- list()
+for (f in csvs) {
+  d <- read_any(f); if (is.null(d)) next
+  nm <- tools::file_path_sans_ext(basename(f))
+  nm <- make.unique(c(names(tabs), nm))[length(tabs) + 1]
+  tabs[[nm]] <- d
+}
+
+num_cols  <- function(d) names(d)[vapply(d, is.numeric, logical(1))]
+chr_cols  <- function(d) names(d)[vapply(d, function(x) is.character(x) || is.factor(x), logical(1))]
+key_guess <- function(d) {
+  cand <- c(params$sample_col, "sample", "sample_id", "orig.ident", "patient_id",
+            "cell_id", "cell", "barcode", "clone", "clonotype", "program", "cluster")
+  hit <- cand[cand %in% names(d)]
+  if (length(hit)) hit[1] else (chr_cols(d)[1] %||% names(d)[1])
+}
+`%||%` <- function(a, b) if (is.null(a)) b else a
+```
+
+```{r findings, include=FALSE}
+# ---------------------------------------------------------------------------
+# Findings are computed, never written by hand. Three generic rules cover every
+# stage; anything stage-specific arrives via the stage's own findings.json.
+# ---------------------------------------------------------------------------
+
+# 1. Inherit whatever the stage itself declared.
+for (jf in jsons) {
+  j <- tryCatch(jsonlite::fromJSON(jf, simplifyVector = FALSE), error = function(e) NULL)
+  if (is.null(j)) next
+  for (r in j) scratch_register(r$id %||% "stage", r$severity %||% "info",
+                                r$headline %||% "", r$detail %||% "",
+                                stage = params$stage, value = r$value)
+}
+
+# 2. An explicit status column is a verdict the stage already reached.
+status_tab <- NULL
+for (nm in names(tabs)) {
+  d <- tabs[[nm]]
+  sc <- intersect(c(params$status_col, "status", "verdict", "qc_status", "pass"), names(d))
+  if (length(sc)) { status_tab <- list(name = nm, d = d, col = sc[1]); break }
+}
+if (!is.null(status_tab)) {
+  v <- tolower(as.character(status_tab$d[[status_tab$col]]))
+  nbad <- sum(grepl("fail|critical|error", v)); nwarn <- sum(grepl("warn|caution", v))
+  if (nbad)  scratch_register("stage_fail", "critical",
+      sprintf("%d of %d entries failed", nbad, length(v)),
+      sprintf("From `%s` in `%s`.", status_tab$col, status_tab$name), stage = params$stage, value = nbad)
+  if (nwarn) scratch_register("stage_warn", "warning",
+      sprintf("%d of %d entries flagged", nwarn, length(v)),
+      sprintf("From `%s` in `%s`.", status_tab$col, status_tab$name), stage = params$stage, value = nwarn)
+}
+
+# 3. Outliers: any numeric column with a value >= 3 SD from its mean. This is
+#    what surfaces the one sample nobody would have scrolled to.
+for (nm in names(tabs)) {
+  d <- tabs[[nm]]; if (nrow(d) < 5 || nrow(d) > 200000) next
+  k <- key_guess(d)
+  for (cl in num_cols(d)) {
+    x <- suppressWarnings(as.numeric(d[[cl]])); x <- x[is.finite(x)]
+    if (length(x) < 5) break
+    mu <- mean(x); s <- stats::sd(x); if (!is.finite(s) || s == 0) next
+    z <- (suppressWarnings(as.numeric(d[[cl]])) - mu) / s
+    hit <- which(abs(z) >= 3 & is.finite(z))
+    if (length(hit) && length(hit) <= 5) {
+      scratch_register(paste0("outlier_", nm, "_", cl), "info",
+        sprintf("`%s` has %d extreme value(s) in `%s`", cl, length(hit), nm),
+        paste(sprintf("**%s** = %s (%+.1f SD; median %s)",
+                      as.character(d[[k]][hit]), format(signif(d[[cl]][hit], 4), big.mark = ","),
+                      z[hit], format(signif(stats::median(x), 4), big.mark = ",")), collapse = "; "),
+        stage = params$stage)
+    }
+  }
+}
+
+if (!length(.SX_FINDINGS$rows))
+  scratch_register("ok", "good", sprintf("%s completed with nothing flagged", params$stage_title),
+                   sprintf("%d table(s) and %d figure(s) published.", length(tabs), length(figs)),
+                   stage = params$stage)
+scratch_findings_json(file.path("data", "findings.json"), stage = params$stage)
+```
+
+## Verdict
+
+```{r verdict, results='asis'}
+scratch_section(
+  sprintf("Everything **%s** produced, summarised before any detail.", params$stage_title),
+  how   = "Findings are computed from this stage's own outputs at render time, ranked worst-first — they cannot disagree with the tables below.",
+  watch = "**critical** blocks the run; **warning** is worth a look before trusting downstream results.")
+
+tiles <- list()
+tiles[["Tables"]]  <- list(value = length(tabs),  sub = "published")
+tiles[["Figures"]] <- list(value = length(figs),  sub = if (length(pdfs)) sprintf("+ %d vector", length(pdfs)) else "")
+if (length(rds)) tiles[["Objects"]] <- list(value = length(rds), sub = "R objects")
+sev <- vapply(.SX_FINDINGS$rows, function(r) r$severity, character(1))
+tiles[["Findings"]] <- list(value = length(sev),
+  sub = paste(sprintf("%d %s", table(sev), names(table(sev))), collapse = " · "),
+  state = if (any(sev == "critical")) "critical" else if (any(sev == "warning")) "warning" else "good")
+if (!is.null(status_tab)) {
+  v <- tolower(as.character(status_tab$d[[status_tab$col]]))
+  tiles[["Entries"]] <- list(value = length(v), sub = sprintf("in %s", status_tab$name))
+}
+scratch_tiles(tiles)
+
+if (!is.null(status_tab)) {
+  v <- as.character(status_tab$d[[status_tab$col]])
+  map <- ifelse(grepl("fail|critical|error", tolower(v)), "critical",
+         ifelse(grepl("warn|caution", tolower(v)), "warning", "good"))
+  lab <- as.character(status_tab$d[[key_guess(status_tab$d)]])
+  if (length(lab) == length(map) && length(map) <= 60)
+    scratch_verdict(setNames(map, lab), labels = lab)
+}
+scratch_headline()
+```
+
+## Results
+
+```{r results-sec, results='asis'}
+scratch_section(
+  sprintf("Every table **%s** produced, searchable and downloadable.", params$stage_title),
+  how   = "Use the dropdown to switch table. Filter any column from its header; the buttons export the filtered rows, not just the page.",
+  watch = "Row counts far below expectation usually mean an upstream filter removed more than intended.")
+```
+
+```{r tables}
+# NOT a tabset: an htmlwidget printed inside knit_child loses its JS dependency
+# registration and renders blank. A tagList keeps the dependencies attached.
+if (!length(tabs)) {
+  htmltools::tagList(htmltools::tags$p(htmltools::tags$em("This stage published no tables.")))
+} else {
+  scratch_table_set(lapply(tabs, function(d) if (nrow(d) > 5000) utils::head(d, 5000) else d),
+                    level = 3, collapse_after = 3)
+}
+```
+
+## Explore
+
+```{r explore-sec, results='asis'}
+scratch_section(
+  "The stage's main table, plotted interactively.",
+  how   = "Pick a metric; hover any bar for its value, the cohort median and the deviation from it. Filter by group to compare subsets.",
+  watch = "Bars that sit far from the median are the same entries flagged as outliers above.")
+```
+
+```{r explore}
+main <- NULL
+if (length(tabs)) {
+  # The most informative table: most numeric columns, sensible row count.
+  score <- vapply(tabs, function(d) length(num_cols(d)) * (nrow(d) >= 2 && nrow(d) <= 5000), numeric(1))
+  if (any(score > 0)) main <- tabs[[which.max(score)]]
+}
+if (is.null(main) || !length(num_cols(main))) {
+  cat("\n_No table in this stage has the shape for an interactive view._\n")
+} else {
+  k <- key_guess(main)
+  nums <- num_cols(main)[seq_len(min(8, length(num_cols(main))))]
+  m <- melt(as.data.table(main)[, c(k, nums), with = FALSE], id.vars = k,
+            variable.name = "metric", value.name = "value")
+  setnames(m, k, "entry")
+  m <- m[is.finite(value)]
+  m[, med := stats::median(value, na.rm = TRUE), by = metric][, dev := value - med]
+  m[, hover := sprintf("<b>%s</b><br>%s: <b>%s</b><br>cohort median %s (%+.3g)",
+                       entry, metric, format(signif(value, 5), big.mark = ","),
+                       format(signif(med, 5), big.mark = ","), dev)]
+
+  if (HAVE("plotly") && HAVE("crosstalk") && nrow(m) <= params$max_interactive_rows) {
+    sd <- crosstalk::SharedData$new(as.data.frame(m), key = ~paste(entry, metric), group = "stage")
+    p <- plotly::plot_ly(sd, x = ~value, y = ~entry, color = ~metric,
+                         colors = SCRATCH_PAL$categorical, type = "bar", orientation = "h",
+                         hovertext = ~hover, hovertemplate = "%{hovertext}<extra></extra>") |>
+      plotly::layout(barmode = "group", xaxis = list(title = ""),
+                     yaxis = list(title = "", automargin = TRUE), hovermode = "closest",
+                     legend = list(orientation = "h", y = -0.14)) |>
+      plotly::config(displaylogo = FALSE, toImageButtonOptions = list(format = "svg", scale = 2))
+    htmltools::tagList(
+      crosstalk::bscols(widths = c(3, 9),
+        list(crosstalk::filter_select("f_metric", "Metric", sd, ~metric, multiple = TRUE),
+             crosstalk::filter_select("f_entry", "Entry", sd, ~entry, multiple = TRUE)),
+        p))
+  } else {
+    p <- ggplot(m, aes(value, reorder(entry, value), fill = metric)) +
+      geom_col() + facet_wrap(~metric, scales = "free_x") +
+      labs(title = "Stage metrics", x = NULL, y = NULL) + theme(legend.position = "none")
+    print(p)
+  }
+}
+```
+
+## Figures
+
+```{r figs-sec, results='asis'}
+scratch_section(
+  sprintf("Figures published by **%s**.", params$stage_title),
+  how   = "Select a figure from the dropdown. Each is also written as a vector PDF beside the PNG for direct use in a manuscript.",
+  watch = "A figure missing here that you expected usually means its analysis block was skipped, not that it failed.")
+```
+
+```{r figures, results='asis'}
+if (!length(figs)) {
+  cat("\n_No figures published._\n")
+} else {
+  items <- setNames(lapply(figs, function(f) function() {
+    cat(sprintf('\n![](%s){fig-alt="%s"}\n', f, basename(f)))
+  }), tools::file_path_sans_ext(basename(figs)))
+  scratch_tabset(items, level = 3)
+}
+```
+
+## Ask
+
+```{r ask-sec, results='asis'}
+scratch_section(
+  "A question box answering from this stage's own data — no network needed.",
+  how   = "Ask in plain language: what failed, any rare patterns, top N by a metric, compare two entries, or details for one entry.",
+  watch = "Every number is computed live from the embedded tables. If a local model is serving on this machine it phrases the answer; it never supplies the numbers.")
+```
+
+```{r agent, results='asis'}
+send <- tabs
+if (length(send) > 6) send <- send[order(vapply(send, nrow, numeric(1)))][seq_len(6)]
+send <- lapply(send, function(d) as.data.frame(if (nrow(d) > 2000) utils::head(d, 2000) else d))
+scratch_agent(tables = send, stage = params$stage, project = params$project_name, viz_dir = ".")
+```
+
+## Provenance
+
+```{r prov, results='asis'}
+scratch_details("Files this report was built from", {
+  cat("\n")
+  for (grp in list(list("Tables", csvs), list("Figures", figs), list("Vector", pdfs), list("Objects", rds))) {
+    if (!length(grp[[2]])) next
+    cat(sprintf("\n**%s (%d)**\n\n", grp[[1]], length(grp[[2]])))
+    cat(paste(sprintf("- `%s`", basename(grp[[2]])), collapse = "\n"), "\n")
+  }
+})
+scratch_details("Machine-readable findings", {
+  fp <- file.path("data", "findings.json")
+  if (file.exists(fp)) cat("\n```json\n", paste(readLines(fp, warn = FALSE), collapse = "\n"), "\n```\n")
+})
+```
+
+```{r session, results='asis'}
+scratch_details("Session info", { cat("\n```\n"); print(utils::sessionInfo()); cat("\n```\n") })
+```

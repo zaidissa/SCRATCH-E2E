@@ -1,0 +1,1427 @@
+---
+title: "SCRATCH CellComm - NicheNet"
+author: "Syed Shujaat Ali Zaidi"
+execute:
+  freeze: auto
+  cache: false
+  warning: false
+  message: true
+  daemon: false
+format:
+  html:
+    embed-resources: true  # Change this to true
+    self-contained: true    # Keep for compatibility
+    keep-md: false
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    code-fold: show
+    code-tools: true
+    fig-format: png
+    fig-dpi: 300
+    fig-responsive: true
+    fig-align: center
+lightbox:
+  match: auto
+  effect: zoom
+  loop: true
+params:
+  # -----------------
+  # Required inputs
+  # -----------------
+  seurat_object: null
+
+  # NicheNet resources (MANDATORY; user provides these RDS files)
+  # lr_network_rds: null
+  # ligand_target_matrix_rds: null
+  # weighted_networks_rds: null
+  nichenet_assets_dir: "assets/nichenet_resources"
+
+  # Expected upstream artifact (available in SCRATCH; used if present; fallback if missing)
+  liana_csv: "project/cellcommunication/liana/data/liana_results.csv"
+  
+
+  # Optional upstream artifact (ignored by default; keep param for future)
+  cellchat_rds: "project/cellcommunication/cellchat/data/cellchat_object.rds"
+
+  # -----------------
+  # Project
+  # -----------------
+  project_name: "project"
+  work_directory: "."
+
+  # -----------------
+  # Data conventions
+  # -----------------
+  assay: "RNA"
+  slot: null              # Seurat v4 slot OR Seurat v5 layer
+  layer: "data"
+  celltype_col: "celltype"
+  condition_col: "batch"
+  condition_ref: "1"
+  condition_test: "2"
+
+  # -----------------
+  # Robustness filters
+  # -----------------
+  min_cells_per_group: 30
+  min_cells_per_condition_in_receiver: 15
+  expressed_pct: 0.05
+
+  # -----------------
+  # Receiver program definition
+  # -----------------
+  receiver_program_mode: "de"   # de|geneset
+  # condition_ref: "Control"
+  # condition_test: "Case"
+
+  # If receiver_program_mode == "geneset"
+  genes_of_interest: ""         # comma/semicolon separated list; if provided, overrides DE
+  geneset_name: "GOI"
+
+  # If receiver_program_mode == "de"
+  logfc_min: 0.25
+  padj_max: 0.05
+  max_geneset: 300
+
+  # -----------------
+  # Auto receiver/sender selection (DEFAULT)
+  # -----------------
+  auto_k_receivers: 3
+  auto_m_senders: 5
+
+  # If you want manual override (optional)
+  receiver_mode: "auto"         # auto|manual
+  sender_mode: "auto"           # auto|manual|all_other
+  manual_receivers: ""
+  manual_senders: ""
+
+  # -----------------
+  # NicheNet outputs
+  # -----------------
+  top_ligands: 30
+  heatmap_ligands: 15
+  heatmap_targets_per_ligand: 40
+  lr_support_top_ligands: 30
+  lr_support_top_pairs: 60
+
+  # -----------------
+  # Visualizations
+  # -----------------
+  show_gene_set_summary: true
+  plot_lr_support: true
+  plot_ligand_target_heatmap: true
+  plot_ligand_receptor_heatmap: true
+  plot_sender_ligand_expression: true
+  plot_receiver_receptor_expression: true
+  plot_network_graph: true
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r}
+suppressPackageStartupMessages({
+library(Seurat)
+library(SeuratObject)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(readr)
+library(ggplot2)
+library(Matrix)
+library(ComplexHeatmap)
+library(circlize)
+library(scales)
+library(igraph)
+library(ggraph)
+library(rlang)
+})
+# if (!requireNamespace("rlang", quietly = TRUE)) stop("Missing package: rlang")
+# SeuratObject::PackageCheck("presto", error = FALSE)
+# SeuratObject::GetAssayData
+# getS3method("GetAssayData", "StdAssay")
+
+
+
+seurat_v  <- as.character(packageVersion("Seurat"))
+so_v      <- as.character(packageVersion("SeuratObject"))
+# ---- Patch: override SeuratObject::PackageCheck (defunct in SeuratObject >= 5) ----
+if (!requireNamespace("rlang", quietly = TRUE)) stop("Missing package: rlang")
+
+slot_or_layer <- params$layer %||% slot_or_layer %||% "data"
+
+
+
+
+message("Seurat=", seurat_v, " | SeuratObject=", so_v)
+
+# ---- HARD PATCH: make SeuratObject::GetAssayData accept slot= again ----
+if (packageVersion("SeuratObject") >= "5.0.0") {
+
+  nsSO <- asNamespace("SeuratObject")
+
+  patch_one <- function(fun_name) {
+    if (!exists(fun_name, envir = nsSO, inherits = FALSE)) return(FALSE)
+
+    orig <- get(fun_name, envir = nsSO, inherits = FALSE)
+
+    shim <- function(object, layer = NULL, slot = NULL, ...) {
+      # if old code calls slot=, map it to layer=
+      if (is.null(layer) && !is.null(slot)) layer <- slot
+
+      # call original using layer=
+      # (some originals take layer explicitly; some take ...)
+      if ("layer" %in% names(formals(orig))) {
+        return(orig(object = object, layer = layer, ...))
+      } else {
+        # fallback: pass as first arg after object; many methods accept via ...
+        return(orig(object = object, layer = layer, ...))
+      }
+    }
+
+    # overwrite in namespace (bindings may be locked)
+    try(unlockBinding(fun_name, nsSO), silent = TRUE)
+    assign(fun_name, shim, envir = nsSO)
+    try(lockBinding(fun_name, nsSO), silent = TRUE)
+
+    TRUE
+  }
+
+  # Patch the ones Seurat commonly dispatches to in v5 objects
+  patched <- c()
+  for (nm in c("GetAssayData.StdAssay", "GetAssayData.Assay5", "GetAssayData.Assay")) {
+    if (patch_one(nm)) patched <- c(patched, nm)
+  }
+
+  if (length(patched) == 0) {
+    message("WARNING: No GetAssayData.* methods found to patch in SeuratObject namespace.")
+  } else {
+    message("Patched SeuratObject methods to map slot -> layer: ", paste(patched, collapse = ", "))
+  }
+}
+
+
+# If SeuratObject is v5+, Seurat must also be v5+ (otherwise FindMarkers will call GetAssayData(slot=...))
+# if (packageVersion("SeuratObject") >= "5.0.0" && packageVersion("Seurat") < "5.0.0") {
+#   stop(
+#     "Incompatible package versions detected:\n",
+#     "  SeuratObject >= 5.0.0 but Seurat < 5.0.0.\n",
+#     "Fix: upgrade Seurat to v5+ OR downgrade SeuratObject to <5.\n",
+#     "Current: Seurat=", seurat_v, " | SeuratObject=", so_v
+#   )
+# }
+
+
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+# slot_or_layer <- params$layer %||% slot_or_layer %||% "data"
+
+
+if (!requireNamespace("nichenetr", quietly = TRUE)) stop("Missing package: nichenetr")
+suppressPackageStartupMessages(library(nichenetr))
+
+# ----------------------------
+
+# Working dir & output dirs
+
+# ----------------------------
+
+if (!is.null(params$work_directory) && dir.exists(params$work_directory)) {
+setwd(params$work_directory)
+}
+
+dir.create("figures/cellcomm/nichenet", recursive = TRUE, showWarnings = FALSE)
+dir.create("data/nichenet",            recursive = TRUE, showWarnings = FALSE)
+dir.create("data",                    recursive = TRUE, showWarnings = FALSE)
+
+theme_set(theme_bw(base_size = 12))
+set.seed(1)
+
+# ----------------------------
+
+# Utils
+
+# ----------------------------
+
+parse_list <- function(x) {
+if (is.null(x) || length(x) == 0 || is.na(x) || !nzchar(x)) return(character(0))
+v <- unlist(strsplit(x, "[,;|]"))
+v <- trimws(v)
+v[nzchar(v)]
+}
+
+norm01 <- function(x) {
+if (all(is.na(x))) return(rep(0, length(x)))
+rng <- max(x, na.rm = TRUE) - min(x, na.rm = TRUE)
+if (rng == 0) return(rep(0, length(x)))
+(x - min(x, na.rm = TRUE)) / rng
+}
+
+get_expressed <- function(mat, cells, min_pct = 0.05) {
+if (length(cells) == 0) return(character(0))
+sub <- mat[, cells, drop = FALSE]
+frac <- Matrix::rowMeans(sub > 0)
+names(frac)[frac >= min_pct]
+}
+
+avg_expr <- function(mat, cells) {
+if (length(cells) == 0) return(setNames(numeric(0), character(0)))
+sub <- mat[, cells, drop = FALSE]
+Matrix::rowMeans(sub)
+}
+
+# ----------------------------
+
+# Seurat v4/v5 compatibility
+
+# ----------------------------
+join_layers_if_needed <- function(obj, assay) {
+  a <- obj[[assay]]
+  if (is.null(a)) stop("Assay not found: ", assay)
+
+  # Only relevant for Seurat v5 / Assay5 style objects
+  has_layers <- "Layers" %in% getNamespaceExports("SeuratObject")
+  has_join   <- "JoinLayers" %in% getNamespaceExports("SeuratObject")
+
+  if (has_layers && has_join) {
+    lays <- tryCatch(SeuratObject::Layers(a), error = function(e) NULL)
+    if (!is.null(lays) && length(lays) > 1) {
+      message("JoinLayers: assay '", assay, "' has ", length(lays), " layers -> joining")
+      obj[[assay]] <- SeuratObject::JoinLayers(a)
+    }
+  }
+  obj
+}
+
+get_assay_mat <- function(obj, assay="RNA", slot_or_layer="data") {
+  obj <- join_layers_if_needed(obj, assay)
+
+  # inspect the Seurat S3 method (this is the one that matters)
+  m <- getS3method("GetAssayData", "Seurat")
+  fm <- names(formals(m))
+
+  if ("layer" %in% fm) {
+    return(SeuratObject::GetAssayData(obj, assay = assay, layer = slot_or_layer))
+  } else {
+    return(SeuratObject::GetAssayData(obj, assay = assay, slot  = slot_or_layer))
+  }
+}
+
+# get_assay_mat <- function(obj, assay = "RNA", slot_or_layer = "data") {
+#   obj <- join_layers_if_needed(obj, assay)
+# 
+#   so_v5 <- utils::packageVersion("SeuratObject") >= "5.0.0"
+# 
+#   if (so_v5) {
+#     return(SeuratObject::GetAssayData(obj, assay = assay, layer = slot_or_layer))
+#   } else {
+#     return(SeuratObject::GetAssayData(obj, assay = assay, slot  = slot_or_layer))
+#   }
+# }
+
+
+subset_by_meta <- function(obj, col, value) {
+  md <- obj@meta.data
+  if (!col %in% colnames(md)) stop("Metadata column not found: ", col)
+  cells <- rownames(md)[md[[col]] %in% value]
+  obj[, cells, drop = FALSE]   # <-- works across Seurat v4/v5 without Seurat::subset
+}
+
+
+# subset_by_meta <- function(obj, col, value) {
+# md <- obj@meta.data
+# if (!col %in% colnames(md)) stop("Metadata column not found: ", col)
+# cells <- rownames(md)[md[[col]] %in% value]
+# SeuratObject::subset(obj, cells = cells)
+# }
+
+find_markers_compat <- function(obj, ident.1, ident.2,
+                               assay = "RNA", slot_or_layer = "data",
+                               logfc.threshold = 0.1, min.pct = 0.1, ...) {
+
+  obj <- join_layers_if_needed(obj, assay)
+
+  # fm_formals <- names(formals(Seurat::FindMarkers))
+  fm_formals <- names(formals(getS3method("FindMarkers", "Seurat")))
+
+  args <- list(
+    object = obj,
+    ident.1 = ident.1,
+    ident.2 = ident.2,
+    assay = assay,
+    logfc.threshold = logfc.threshold,
+    min.pct = min.pct,
+    ...
+  )
+
+  if ("layer" %in% fm_formals) {
+    args$layer <- slot_or_layer
+  } else {
+    args$slot  <- slot_or_layer
+  }
+
+  do.call(Seurat::FindMarkers, args)
+}
+
+
+# ----------------------------
+
+# Robust metadata column resolver
+
+# ----------------------------
+
+resolve_col <- function(md, preferred, candidates, label) {
+if (!is.null(preferred) && nzchar(preferred) && preferred %in% colnames(md)) return(preferred)
+hit <- candidates[candidates %in% colnames(md)][1]
+if (length(hit) == 0 || is.na(hit) || !nzchar(hit)) {
+stop("No valid ", label, " column found. Tried preferred='", preferred,
+"' and candidates: ", paste(candidates, collapse = ", "))
+}
+hit
+}
+
+CELLTYPE_CANDIDATES <- c(
+"celltype","cell_type","CellType","celltype_final","celltype_refined",
+"azimuth_labels","azimuth_label","predicted.celltype.l2","predicted.celltype.l1",
+"annotation","annot","label","labels","final_annotation","seurat_clusters"
+)
+
+CONDITION_CANDIDATES <- c(
+"condition","Condition","group","Group","case_control","status",
+"DiseaseStatus","disease_status","phenotype","response","treatment","batch"
+)
+
+# ----------------------------
+
+# LIANA schema resolver
+
+# ----------------------------
+
+resolve_liana_cols <- function(df) {
+cands <- list(
+source   = c("source","sender","cell_source","from"),
+target   = c("target","receiver","cell_target","to"),
+ligand   = c("ligand","ligand_symbol","ligand_name","ligand.complex","ligand_complex"),
+receptor = c("receptor","receptor_symbol","receptor_name","receptor.complex","receptor_complex")
+)
+out <- list()
+for (k in names(cands)) {
+hit <- cands[[k]][cands[[k]] %in% colnames(df)][1]
+out[[k]] <- ifelse(length(hit)==0 || is.na(hit), NA_character_, hit)
+}
+out
+}
+
+# ----------------------------
+
+# NicheNet resources loader (NO URLs; user-provided)
+
+# ----------------------------
+resolve_nichenet_assets <- function(dir) {
+  stopifnot(!is.null(dir), dir.exists(dir))
+
+  # Prefer standard names if present; else match common Zenodo filenames
+  candidates <- list(
+    lr = c("lr_network.rds", "lr_network_human_21122021.rds", "lr_network_mouse_*.rds", "lr_network_*human*.rds"),
+    lt = c("ligand_target_matrix.rds", "ligand_target_matrix_nsga2r_final.rds", "ligand_target_matrix_*.rds"),
+    wn = c("weighted_networks.rds", "weighted_networks_nsga2r_final.rds", "weighted_networks_*.rds")
+  )
+
+  pick_one <- function(patterns) {
+    for (p in patterns) {
+      hits <- Sys.glob(file.path(dir, p))
+      if (length(hits) > 0) return(hits[[1]])
+    }
+    NA_character_
+  }
+
+  lr_path <- pick_one(candidates$lr)
+  lt_path <- pick_one(candidates$lt)
+  wn_path <- pick_one(candidates$wn)
+
+  if (is.na(lr_path)) stop("Could not find lr_network RDS under: ", dir)
+  if (is.na(lt_path)) stop("Could not find ligand_target_matrix RDS under: ", dir)
+  if (is.na(wn_path)) stop("Could not find weighted_networks RDS under: ", dir)
+
+  list(lr = lr_path, lt = lt_path, wn = wn_path)
+}
+
+assets_dir <- params$nichenet_assets_dir
+lr_path <- file.path(assets_dir, "lr_network_human.rds")
+lt_path <- file.path(assets_dir, "ligand_target_matrix.rds")
+wn_path <- file.path(assets_dir, "weighted_networks.rds")
+
+stopifnot(dir.exists(assets_dir))
+stopifnot(file.exists(lr_path), file.exists(lt_path), file.exists(wn_path))
+
+lr_network <- readRDS(lr_path) %>% dplyr::distinct(from, to)
+ligand_target_matrix <- readRDS(lt_path)
+weighted_networks <- readRDS(wn_path)
+
+# sanity checks
+stopifnot(is.data.frame(lr_network), all(c("from","to") %in% colnames(lr_network)))
+stopifnot(is.matrix(ligand_target_matrix) || inherits(ligand_target_matrix, "Matrix"))
+stopifnot(is.list(weighted_networks))
+
+all_ligands   <- unique(lr_network$from)
+all_receptors <- unique(lr_network$to)
+
+
+
+# Sanity checks (fast)
+stopifnot(is.data.frame(lr_network), all(c("from","to") %in% colnames(lr_network)))
+stopifnot(is.matrix(ligand_target_matrix) || inherits(ligand_target_matrix, "Matrix"))
+stopifnot(is.list(weighted_networks))
+
+
+load_nichenet_resources <- function(lr_network_rds, ligand_target_matrix_rds, weighted_networks_rds) {
+stopifnot(!is.null(lr_network_rds), file.exists(lr_network_rds))
+stopifnot(!is.null(ligand_target_matrix_rds), file.exists(ligand_target_matrix_rds))
+stopifnot(!is.null(weighted_networks_rds), file.exists(weighted_networks_rds))
+
+lr_network <- readRDS(lr_network_rds)
+ligand_target_matrix <- readRDS(ligand_target_matrix_rds)
+weighted_networks <- readRDS(weighted_networks_rds)
+
+lr_network <- lr_network %>% dplyr::distinct(from, to)
+
+list(lr_network = lr_network,
+ligand_target_matrix = ligand_target_matrix,
+weighted_networks = weighted_networks)
+}
+```
+
+##What this notebook does
+##Takes an analysis-ready Seurat object (batch corrected, annotated).
+##Uses NicheNet to rank ligands that best explain a receiver’s response gene program.
+##Uses LIANA (expected upstream) to restrict candidate ligands to LR-supported ligands (sender→receiver). If LIANA is missing or too restrictive, it falls back to expression+LR prior only.
+##Automatically selects receivers and senders unless the user provides a genes of interest program or manual receivers/senders.
+
+```{r}
+# ---- required ----
+
+stopifnot(!is.null(params$seurat_object), file.exists(params$seurat_object))
+
+# ---- expected upstream ----
+
+has_liana <- !is.null(params$liana_csv) && file.exists(params$liana_csv)
+if (!has_liana) message("LIANA CSV not found -> running NicheNet without LIANA-guided restriction (fallback).")
+
+# Load Seurat
+
+seu <- readRDS(params$seurat_object)
+stopifnot(inherits(seu, "Seurat"))
+DefaultAssay(seu) <- params$assay
+seu <- join_layers_if_needed(seu, params$assay)
+
+# Resolve columns
+
+md <- seu@meta.data
+celltype_col  <- resolve_col(md, params$celltype_col,  CELLTYPE_CANDIDATES,  "celltype")
+condition_col <- resolve_col(md, params$condition_col, CONDITION_CANDIDATES, "condition")
+
+# if condition_ref/test are not present in the data, auto-pick the two most frequent levels
+cond_vals <- seu@meta.data[[condition_col]]
+lvl_counts <- sort(table(cond_vals), decreasing = TRUE)
+
+# ---- pick condition_ref / condition_test WITHOUT modifying params ----
+condition_ref  <- as.character(params$condition_ref)
+condition_test <- as.character(params$condition_test)
+
+if (!(condition_ref %in% names(lvl_counts)) || !(condition_test %in% names(lvl_counts))) {
+  if (length(lvl_counts) < 2) stop("Need at least 2 levels in condition_col='", condition_col, "' to run DE mode.")
+  condition_ref  <- names(lvl_counts)[1]
+  condition_test <- names(lvl_counts)[2]
+  message("Auto-selected condition_ref='", condition_ref, "' and condition_test='", condition_test, "' from condition_col='", condition_col, "'.")
+} else {
+  message("Using provided condition_ref='", condition_ref, "' and condition_test='", condition_test, "'.")
+}
+##################################################################################
+# sanity
+stopifnot(condition_ref %in% names(lvl_counts), condition_test %in% names(lvl_counts))
+
+
+
+message("Resolved columns:\n  celltype_col  = ", celltype_col, "\n  condition_col = ", condition_col)
+write_csv(tibble(celltype_col = celltype_col, condition_col = condition_col),
+file.path("data/nichenet", "resolved_columns_nichenet.csv"))
+
+# Filter rare cell types
+
+ct_counts <- seu@meta.data %>%
+count(.data[[celltype_col]], name = "n_cells") %>%
+arrange(desc(n_cells))
+
+keep_ct <- ct_counts %>% filter(n_cells >= params$min_cells_per_group) %>% pull(1)
+keep_cells <- rownames(seu@meta.data)[seu@meta.data[[celltype_col]] %in% keep_ct]
+stopifnot(length(keep_cells) > 0)
+
+seu <- subset(seu, cells = keep_cells)
+
+ct_counts2 <- seu@meta.data %>% count(.data[[celltype_col]], name="n_cells") %>% arrange(desc(n_cells))
+write_csv(ct_counts2, file.path("data/nichenet", "celltype_counts_filtered.csv"))
+
+celltypes <- sort(unique(seu@meta.data[[celltype_col]]))
+
+# Expression matrix for "expressed genes"
+
+# exprs_all <- get_assay_mat(seu, assay = params$assay, slot_or_layer = slot_or_layer)
+exprs_all <- get_assay_mat(seu, assay = params$assay, slot_or_layer = slot_or_layer)
+
+
+meta_all <- seu@meta.data %>%
+mutate(celltype = .data[[celltype_col]],
+condition = .data[[condition_col]])
+
+resolve_path <- function(p) {
+  if (is.null(p) || !nzchar(p)) return(NA_character_)
+  if (grepl("^/", p)) return(p)
+  file.path(params$work_directory %||% ".", p)
+}
+
+liana_csv_path    <- resolve_path(params$liana_csv)
+cellchat_rds_path <- resolve_path(params$cellchat_rds)
+
+has_liana   <- !is.na(liana_csv_path)   && file.exists(liana_csv_path)
+has_cellchat<- !is.na(cellchat_rds_path)&& file.exists(cellchat_rds_path)
+
+if (!has_liana)   message("LIANA CSV missing -> running without LIANA-guided restriction.")
+if (!has_cellchat)message("CellChat RDS missing -> skipping CellChat-based additions.")
+
+liana_res <- NULL; liana_cols <- NULL
+if (has_liana) {
+  liana_res  <- readr::read_csv(liana_csv_path, show_col_types = FALSE)
+  liana_cols <- resolve_liana_cols(liana_res)
+
+  if (any(is.na(unlist(liana_cols[c("source","target","ligand","receptor")])))) {
+    warning("LIANA loaded but required columns not found; disabling LIANA-guided restriction.")
+    has_liana <- FALSE
+    liana_res <- NULL
+    liana_cols <- NULL
+  }
+}
+
+
+# Save a quick manifest
+
+write_csv(
+tibble(
+seurat_object = params$seurat_object,
+lr_network_rds = params$lr_network_rds,
+ligand_target_matrix_rds = params$ligand_target_matrix_rds,
+weighted_networks_rds = params$weighted_networks_rds,
+liana_csv = params$liana_csv %||% "",
+assay = params$assay,
+slot = slot_or_layer,
+celltype_col = celltype_col,
+condition_col = condition_col
+),
+file.path("data/nichenet", "run_manifest.csv")
+)
+
+# Convenience sets (tutorial-like)
+
+all_ligands   <- unique(lr_network$from)
+all_receptors <- unique(lr_network$to)
+```
+
+
+##Receiver program mode
+##If genes_of_interest is provided (non-empty), we use it as the receiver program and switch to "geneset" mode automatically. Otherwise we use receiver-specific DE (Case vs Control) like the tutorial.
+```{r}
+goi <- parse_list(params$genes_of_interest)
+
+receiver_program_mode <- params$receiver_program_mode
+if (length(goi) > 0) receiver_program_mode <- "geneset"
+
+message("receiver_program_mode = ", receiver_program_mode)
+if (receiver_program_mode == "geneset") {
+message("Using genes_of_interest (n=", length(goi), "): ", paste(head(goi, 10), collapse = ", "),
+if (length(goi) > 10) " ..." else "")
+}
+
+```
+
+
+##Automatic receiver selection (default)
+##If receiver_program_mode == "geneset": receivers are selected by GOI expression enrichment (average GOI expression per celltype).
+##If receiver_program_mode == "de": receivers are selected by DE burden (number of up genes in Case vs Control) — same idea as the vignette where you define a receiver response.
+
+```{r problem}
+# Score receiver candidates
+
+score_receivers_by_goi <- function(ct) {
+cells <- rownames(meta_all)[meta_all$celltype == ct]
+if (length(cells) < params$min_cells_per_group) return(NA_real_)
+goi_present <- intersect(goi, rownames(exprs_all))
+if (length(goi_present) < 3) return(NA_real_)
+sub <- exprs_all[goi_present, cells, drop = FALSE]
+mean(as.numeric(Matrix::colMeans(sub)))
+}
+
+compute_de_burden <- function(ct) {
+  ct_cells <- rownames(seu@meta.data)[seu@meta.data[[celltype_col]] == ct]
+  if (length(ct_cells) < params$min_cells_per_group) return(0)
+
+  grp_vec <- seu@meta.data[[condition_col]]
+  n_ref  <- sum(grp_vec[ct_cells] == condition_ref, na.rm = TRUE)
+  n_test <- sum(grp_vec[ct_cells] == condition_test, na.rm = TRUE)
+
+  if (n_ref < params$min_cells_per_condition_in_receiver ||
+      n_test < params$min_cells_per_condition_in_receiver) return(0)
+
+  de_tbl <- de_wilcox_layer(
+    seu       = seu,
+    cells_use = ct_cells,
+    group_vec = grp_vec,
+    group1    = condition_test,
+    group2    = condition_ref,
+    assay     = params$assay,
+    layer     = slot_or_layer,
+    min_pct   = 0.1,
+    logfc_min = params$logfc_min
+  )
+
+  if (is.null(de_tbl) || nrow(de_tbl) == 0) return(0)
+  nrow(de_tbl)
+}
+
+
+receiver_metrics <- tibble(celltype = celltypes)
+```
+
+```{r problem 1}
+# Always use layer if present; fallback to slot for older objects
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+slot_or_layer <- params$layer %||% params$slot %||% "data"
+
+if (!requireNamespace("presto", quietly = TRUE)) {
+  stop("Package 'presto' is required for DE in SeuratObject v5 when Seurat::FindMarkers breaks. Install it: install.packages('presto')")
+}
+
+# DE using assay matrix (layer) + presto (no Seurat::FindMarkers)
+de_wilcox_layer <- function(seu, cells_use, group_vec, group1, group2,
+                            assay = "RNA", layer = "data",
+                            min_pct = 0.1, logfc_min = 0.25) {
+
+  # subset metadata to cells
+  group_vec <- as.character(group_vec[cells_use])
+  keep <- group_vec %in% c(group1, group2)
+  cells_use <- cells_use[keep]
+  group_vec <- group_vec[keep]
+
+  if (length(cells_use) == 0) return(NULL)
+
+  # pull expression from layer (your get_assay_mat already uses layer when available)
+  mat <- get_assay_mat(seu[, cells_use, drop = FALSE], assay = assay, slot_or_layer = layer)
+
+  grp <- factor(group_vec, levels = c(group1, group2))
+  n1 <- sum(grp == group1); n2 <- sum(grp == group2)
+  if (n1 == 0 || n2 == 0) return(NULL)
+
+  # gene filter by expression pct in either group
+  idx1 <- which(grp == group1)
+  idx2 <- which(grp == group2)
+  pct1 <- Matrix::rowMeans(mat[, idx1, drop = FALSE] > 0)
+  pct2 <- Matrix::rowMeans(mat[, idx2, drop = FALSE] > 0)
+  keep_genes <- (pmax(pct1, pct2) >= min_pct)
+  if (!any(keep_genes)) return(NULL)
+
+  mat2 <- mat[keep_genes, , drop = FALSE]
+
+  # presto Wilcoxon
+  res <- presto::wilcoxauc(mat2, y = grp)
+
+  # presto returns one row per feature per group; keep group1 rows and compute log2FC
+  res1 <- res[res$group == group1, , drop = FALSE]
+
+  # average expression per group for log2FC
+  avg1 <- Matrix::rowMeans(mat2[, idx1, drop = FALSE])
+  avg2 <- Matrix::rowMeans(mat2[, idx2, drop = FALSE])
+  log2fc <- log2((avg1 + 1e-9) / (avg2 + 1e-9))
+
+  out <- data.frame(
+    gene       = res1$feature,
+    p_val      = res1$pval,
+    p_val_adj  = res1$padj,
+    avg_log2FC = as.numeric(log2fc[match(res1$feature, rownames(mat2))]),
+    stringsAsFactors = FALSE
+  )
+
+  # apply thresholds
+  out <- out[!is.na(out$p_val_adj) & out$p_val_adj < params$padj_max &
+               out$avg_log2FC > logfc_min, , drop = FALSE]
+  out
+}
+
+
+if (receiver_program_mode == "geneset") {
+receiver_metrics <- receiver_metrics %>%
+mutate(goi_score = map_dbl(celltype, score_receivers_by_goi)) %>%
+mutate(receiver_score = norm01(tidyr::replace_na(goi_score, 0))) %>%
+arrange(desc(receiver_score))
+
+} else {
+receiver_metrics <- receiver_metrics %>%
+mutate(de_burden = map_dbl(celltype, compute_de_burden)) %>%
+mutate(receiver_score = norm01(de_burden)) %>%
+arrange(desc(receiver_score))
+}
+
+write_csv(receiver_metrics, file.path("data/nichenet", "auto_receiver_metrics.csv"))
+```
+
+```{r problem2}
+p_recv <- receiver_metrics %>%
+mutate(celltype = factor(celltype, levels = rev(celltype))) %>%
+ggplot(aes(x = celltype, y = receiver_score)) +
+geom_col() + coord_flip() +
+labs(
+title = "Auto receiver ranking",
+subtitle = if (receiver_program_mode == "geneset")
+paste0("Based on GOI mean expression per celltype (n GOI = ", length(goi), ")")
+else
+"Based on DE burden (Case vs Control) within each celltype",
+x = "Celltype", y = "Receiver score (0-1)"
+)
+
+ggsave(file.path("figures/cellcomm/nichenet", "auto_receiver_ranking.png"),
+p_recv, width = 8.5, height = 6, dpi = 300)
+p_recv
+
+# Pick receivers (default auto)
+
+manual_receivers <- parse_list(params$manual_receivers)
+if (params$receiver_mode == "manual") {
+receivers <- intersect(manual_receivers, celltypes)
+if (length(receivers) == 0) stop("receiver_mode=manual but manual_receivers not found in object.")
+} else {
+receivers <- receiver_metrics %>% slice_head(n = as.integer(params$auto_k_receivers)) %>% pull(celltype)
+}
+
+receivers
+```
+
+
+##Automatic sender selection (default)
+##Senders are chosen as the top celltypes by outgoing LR count from LIANA (preferred) or by abundance if LIANA is missing.
+
+```{r}
+manual_senders <- parse_list(params$manual_senders)
+
+sender_score_table <- tibble(celltype = celltypes) %>%
+left_join(ct_counts2 %>% rename(celltype = .data[[celltype_col]]), by="celltype") %>%
+mutate(n_cells = replace_na(n_cells, 0))
+
+if (has_liana) {
+liana_out <- liana_res %>%
+count(.data[[liana_cols$source]], name = "liana_out_lr") %>%
+rename(celltype = .data[[liana_cols$source]])
+
+sender_score_table <- sender_score_table %>%
+left_join(liana_out, by="celltype") %>%
+mutate(liana_out_lr = replace_na(liana_out_lr, 0))
+} else {
+sender_score_table <- sender_score_table %>% mutate(liana_out_lr = 0)
+}
+
+select_senders <- function(receiver_ct) {
+all_others <- setdiff(celltypes, receiver_ct)
+
+if (params$sender_mode == "manual") {
+s <- intersect(manual_senders, all_others)
+if (length(s) == 0) stop("sender_mode=manual but manual_senders invalid for receiver: ", receiver_ct)
+return(s)
+}
+if (params$sender_mode == "all_other") return(all_others)
+
+# auto: LIANA outgoing first, else n_cells
+
+tbl <- sender_score_table %>%
+filter(celltype %in% all_others)
+
+if (has_liana) {
+out_sorted <- tbl %>% arrange(desc(liana_out_lr), desc(n_cells)) %>%
+slice_head(n = as.integer(params$auto_m_senders)) %>% pull(celltype)
+} else {
+out_sorted <- tbl %>% arrange(desc(n_cells)) %>%
+slice_head(n = as.integer(params$auto_m_senders)) %>% pull(celltype)
+}
+
+if (length(out_sorted) == 0) all_others else out_sorted
+}
+```
+
+##NicheNet per receiver (tutorial-aligned core steps)
+##For each receiver:
+##define response program (DE or GOI)
+##define expressed ligands in senders and expressed receptors in receiver
+##compute candidate ligands (expression + LR prior), then restrict using LIANA (directional), fallback if too few
+##compute ligand activities (AUPR)
+##visualize: activity ranking, ligand-target heatmap, ligand-receptor heatmap, LR support plot, network graph
+
+```{r}
+niche_summary <- list()
+
+for (receiver_ct in receivers) {
+
+senders <- select_senders(receiver_ct)
+
+rec_tag <- paste0("receiver_", make.names(receiver_ct))
+rec_dir_fig <- file.path("figures/cellcomm/nichenet", rec_tag)
+rec_dir_dat <- file.path("data/nichenet", rec_tag)
+dir.create(rec_dir_fig, recursive = TRUE, showWarnings = FALSE)
+dir.create(rec_dir_dat, recursive = TRUE, showWarnings = FALSE)
+
+message("\n---- Receiver: ", receiver_ct, " | Senders: ", paste(senders, collapse = ", "), " ----")
+
+receiver_cells <- rownames(meta_all)[meta_all$celltype == receiver_ct]
+sender_cells   <- rownames(meta_all)[meta_all$celltype %in% senders]
+
+# -----------------------------
+
+# Receiver response program
+
+# -----------------------------
+
+if (receiver_program_mode == "geneset") {
+geneset_oi <- intersect(goi, rownames(ligand_target_matrix))
+de_tbl <- tibble(gene = geneset_oi, source = "GOI")
+} else {
+sub <- subset_by_meta(seu, celltype_col, receiver_ct)
+Idents(sub) <- as.factor(sub@meta.data[[condition_col]])
+
+
+tab_cond <- table(Idents(sub))
+if (!(condition_ref %in% names(tab_cond)) ||
+    !(condition_test %in% names(tab_cond)) ||
+    tab_cond[[condition_ref]] < params$min_cells_per_condition_in_receiver ||
+    tab_cond[[condition_test]] < params$min_cells_per_condition_in_receiver) {
+  warning("Skipping receiver ", receiver_ct, ": insufficient cells per condition.")
+  next
+}
+
+de <- de_wilcox_layer(
+  seu       = sub,  # or seu, but sub is fine if already subset
+  cells_use = colnames(sub),
+  group_vec = sub@meta.data[[condition_col]],
+  group1    = condition_test,
+  group2    = condition_ref,
+  assay     = params$assay,
+  layer     = slot_or_layer,
+  min_pct   = 0.1,
+  logfc_min = params$logfc_min
+)
+
+if (is.null(de)) {
+  de <- data.frame(gene=character(), p_val_adj=numeric(), avg_log2FC=numeric())
+}
+
+# de already has a 'gene' column -> DO NOT do rownames_to_column()
+de <- dplyr::arrange(de, p_val_adj)
+
+write_csv(de, file.path(rec_dir_dat, "receiver_DE.csv"))
+
+# geneset_oi <- de %>%
+#   filter(!is.na(p_val_adj),
+#          p_val_adj < params$padj_max,
+#          avg_log2FC > params$logfc_min) %>%
+#   slice_head(n = as.integer(params$max_geneset)) %>%
+#   pull(gene)
+
+fc_col <- intersect(c("avg_log2FC","avg_logFC","log2FC"), colnames(de))[1]
+if (is.na(fc_col) || !nzchar(fc_col)) stop("No fold-change column found in DE table.")
+
+geneset_oi <- de %>%
+  filter(!is.na(p_val_adj),
+         p_val_adj < params$padj_max,
+         .data[[fc_col]] > params$logfc_min) %>%
+  slice_head(n = as.integer(params$max_geneset)) %>%
+  pull(gene)
+
+
+geneset_oi <- intersect(geneset_oi, rownames(ligand_target_matrix))
+de_tbl <- de
+
+
+}
+
+if (length(geneset_oi) < 10) {
+warning("Skipping receiver ", receiver_ct, ": geneset_oi too small after filtering (", length(geneset_oi), ").")
+next
+}
+
+# -----------------------------
+
+# Expressed genes (sender/receiver)
+
+# -----------------------------
+
+expressed_senders  <- get_expressed(exprs_all, sender_cells,   min_pct = params$expressed_pct)
+expressed_receiver <- get_expressed(exprs_all, receiver_cells, min_pct = params$expressed_pct)
+
+expressed_ligands_senders <- intersect(all_ligands, expressed_senders)
+expressed_receptors <- intersect(all_receptors, expressed_receiver)
+
+# Candidate ligands: sender-expressed ligands that have at least one receptor expressed in receiver
+
+potential_ligands_base <- lr_network %>%
+filter(from %in% expressed_ligands_senders,
+to %in% expressed_receptors) %>%
+pull(from) %>%
+unique()
+
+# -----------------------------
+
+# LIANA-guided restriction (directional), fallback if too few
+
+# -----------------------------
+
+potential_ligands <- potential_ligands_base
+liana_ligs_dir <- character(0)
+
+if (has_liana) {
+liana_ligs_dir <- liana_res %>%
+filter(.data[[liana_cols$target]] == receiver_ct,
+.data[[liana_cols$source]] %in% senders) %>%
+pull(.data[[liana_cols$ligand]]) %>%
+unique()
+
+
+liana_ligs_dir <- intersect(liana_ligs_dir, all_ligands)
+
+guided <- intersect(potential_ligands_base, liana_ligs_dir)
+if (length(guided) >= 5) {
+  potential_ligands <- guided
+  message("Using LIANA-guided potential ligands: ", length(potential_ligands),
+          " (base=", length(potential_ligands_base), ")")
+} else {
+  message("LIANA-guided too few (", length(guided),
+          ") -> fallback to base (", length(potential_ligands_base), ")")
+}
+
+write_csv(
+  tibble(receiver = receiver_ct,
+         senders = paste(senders, collapse = "; "),
+         n_candidates_base = length(potential_ligands_base),
+         n_liana_ligands_dir = length(liana_ligs_dir),
+         n_candidates_final = length(potential_ligands)),
+  file.path(rec_dir_dat, "ligand_candidate_counts.csv")
+)
+
+
+}
+
+if (length(potential_ligands) < 5) {
+warning("Skipping receiver ", receiver_ct, ": too few potential ligands (", length(potential_ligands), ").")
+next
+}
+
+# Background expressed genes (must be in ligand_target_matrix)
+
+background_expressed_genes <- intersect(expressed_receiver, rownames(ligand_target_matrix))
+if (length(background_expressed_genes) < 500) {
+warning("Receiver ", receiver_ct, ": background_expressed_genes small (", length(background_expressed_genes), ").")
+}
+
+# -----------------------------
+
+# Ligand activity inference (core step)
+
+# -----------------------------
+
+ligand_activities <- nichenetr::predict_ligand_activities(
+geneset                    = geneset_oi,
+background_expressed_genes = background_expressed_genes,
+ligand_target_matrix       = ligand_target_matrix,
+potential_ligands          = potential_ligands
+) %>% arrange(desc(aupr_corrected))
+
+write_csv(ligand_activities, file.path(rec_dir_dat, "ligand_activities.csv"))
+
+# -----------------------------
+
+# Summary table
+
+# -----------------------------
+
+gene_set_summary <- tibble(
+receiver = receiver_ct,
+program_mode = receiver_program_mode,
+geneset_name = if (receiver_program_mode == "geneset") params$geneset_name else "DE_up",
+condition_ref = condition_ref,
+condition_test = condition_test,
+senders = paste(senders, collapse = "; "),
+n_receiver_cells = length(receiver_cells),
+n_sender_cells = length(sender_cells),
+n_geneset_oi = length(geneset_oi),
+n_background_expressed = length(background_expressed_genes),
+n_receptors_expressed_receiver = length(expressed_receptors),
+n_candidate_ligands_base = length(potential_ligands_base),
+n_candidate_ligands_final = length(potential_ligands),
+top_ligands = paste(head(ligand_activities$test_ligand, 10), collapse = "; ")
+)
+if (isTRUE(params$show_gene_set_summary)) {
+write_csv(gene_set_summary, file.path(rec_dir_dat, "gene_set_summary.csv"))
+}
+
+# ==========================================================
+
+# Advanced visualizations
+
+# ==========================================================
+
+# -----------------------------
+
+# 1) Ligand activity barplot
+
+# -----------------------------
+
+plot_lig <- ligand_activities %>%
+slice_head(n = as.integer(params$top_ligands)) %>%
+mutate(test_ligand = factor(test_ligand, levels = rev(test_ligand)))
+
+p_lig <- ggplot(plot_lig, aes(x = test_ligand, y = aupr_corrected)) +
+geom_col() +
+coord_flip() +
+labs(
+title = paste0("NicheNet ligand activity (receiver: ", receiver_ct, ")"),
+subtitle = paste0("Program: ", gene_set_summary$geneset_name,
+" | Senders: ", paste(senders, collapse = ", ")),
+x = "Ligand",
+y = "AUPR (corrected)"
+)
+
+ggsave(file.path(rec_dir_fig, "top_ligands_aupr.png"), p_lig, width = 9, height = 6, dpi = 300)
+print(p_lig)
+
+# -----------------------------
+
+# 2) LR support dotplot (expression + activity)
+
+# -----------------------------
+
+if (isTRUE(params$plot_lr_support)) {
+top_ligs <- ligand_activities %>%
+slice_head(n = as.integer(params$lr_support_top_ligands)) %>%
+pull(test_ligand)
+
+
+lr_supported <- lr_network %>%
+  filter(from %in% top_ligs, to %in% expressed_receptors) %>%
+  distinct(from, to) %>%
+  rename(ligand = from, receptor = to)
+
+write_csv(lr_supported, file.path(rec_dir_dat, "ligand_receptor_supported_pairs.csv"))
+
+if (nrow(lr_supported) > 0) {
+  sender_means   <- avg_expr(exprs_all, sender_cells)
+  receiver_means <- avg_expr(exprs_all, receiver_cells)
+
+  lr_df <- lr_supported %>%
+    mutate(
+      ligand_avg_sender     = as.numeric(sender_means[ligand]),
+      receptor_avg_receiver = as.numeric(receiver_means[receptor])
+    ) %>%
+    mutate(
+      ligand_avg_sender     = if_else(is.na(ligand_avg_sender), 0, ligand_avg_sender),
+      receptor_avg_receiver = if_else(is.na(receptor_avg_receiver), 0, receptor_avg_receiver)
+    )
+
+  lig_act_tbl <- ligand_activities %>%
+    select(test_ligand, aupr_corrected) %>%
+    rename(ligand = test_ligand)
+
+  lr_plot <- lr_df %>%
+    left_join(lig_act_tbl, by = "ligand") %>%
+    mutate(score = rescale(aupr_corrected, to = c(0, 1)) * 0.7 + rescale(receptor_avg_receiver, to = c(0, 1)) * 0.3) %>%
+    arrange(desc(score)) %>%
+    slice_head(n = as.integer(params$lr_support_top_pairs))
+
+  write_csv(lr_plot, file.path(rec_dir_dat, "ligand_receptor_support_top_pairs.csv"))
+
+  lr_plot <- lr_plot %>%
+    mutate(ligand = factor(ligand, levels = rev(unique(ligand))),
+           receptor = factor(receptor, levels = unique(receptor)))
+
+  p_lr <- ggplot(lr_plot, aes(x = receptor, y = ligand)) +
+    geom_point(aes(size = receptor_avg_receiver, alpha = aupr_corrected)) +
+    coord_flip() +
+    labs(
+      title = paste0("LR support (receiver: ", receiver_ct, ")"),
+      subtitle = "Dot size: avg receptor expr in receiver; alpha: ligand activity (AUPR)",
+      x = "Receptor (expressed in receiver)",
+      y = "Ligand (top activity)",
+      size = "Avg expr (receiver)",
+      alpha = "AUPR"
+    ) +
+    theme(axis.text.y = element_text(size = 8),
+          axis.text.x = element_text(size = 8))
+
+  ggsave(file.path(rec_dir_fig, "ligand_receptor_support_dotplot.png"),
+         p_lr, width = 10, height = 7, dpi = 300)
+  print(p_lr)
+}
+
+
+}
+
+# -----------------------------
+
+# 3) Ligand-target heatmap (regulatory potential)
+
+# -----------------------------
+
+if (isTRUE(params$plot_ligand_target_heatmap)) {
+top_ligs_hm <- ligand_activities %>% slice_head(n = as.integer(params$heatmap_ligands)) %>% pull(test_ligand)
+top_ligs_hm <- intersect(top_ligs_hm, rownames(ligand_target_matrix))
+
+
+top_targets <- function(lig, n = 40) {
+  v <- ligand_target_matrix[lig, , drop = TRUE]
+  names(sort(v, decreasing = TRUE))[1:min(n, length(v))]
+}
+
+targets_union <- unique(unlist(map(top_ligs_hm, top_targets, n = as.integer(params$heatmap_targets_per_ligand))))
+
+lt_mat <- ligand_target_matrix[top_ligs_hm, targets_union, drop = FALSE]
+
+# Prefer targets that are in the receiver program if enough overlap
+lt_in_prog <- lt_mat[, colnames(lt_mat) %in% geneset_oi, drop = FALSE]
+if (ncol(lt_in_prog) >= 10) lt_mat <- lt_in_prog
+
+# Row-scale for visualization
+lt_scaled <- t(scale(t(as.matrix(lt_mat))))
+lt_scaled[is.na(lt_scaled)] <- 0
+
+ht <- ComplexHeatmap::Heatmap(
+  lt_scaled,
+  name = "Z(RegPot)",
+  column_title = paste0("Predicted targets (receiver: ", receiver_ct, ")"),
+  row_title = "Top ligands",
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  show_column_names = FALSE
+)
+
+png(file.path(rec_dir_fig, "ligand_target_heatmap.png"), width = 2800, height = 1800, res = 300)
+ComplexHeatmap::draw(ht)
+dev.off()
+
+
+}
+
+# -----------------------------
+
+# 4) Ligand-receptor heatmap (prior interaction potential)
+
+# -----------------------------
+
+# ---- Ligand-receptor heatmap (version-safe for nichenetr 2.2.1.1) ----
+if (isTRUE(params$plot_ligand_receptor_heatmap)) {
+
+  best_ligs <- ligand_activities %>%
+    slice_head(n = as.integer(params$heatmap_ligands)) %>%
+    pull(test_ligand)
+
+  # This is the correct call for your version:
+  lr_links_df <- nichenetr::get_weighted_ligand_receptor_links(
+    best_upstream_ligands     = best_ligs,
+    expressed_receptors       = expressed_receptors,
+    lr_network                = lr_network,
+    weighted_networks_lr_sig  = weighted_networks$lr_sig
+  )
+
+  # Ensure columns are exactly what prepare_* expects:
+  lr_links_df <- lr_links_df %>% dplyr::select(from, to, weight)
+
+  write_csv(lr_links_df, file.path(rec_dir_dat, "weighted_ligand_receptor_links.csv"))
+
+  if (nrow(lr_links_df) > 0) {
+
+    vis_lr <- nichenetr::prepare_ligand_receptor_visualization(
+      lr_network_top_df_long = lr_links_df,
+      best_upstream_ligands  = best_ligs,
+      order_hclust           = "both"
+    )
+
+    mat_lr <- t(vis_lr)
+
+    ht_lr <- ComplexHeatmap::Heatmap(
+      mat_lr,
+      name = "Prior\npotential",
+      column_title = paste0("Receptors (receiver: ", receiver_ct, ")"),
+      row_title = "Ligands",
+      cluster_rows = TRUE,
+      cluster_columns = TRUE
+    )
+
+    png(file.path(rec_dir_fig, "ligand_receptor_heatmap.png"), width = 2600, height = 1600, res = 300)
+    ComplexHeatmap::draw(ht_lr)
+    dev.off()
+  }
+}
+
+# -----------------------------
+
+# 5) Sender ligand expression dotplot (Seurat)
+
+# -----------------------------
+
+if (isTRUE(params$plot_sender_ligand_expression)) {
+top_ligs <- ligand_activities %>%
+slice_head(n = as.integer(params$heatmap_ligands)) %>%
+pull(test_ligand) %>%
+intersect(rownames(exprs_all))
+
+
+if (length(top_ligs) >= 3) {
+  obj_senders <- subset(seu, cells = sender_cells)
+  Idents(obj_senders) <- obj_senders@meta.data[[celltype_col]]
+  p <- DotPlot(obj_senders, features = rev(top_ligs)) + coord_flip() +
+    labs(title = paste0("Sender ligand expression (receiver: ", receiver_ct, ")"),
+         subtitle = paste0("Senders: ", paste(senders, collapse = ", ")))
+  ggsave(file.path(rec_dir_fig, "sender_ligand_expression_dotplot.png"), p, width = 10, height = 7, dpi = 300)
+  print(p)
+}
+
+
+}
+
+# -----------------------------
+
+# 6) Receiver receptor expression dotplot (Seurat)
+
+# -----------------------------
+
+if (isTRUE(params$plot_receiver_receptor_expression)) {
+best_ligs <- ligand_activities %>% slice_head(n = as.integer(params$heatmap_ligands)) %>% pull(test_ligand)
+
+
+# receptors paired with best ligands (supported by prior + expression)
+rec_pairs <- lr_network %>%
+  filter(from %in% best_ligs, to %in% expressed_receptors) %>%
+  distinct(to) %>%
+  pull(to) %>%
+  intersect(rownames(exprs_all))
+
+rec_pairs <- head(rec_pairs, 30)
+
+if (length(rec_pairs) >= 3) {
+  obj_rec <- subset(seu, cells = receiver_cells)
+  Idents(obj_rec) <- obj_rec@meta.data[[condition_col]]
+  p <- DotPlot(obj_rec, features = rev(rec_pairs)) + coord_flip() +
+    labs(title = paste0("Receiver receptor expression (", receiver_ct, ")"),
+         subtitle = paste0("Grouped by ", condition_col))
+  ggsave(file.path(rec_dir_fig, "receiver_receptor_expression_dotplot.png"), p, width = 10, height = 7, dpi = 300)
+  print(p)
+}
+
+
+}
+
+# -----------------------------
+
+# 7) Network graph (ligand -> receptor -> targets)
+
+# -----------------------------
+
+if (isTRUE(params$plot_network_graph)) {
+best_ligs <- ligand_activities %>% slice_head(n = min(10, params$heatmap_ligands)) %>% pull(test_ligand)
+
+
+# ligand->receptor edges (prior + expression)
+lr_edges <- lr_network %>%
+  filter(from %in% best_ligs, to %in% expressed_receptors) %>%
+  distinct(from, to) %>%
+  rename(from_node = from, to_node = to) %>%
+  mutate(type = "ligand_receptor")
+
+# ligand->targets (top targets per ligand, intersect program if possible)
+top_targets_per_lig <- function(lig, n = 20) {
+  if (!lig %in% rownames(ligand_target_matrix)) return(character(0))
+  v <- ligand_target_matrix[lig, , drop = TRUE]
+  tg <- names(sort(v, decreasing = TRUE))[1:min(n, length(v))]
+  tg <- intersect(tg, geneset_oi)
+  if (length(tg) < 5) tg <- names(sort(v, decreasing = TRUE))[1:min(n, length(v))]
+  tg
+}
+
+lt_edges <- map_dfr(best_ligs, function(lig) {
+  tg <- top_targets_per_lig(lig, n = 20)
+  tibble(from_node = lig, to_node = tg, type = "ligand_target")
+})
+
+edges <- bind_rows(lr_edges, lt_edges) %>% filter(!is.na(to_node), nzchar(to_node))
+if (nrow(edges) > 0) {
+  g <- igraph::graph_from_data_frame(edges, directed = TRUE)
+
+  V(g)$role <- case_when(
+    V(g)$name %in% best_ligs ~ "ligand",
+    V(g)$name %in% expressed_receptors ~ "receptor",
+    TRUE ~ "target"
+  )
+
+  p_net <- ggraph(g, layout = "fr") +
+    geom_edge_link(alpha = 0.4) +
+    geom_node_point(aes(shape = role), size = 3) +
+    geom_node_text(aes(label = name), repel = TRUE, size = 3) +
+    labs(title = paste0("NicheNet network (receiver: ", receiver_ct, ")"),
+         subtitle = "Ligands connect to expressed receptors and predicted targets") +
+    theme_void()
+
+  ggsave(file.path(rec_dir_fig, "nichenet_network_graph.png"), p_net, width = 10, height = 8, dpi = 300)
+  print(p_net)
+
+  write_csv(as_tibble(edges), file.path(rec_dir_dat, "network_edges.csv"))
+}
+
+
+}
+
+# -----------------------------
+
+# Store final summary row
+
+# -----------------------------
+
+niche_summary[[receiver_ct]] <- gene_set_summary
+}
+```
+
+```{r summary}
+niche_summary_df <- bind_rows(niche_summary)
+write_csv(niche_summary_df, file.path("data/nichenet", "nichenet_summary.csv"))
+write_csv(niche_summary_df, file.path("data", "nichenet_summary.csv"))
+
+niche_summary_df
+
+```
+
+```{r}
+out_rds <- paste0(params$project_name, "_nichenet_done.rds")
+saveRDS(list(done=TRUE,
+receivers=receivers,
+receiver_program_mode=receiver_program_mode,
+timestamp=Sys.time()),
+file = out_rds)
+out_rds
+```
+
+```{r}
+sessionInfo()
+```
+

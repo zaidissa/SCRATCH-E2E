@@ -1,0 +1,1094 @@
+---
+title: "SCRATCH CellComm - LIANA (Robust + Checkpoints)"
+author: "Syed Shujaat Ali Zaidi"
+execute:
+  freeze: auto
+  cache: false
+  warning: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    fig-format: png
+    fig-dpi: 300
+    fig-responsive: true
+    fig-align: center
+lightbox:
+  match: auto
+  effect: zoom
+  loop: true
+params:
+  seurat_object: null
+  project_name: "project"
+  work_directory: "."
+
+  assay: "RNA"
+  slot: "data"                 # "data" (log-normalized) or "counts"
+  celltype_col: "celltype"
+  sample_col: "sample_id"
+  min_cells_per_group: 30
+
+  liana_resource: "consensus"  # e.g. "Consensus", "CellPhoneDB", ...
+  liana_methods: "natmi,cellphonedb,connectome,logfc,sca,geometric_mean"
+  liana_reduce: "sum"          # NOTE: NOT all LIANA versions accept "sum" for aggregate_how; we validate.
+  liana_ntop: 50
+  liana_top_n_plot: 300
+  liana_rank_col: "aggregate_rank"
+  liana_dotplot_source: ""
+  liana_dotplot_target: ""
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r setup}
+# knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE)
+
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(Matrix)
+  library(readr)
+  library(stringr)
+  library(scales)
+  library(ComplexHeatmap)
+  library(circlize)
+  library(SingleCellExperiment)
+  library(SummarizedExperiment)
+  library(purrr)
+  library(tibble)
+})
+
+if (!requireNamespace("liana", quietly = TRUE)) {
+  stop("Missing package: liana. Please install LIANA (saezlab/liana).")
+}
+suppressPackageStartupMessages(library(liana))
+
+# ---------- Workdir + outputs ----------
+if (!is.null(params$work_directory) && dir.exists(params$work_directory)) setwd(params$work_directory)
+dir.create("figures/cellcomm/liana", recursive = TRUE, showWarnings = FALSE)
+dir.create("data", recursive = TRUE, showWarnings = FALSE)
+
+
+theme_set(theme_bw(base_size = 12))
+set.seed(1)
+```
+
+```{r}
+#| echo: false
+#| warning: false
+# ---------- Prevent plyr/dplyr conflicts ----------
+if ("package:plyr" %in% search()) {
+  detach("package:plyr", unload = TRUE, character.only = TRUE)
+}
+
+# ---------- Helpers ----------
+checkpoint <- function(ok, msg) {
+  if (!isTRUE(ok)) stop("CHECKPOINT FAILED: ", msg)
+  message("✔ ", msg)
+}
+
+parse_list <- function(x) {
+  if (is.null(x) || length(x) == 0 || is.na(x) || !nzchar(x)) return(character(0))
+  v <- unlist(strsplit(x, "[,;|]"))
+  v <- trimws(v)
+  v[nzchar(v)]
+}
+
+coalesce0 <- function(x, fallback) {
+  if (is.null(x) || length(x) == 0) return(fallback)
+  if (is.character(x) && length(x) == 1 && !nzchar(x)) return(fallback)
+  x
+}
+
+resolve_col <- function(md, preferred, candidates, label) {
+  if (!is.null(preferred) && nzchar(preferred) && preferred %in% colnames(md)) return(preferred)
+  hit <- candidates[candidates %in% colnames(md)][1]
+  if (length(hit) == 0 || is.na(hit) || !nzchar(hit)) {
+    stop("No valid ", label, " column found. Tried preferred='", preferred,
+         "' and candidates: ", paste(candidates, collapse = ", "))
+  }
+  hit
+}
+
+# show_resources/show_methods in YOUR LIANA return character vectors
+get_names_chr <- function(x) {
+  if (inherits(x, "try-error") || is.null(x)) return(character(0))
+  if (is.character(x)) return(unique(x))
+  if (is.data.frame(x) || tibble::is_tibble(x)) {
+    nmcol <- intersect(c("resource", "method"), colnames(x))[1]
+    if (!is.na(nmcol)) return(unique(as.character(x[[nmcol]])))
+  }
+  unique(as.character(x))
+}
+
+guess_rank_col <- function(df, preferred = "aggregate_rank") {
+  candidates <- c(preferred, "aggregate_rank", "mean_rank", "median_rank",
+                  "magnitude_rank", "specificity_rank",
+                  "lrscore", "LRscore", "score", "pvalue")
+  candidates <- intersect(candidates, colnames(df))
+  if (length(candidates) == 0) stop("No recognizable rank/score column found in aggregated LIANA output.")
+  candidates[1]
+}
+
+# method-specific score columns differ; pick what exists in that method table
+pick_score_col <- function(df) {
+  candidates <- c("LRscore", "lrscore", "LRScore",
+                  "lr.mean", "lr_mean",
+                  "prod_weight", "weight_sc", "edge_specificity",
+                  "logfc_comb", "global_mean",
+                  "pvalue", "p_val", "p.value")
+  hit <- intersect(candidates, colnames(df))[1]
+  if (is.na(hit)) return(NA_character_)
+  hit
+}
+
+score_direction <- function(score_col) {
+  if (is.na(score_col)) return(NA)
+  nm <- tolower(score_col)
+  # lower-is-better for p-values / ranks
+  if (grepl("pvalue", nm, fixed = TRUE) ||
+      grepl("p_val", nm, fixed = TRUE) ||
+      grepl("p.value", nm, fixed = TRUE) ||
+      grepl("rank", nm, fixed = TRUE)) return(FALSE)
+  TRUE
+}
+
+# Try to discover allowed aggregate_how values from LIANA internals
+get_allowed_aggregate_how <- function() {
+  # best-effort: different LIANA versions store this differently
+  tries <- c(".aggregate_hows", ".aggregate_how", ".aggregate_how_options", ".aggregate_specs")
+  for (nm in tries) {
+    obj <- try(getFromNamespace(nm, "liana"), silent = TRUE)
+    if (!inherits(obj, "try-error") && !is.null(obj)) {
+      if (is.character(obj)) return(unique(obj))
+      if (is.list(obj)) return(unique(names(obj)))
+    }
+  }
+  # fallback guesses (won't stop execution; we validate later)
+  c("rank_aggregate", "robust_rank_aggregate", "mean_rank", "median_rank", "min_rank", "sum", "mean")
+}
+
+validate_aggregate_how <- function(requested) {
+  allowed <- get_allowed_aggregate_how()
+  allowed <- allowed[nzchar(allowed)]
+  if (length(allowed) == 0) return(list(value = requested, allowed = character(0), changed = FALSE))
+
+  hit <- allowed[tolower(allowed) == tolower(requested)][1]
+  if (!is.na(hit) && nzchar(hit)) {
+    return(list(value = hit, allowed = allowed, changed = FALSE))
+  }
+
+  # If requested not allowed, pick a safe default: prefer robust_rank_aggregate/rank_aggregate if present
+  pref <- allowed[tolower(allowed) %in% c("robust_rank_aggregate", "rank_aggregate", "mean_rank", "median_rank")][1]
+  if (is.na(pref) || !nzchar(pref)) pref <- allowed[1]
+
+  return(list(value = pref, allowed = allowed, changed = TRUE))
+}
+
+```
+
+```{r}
+#| echo: false
+#| warning: false
+# =========================
+
+# 1) Load Seurat + preflight
+
+# =========================
+
+checkpoint(!is.null(params$seurat_object), "params$seurat_object provided")
+# seu <- readRDS("../../../../../project_main_postCCA_withBEFORE.RDS")
+seu <- readRDS(params$seurat_object)
+checkpoint(inherits(seu, "Seurat"), "Loaded Seurat object")
+checkpoint(params$assay %in% names(seu@assays), paste0("Assay exists: ", params$assay))
+DefaultAssay(seu) <- params$assay
+
+cat("\n=== Seurat preflight ===\n")
+cat("Seurat version:", as.character(packageVersion("Seurat")), "\n")
+cat("Assays:", paste(names(seu@assays), collapse = ", "), "\n")
+cat("Default assay:", DefaultAssay(seu), "\n")
+cat("Cells:", ncol(seu), " Genes:", nrow(seu), "\n")
+
+# Use md consistently like this:
+
+md <- seu[[]]  # recommended meta access
+checkpoint(is.data.frame(md), "md <- seu[[]] is a data.frame")
+cat("Meta columns (first 20):", paste(head(colnames(md), 20), collapse=", "), "\n")
+
+CELLTYPE_CANDIDATES <- c(
+"celltype", "cell_type", "CellType", "celltype_final", "celltype_refined",
+"azimuth_labels", "azimuth_label", "predicted.celltype.l2", "predicted.celltype.l1",
+"annotation", "annot", "label", "labels", "final_annotation",
+"seurat_clusters"
+)
+
+celltype_col <- resolve_col(md, params$celltype_col, CELLTYPE_CANDIDATES, "celltype")
+checkpoint(celltype_col %in% colnames(md), paste0("Resolved celltype_col=", celltype_col))
+write_csv(tibble(celltype_col = celltype_col), file.path("data", "resolved_columns_liana.csv"))
+
+ct0 <- md[[celltype_col]]
+cat("Celltype NA:", sum(is.na(ct0)), "/", length(ct0), "\n")
+cat("Celltype empty string:", sum(!is.na(ct0) & !nzchar(as.character(ct0))), "\n")
+
+cat("Celltype levels:", length(unique(ct0)), "\n")
+
+# top 10 largest groups
+print(sort(table(ct0), decreasing = TRUE)[1:10])
+
+```
+
+```{r FilterRareCellTypes}
+#| echo: false
+#| warning: false
+# =========================
+
+# 2) Filter rare celltypes
+
+# =========================
+
+# drop precomputed graphs (rare v5 issues)
+
+if (!is.null(seu@graphs) && length(seu@graphs) > 0) seu@graphs <- list()
+
+md <- seu[[]]  # refresh
+ct_counts <- dplyr::count(md, .data[[celltype_col]], name = "n_cells") %>%
+dplyr::arrange(dplyr::desc(n_cells))
+
+checkpoint(nrow(ct_counts) > 0, "Computed celltype counts")
+write_csv(ct_counts, file.path("data", "celltype_counts_prefilter.csv"))
+
+keep_ct <- ct_counts %>%
+dplyr::filter(n_cells >= as.integer(params$min_cells_per_group)) %>%
+dplyr::pull(1)
+
+checkpoint(length(keep_ct) >= 2, paste0(">=2 celltypes after min_cells_per_group=", params$min_cells_per_group))
+
+keep_cells <- rownames(md)[ md[[celltype_col]] %in% keep_ct ]
+checkpoint(length(keep_cells) > 0, "Non-empty cells after filtering")
+
+seu <- subset(seu, cells = keep_cells)
+md  <- seu[[]]
+
+ct_counts2 <- dplyr::count(md, .data[[celltype_col]], name = "n_cells") %>%
+dplyr::arrange(dplyr::desc(n_cells))
+write_csv(ct_counts2, file.path("data", "celltype_counts_filtered.csv"))
+
+p_ct <- ggplot(ct_counts2, aes(x = reorder(.data[[celltype_col]], n_cells), y = n_cells)) +
+geom_col() +
+coord_flip() +
+labs(title = "Cell-type composition (filtered)", x = "Cell type", y = "# cells") +
+scale_y_continuous(labels = comma)
+
+ggsave(file.path("figures/cellcomm/liana", "celltype_counts_filtered.png"),
+p_ct, width = 7.5, height = 5, dpi = 300)
+p_ct
+```
+
+```{r ResolveLianaMethods}
+#| echo: false
+#| warning: false
+# =========================
+
+# 3) Resolve LIANA resources/methods
+
+# =========================
+
+resources_obj <- try(liana::show_resources(), silent = TRUE)
+methods_obj   <- try(liana::show_methods(), silent = TRUE)
+
+res_names  <- get_names_chr(resources_obj)
+meth_names <- get_names_chr(methods_obj)
+
+write_csv(tibble(resource = res_names), file.path("data", "liana_available_resources.csv"))
+write_csv(tibble(method   = meth_names), file.path("data", "liana_available_methods.csv"))
+
+checkpoint(length(res_names) > 0, "LIANA resources discovered")
+checkpoint(length(meth_names) > 0, "LIANA methods discovered")
+
+# resolve resource
+
+resource_use <- params$liana_resource
+hit_r <- res_names[tolower(res_names) == tolower(resource_use)][1]
+if (!is.na(hit_r) && nzchar(hit_r)) resource_use <- hit_r
+
+# resolve methods
+
+methods_use <- parse_list(params$liana_methods)
+if (length(methods_use) == 0) methods_use <- NULL
+
+if (!is.null(methods_use)) {
+resolved <- vapply(methods_use, function(m) {
+h <- meth_names[tolower(meth_names) == tolower(m)][1]
+if (is.na(h) || !nzchar(h)) NA_character_ else h
+}, character(1))
+
+bad <- methods_use[is.na(resolved)]
+if (length(bad) > 0) message("WARNING: dropping unavailable LIANA methods: ", paste(bad, collapse = ", "))
+
+methods_use <- resolved[!is.na(resolved)]
+if (length(methods_use) == 0) methods_use <- NULL
+}
+
+checkpoint(!is.null(methods_use) && length(methods_use) > 0, "At least one LIANA method remains after resolution")
+
+message("LIANA resource resolved to: ", resource_use)
+message("LIANA methods resolved to:  ", paste(methods_use, collapse = ", "))
+
+write_csv(tibble(resource_use = resource_use,
+methods_use = paste(methods_use, collapse=", ")),
+file.path("data", "liana_resolved_resource_methods.csv"))
+
+```
+
+```{r CheckpointAndCleaning}
+#| echo: false
+#| warning: false
+# =========================
+
+# 4) Clean labels (drop NA/empty) + checkpoint
+
+# =========================
+
+md <- seu[[]]
+checkpoint(celltype_col %in% colnames(md), "celltype_col exists in md before cleaning")
+
+ct <- md[[celltype_col]]
+ok <- !is.na(ct) & nzchar(as.character(ct))
+checkpoint(sum(ok) > 0, "Non-empty labels after NA/empty removal")
+
+seu <- subset(seu, cells = rownames(md)[ok])
+md  <- seu[[]]
+
+md[[celltype_col]] <- droplevels(as.factor(md[[celltype_col]]))
+
+# write back (safe)
+
+seu@meta.data[[celltype_col]] <- md[[celltype_col]]
+
+checkpoint(nlevels(factor(seu@meta.data[[celltype_col]])) >= 2,
+           ">=2 celltype groups after cleaning")
+
+```
+
+
+```{r ConvertSeurat}
+#| echo: false
+#| warning: false
+# =========================
+# 5) Convert Seurat -> SCE (MANUAL; avoids Seurat::as.SingleCellExperiment PackageCheck)
+# =========================
+
+assay_use <- params$assay
+checkpoint(assay_use %in% names(seu@assays), paste0("Assay exists: ", assay_use))
+
+# ---- CHECK layers ----
+lay <- SeuratObject::Layers(seu[[assay_use]])
+message("Layers in assay ", assay_use, ": ", paste(lay, collapse = ", "))
+
+# ---- FIX: join layers into a single layer per slot (Seurat v5) ----
+seu <- SeuratObject::JoinLayers(seu, assay = assay_use)
+
+lay2 <- SeuratObject::Layers(seu[[assay_use]])
+message("After JoinLayers(): ", paste(lay2, collapse = ", "))
+
+# pick a counts layer and a data (log-normalized) layer
+counts_layer <- if ("counts" %in% lay2) "counts" else lay2[grepl("^counts", lay2)][1]
+data_layer   <- if ("data"   %in% lay2) "data"   else lay2[grepl("^data",   lay2)][1]
+
+checkpoint(!is.na(counts_layer) && nzchar(counts_layer), "Found a counts layer")
+checkpoint(!is.na(data_layer)   && nzchar(data_layer),   "Found a data layer (log-normalized)")
+
+# pull matrices from Seurat
+counts_mat <- Seurat::GetAssayData(seu, assay = assay_use, layer = counts_layer)
+data_mat   <- Seurat::GetAssayData(seu, assay = assay_use, layer = data_layer)
+
+checkpoint(ncol(counts_mat) == ncol(seu), "counts_mat has same #cells as Seurat")
+checkpoint(ncol(data_mat)   == ncol(seu), "data_mat has same #cells as Seurat")
+checkpoint(nrow(counts_mat) == nrow(seu), "counts_mat has same #genes as Seurat")
+checkpoint(nrow(data_mat)   == nrow(seu), "data_mat has same #genes as Seurat")
+
+# build SCE manually (NO PackageCheck)
+sce <- SingleCellExperiment::SingleCellExperiment(
+  assays  = list(counts = counts_mat, logcounts = data_mat),
+  colData = S4Vectors::DataFrame(seu@meta.data)
+)
+
+message("SCE built: ", ncol(sce), " cells, ", nrow(sce), " genes")
+
+# choose which assay LIANA should use
+assay_name <- if (tolower(params$slot) == "counts") "counts" else "logcounts"
+avail_assays <- SummarizedExperiment::assayNames(sce)
+
+checkpoint(assay_name %in% avail_assays,
+           paste0("SCE has assay '", assay_name, "'. Available: ", paste(avail_assays, collapse=", ")))
+
+checkpoint(celltype_col %in% colnames(SummarizedExperiment::colData(sce)),
+           "celltype_col present in colData(sce)")
+
+# quick non-zero diagnostic
+subm <- SummarizedExperiment::assay(sce, assay_name)[
+  1:min(50, nrow(sce)),
+  1:min(50, ncol(sce)),
+  drop = FALSE
+]
+expr_range <- range(subm)
+writeLines(
+  paste("assay_name:", assay_name, "range:", paste(expr_range, collapse=" ")),
+  con = file.path("data", "liana_assay_diagnostic.txt")
+)
+message("Assay diagnostic range: ", paste(expr_range, collapse=" "))
+
+
+# # =========================
+# 
+# # 5) Convert Seurat -> SCE + checkpoint
+# 
+# # =========================
+# # ---- CHECK layers ----
+# assay_use <- params$assay
+# lay <- SeuratObject::Layers(seu[[assay_use]])
+# message("Layers in assay ", assay_use, ": ", paste(lay, collapse = ", "))
+# 
+# # ---- FIX: join layers into a single layer per slot ----
+# seu <- SeuratObject::JoinLayers(seu, assay = assay_use)
+# 
+# # confirm it simplified
+# lay2 <- SeuratObject::Layers(seu[[assay_use]])
+# message("After JoinLayers(): ", paste(lay2, collapse = ", "))
+# 
+# # ---- now conversion works ----
+# sce <- Seurat::as.SingleCellExperiment(seu, assay = assay_use)
+# 
+# 
+# # sce <- Seurat::as.SingleCellExperiment(seu, assay = params$assay)
+# 
+# assay_name <- if (tolower(params$slot) == "counts") "counts" else "logcounts"
+# avail_assays <- SummarizedExperiment::assayNames(sce)
+# 
+# checkpoint(assay_name %in% avail_assays,
+# paste0("SCE has assay '", assay_name, "'. Available: ", paste(avail_assays, collapse=", ")))
+# 
+# checkpoint(celltype_col %in% colnames(SummarizedExperiment::colData(sce)),
+# "celltype_col present in colData(sce)")
+# 
+# # quick non-zero diagnostic
+# 
+# subm <- SummarizedExperiment::assay(sce, assay_name)[1:min(50, nrow(sce)), 1:min(50, ncol(sce)), drop=FALSE]
+# expr_range <- range(subm)
+# writeLines(paste("assay_name:", assay_name, "range:", paste(expr_range, collapse=" ")),
+# con = file.path("data", "liana_assay_diagnostic.txt"))
+# message("Assay diagnostic range: ", paste(expr_range, collapse=" "))
+
+```
+
+```{r RunLIANA}
+#| echo: false
+#| warning: false
+# =========================
+
+# 6) Run LIANA (formals-robust)
+
+# =========================
+
+wrap_formals <- names(formals(liana::liana_wrap))
+wrap_args <- list()
+
+# object / sce
+
+if ("sce" %in% wrap_formals) wrap_args$sce <- sce
+if ("object" %in% wrap_formals && is.null(wrap_args$object)) wrap_args$object <- sce
+
+# methods / method
+
+meth_val <- methods_use
+if ("method"  %in% wrap_formals) wrap_args$method  <- meth_val
+if ("methods" %in% wrap_formals) wrap_args$methods <- meth_val
+
+# resource
+
+if ("resource" %in% wrap_formals) wrap_args$resource <- resource_use
+
+# identities column
+
+if ("idents_col" %in% wrap_formals) wrap_args$idents_col <- celltype_col
+if ("group.by"   %in% wrap_formals) wrap_args$`group.by` <- celltype_col
+
+# min cells
+
+if ("min_cells" %in% wrap_formals) wrap_args$min_cells <- as.integer(params$min_cells_per_group)
+
+# SCE assay names, NOT Seurat assay names
+
+if ("assay.type" %in% wrap_formals) wrap_args$assay.type <- assay_name
+if ("assay" %in% wrap_formals)      wrap_args$assay      <- assay_name
+
+# verbose
+
+if ("verbose" %in% wrap_formals) wrap_args$verbose <- TRUE
+
+liana_res <- do.call(liana::liana_wrap, wrap_args)
+
+checkpoint(is.list(liana_res) && length(liana_res) > 0, "LIANA returned list of method results")
+
+n_by_method <- vapply(liana_res, function(x) if (is.null(x)) 0 else nrow(as.data.frame(x)), numeric(1))
+write_csv(tibble(method = names(n_by_method), n = as.integer(n_by_method)),
+file.path("data", "liana_rows_by_method.csv"))
+
+checkpoint(sum(n_by_method > 0) > 0, "At least one LIANA method returned >0 rows")
+
+# Flatten per-method results
+
+liana_res_tbl <- purrr::imap_dfr(liana_res, function(tbl, m) {
+tbl <- as.data.frame(tbl)
+if (!"method" %in% colnames(tbl)) tbl$method <- m
+tbl
+})
+
+req_cols <- c("method","source","target","ligand","receptor")
+miss <- setdiff(req_cols, colnames(liana_res_tbl))
+checkpoint(length(miss) == 0, paste0("Per-method output contains required cols: ", paste(req_cols, collapse=", ")))
+
+write_csv(liana_res_tbl, file.path("data", "liana_results_per_method.csv"))
+cat("Rows (per-method total):", nrow(liana_res_tbl), "\n")
+
+```
+
+```{r LIANAaggregation}
+#| echo: false
+#| warning: false
+# =========================
+# 7) OFFICIAL LIANA aggregation (tutorial alignment) + SAFE fallbacks
+# =========================
+
+# =========================
+# 0) checkpoint helper (if not already defined)
+# =========================
+checkpoint <- function(cond, msg) {
+  if (!isTRUE(cond)) stop("CHECKPOINT FAILED: ", msg)
+  message("\u2714 ", msg)
+}
+
+# =========================
+# 1) robust rank column guesser
+# =========================
+guess_rank_col <- function(df, preferred = "aggregate_rank") {
+  candidates <- c(
+    preferred,
+    "aggregate_rank", "mean_rank", "median_rank",
+    "magnitude_rank", "specificity_rank",
+    "rank", "score", "LRscore", "lrscore", "pvalue", "p_val", "p.value"
+  )
+  candidates <- intersect(candidates, colnames(df))
+  if (length(candidates) == 0) stop("No recognizable rank/score column found in aggregated output.")
+  candidates[1]
+}
+
+# =========================
+# 2) fallback aggregate from per-method ranks
+# =========================
+fallback_aggregate_from_per_method <- function(liana_res_tbl) {
+
+  pick_score_col <- function(df) {
+    candidates <- c(
+      "LRscore", "lrscore", "LRScore",
+      "lr.mean", "lr_mean",
+      "prod_weight", "weight_sc", "edge_specificity",
+      "logfc_comb", "global_mean",
+      "pvalue", "p_val", "p.value"
+    )
+    hit <- intersect(candidates, colnames(df))[1]
+    if (is.na(hit)) return(NA_character_)
+    hit
+  }
+
+  score_direction <- function(score_col) {
+    if (is.na(score_col)) return(NA)
+    nm <- tolower(score_col)
+    if (grepl("pvalue", nm, fixed = TRUE) ||
+        grepl("p_val", nm, fixed = TRUE) ||
+        grepl("p.value", nm, fixed = TRUE) ||
+        grepl("rank", nm, fixed = TRUE)) return(FALSE)
+    TRUE
+  }
+
+  ranked <- liana_res_tbl %>%
+    dplyr::group_by(method) %>%
+    dplyr::group_modify(function(df, key) {
+      sc <- pick_score_col(df)
+      dir_hi <- score_direction(sc)
+
+      df$score_col <- sc
+      if (is.na(sc)) {
+        df$.score <- NA_real_
+        df$method_rank <- NA_real_
+        return(df)
+      }
+
+      df$.score <- suppressWarnings(as.numeric(df[[sc]]))
+      df$.score[!is.finite(df$.score)] <- NA_real_
+
+      if (isTRUE(dir_hi)) {
+        df$method_rank <- dplyr::min_rank(dplyr::desc(df$.score))
+      } else {
+        df$method_rank <- dplyr::min_rank(df$.score)
+      }
+      df
+    }) %>%
+    dplyr::ungroup()
+
+  diag <- ranked %>%
+    dplyr::group_by(method, score_col) %>%
+    dplyr::summarise(
+      n = dplyr::n(),
+      n_score_non_na = sum(!is.na(.score)),
+      n_rank_non_na  = sum(!is.na(method_rank)),
+      .groups = "drop"
+    ) %>%
+    dplyr::arrange(method)
+
+  # ensure complex cols exist
+  ranked <- ranked %>%
+    dplyr::mutate(
+      ligand.complex   = if ("ligand.complex" %in% colnames(ranked)) as.character(.data[["ligand.complex"]]) else as.character(.data[["ligand"]]),
+      receptor.complex = if ("receptor.complex" %in% colnames(ranked)) as.character(.data[["receptor.complex"]]) else as.character(.data[["receptor"]])
+    )
+
+  agg <- ranked %>%
+    dplyr::group_by(source, target, ligand.complex, receptor.complex) %>%
+    dplyr::summarise(
+      n_methods_total  = dplyr::n_distinct(method),
+      n_methods_ranked = sum(!is.na(method_rank)),
+      aggregate_rank   = if (all(is.na(method_rank))) NA_real_ else mean(method_rank, na.rm = TRUE),
+      score_mean       = if (all(is.na(.score))) NA_real_ else mean(.score, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    dplyr::filter(n_methods_ranked > 0) %>%
+    dplyr::arrange(aggregate_rank) %>%
+    dplyr::mutate(
+      ligand   = ligand.complex,
+      receptor = receptor.complex
+    )
+
+  list(agg = agg, ranked = ranked, diag = diag)
+}
+
+# =========================
+# 3) try official liana_aggregate with several aggregate_how values
+# =========================
+try_liana_aggregate <- function(liana_res, resource_use, requested_how) {
+  fml <- names(formals(liana::liana_aggregate))
+
+  candidates <- unique(c(
+    requested_how,
+    "robust_rank_aggregate", "rank_aggregate",
+    "mean_rank", "median_rank",
+    "mean", "sum"
+  ))
+  candidates <- candidates[!is.na(candidates) & nzchar(candidates)]
+
+  last_err <- NULL
+  for (h in candidates) {
+    args <- list(liana_res = liana_res, verbose = TRUE)
+    if ("resource" %in% fml) args$resource <- resource_use
+    if ("aggregate_how" %in% fml) args$aggregate_how <- h
+
+    tmp <- try(do.call(liana::liana_aggregate, args), silent = TRUE)
+    if (!inherits(tmp, "try-error")) {
+      return(list(ok = TRUE, how = h, value = as.data.frame(tmp), error = NULL))
+    } else {
+      last_err <- attr(tmp, "condition")$message
+    }
+  }
+
+  list(ok = FALSE, how = NA_character_, value = NULL, error = last_err)
+}
+
+# =========================
+# 4) RUN aggregation (official -> fallback)
+# =========================
+checkpoint(is.list(liana_res) && length(liana_res) > 0, "Have liana_res list from liana_wrap")
+checkpoint(exists("liana_res_tbl") && nrow(liana_res_tbl) > 0, "Have liana_res_tbl per-method table")
+
+agg_attempt <- try_liana_aggregate(liana_res, resource_use, params$liana_reduce)
+
+if (isTRUE(agg_attempt$ok)) {
+  liana_agg <- agg_attempt$value
+  message("✔ Official liana_aggregate succeeded with aggregate_how='", agg_attempt$how, "'")
+  writeLines(
+    paste0("Requested: ", params$liana_reduce, "\nUsing: ", agg_attempt$how),
+    con = file.path("data", "liana_aggregate_how_resolution.txt")
+  )
+} else {
+  message("WARNING: Official liana_aggregate failed. Error: ", agg_attempt$error)
+  message("Falling back to custom consensus aggregation from per-method ranks...")
+
+  fb <- fallback_aggregate_from_per_method(liana_res_tbl)
+  liana_agg <- as.data.frame(fb$agg)
+
+  readr::write_csv(fb$ranked, file.path("data", "liana_ranked_per_method.csv"))
+  readr::write_csv(fb$diag,   file.path("data", "liana_score_diagnostics.csv"))
+
+  writeLines(
+    paste0(
+      "Official liana_aggregate failed.\n",
+      "Requested: ", params$liana_reduce, "\n",
+      "Error: ", agg_attempt$error, "\n",
+      "Used fallback: mean(method_rank) across methods.\n"
+    ),
+    con = file.path("data", "liana_aggregate_how_resolution.txt")
+  )
+}
+
+# ---- Aggregation label (always defined; prevents "agg_how_use not found") ----
+agg_label <- if (exists("agg_attempt") && isTRUE(agg_attempt$ok)) {
+  paste0("official_liana_aggregate (", agg_attempt$how, ")")
+} else {
+  "fallback_mean(method_rank)"
+}
+
+subtxt <- paste0(
+  "Resource: ", resource_use,
+  " | Methods: ", paste(methods_use, collapse = ", "),
+  " | Aggregation: ", agg_label
+)
+
+
+# Ensure complex columns exist
+if (!"ligand.complex" %in% colnames(liana_agg) && "ligand" %in% colnames(liana_agg)) liana_agg$ligand.complex <- liana_agg$ligand
+if (!"receptor.complex" %in% colnames(liana_agg) && "receptor" %in% colnames(liana_agg)) liana_agg$receptor.complex <- liana_agg$receptor
+if (!"ligand" %in% colnames(liana_agg) && "ligand.complex" %in% colnames(liana_agg)) liana_agg$ligand <- liana_agg$ligand.complex
+if (!"receptor" %in% colnames(liana_agg) && "receptor.complex" %in% colnames(liana_agg)) liana_agg$receptor <- liana_agg$receptor.complex
+
+readr::write_csv(liana_agg, file.path("data", "liana_aggregate.csv"))
+readr::write_csv(liana_agg, file.path("data", "liana_results.csv"))
+
+checkpoint(nrow(liana_agg) > 0, "Aggregated LIANA table is non-empty")
+rank_col <- guess_rank_col(liana_agg, params$liana_rank_col)
+message("Using rank column for plotting: ", rank_col)
+
+# quick peek
+print(head(liana_agg, 3))
+
+
+
+# # =========================
+# 
+# # 7) OFFICIAL LIANA aggregation (for built-in dotplot + tutorial alignment)
+# 
+# # =========================
+# 
+# list_supported_aggregate_hows <- function() {
+#   ns <- asNamespace("liana")
+# 
+#   # Most LIANA versions store aggregate strategies in one of these internal objects
+#   candidates <- c(
+#     ".aggregate_hows", "aggregate_hows",
+#     ".aggregate_methods", "aggregate_methods",
+#     ".score_mode", ".score_specs", ".score_modes"
+#   )
+# 
+#   out <- character(0)
+# 
+#   for (nm in candidates) {
+#     if (exists(nm, envir = ns, inherits = FALSE)) {
+#       x <- get(nm, envir = ns)
+# 
+#       if (is.character(x)) out <- c(out, x)
+#       if (is.list(x) && length(names(x)) > 0) out <- c(out, names(x))
+#     }
+#   }
+# 
+#   # Some versions might expose a helper function
+#   funs <- ls(ns, all.names = TRUE)
+#   if ("show_aggregate_hows" %in% funs) {
+#     out <- c(out, tryCatch(get("show_aggregate_hows", ns)(), error = function(e) character(0)))
+#   }
+# 
+#   out <- unique(out)
+#   out[nzchar(out)]
+# }
+# 
+# 
+# allowed_agg <- list_supported_aggregate_hows()
+# print(allowed_agg)
+# checkpoint(length(allowed_agg) > 0, "Discovered supported aggregate_how options from LIANA")
+# 
+# agg_formals <- names(formals(liana::liana_aggregate))
+# 
+# # validate aggregate_how for THIS LIANA version
+# 
+# agg_check <- validate_aggregate_how(params$liana_reduce)
+# agg_how_use <- agg_check$value
+# 
+# if (isTRUE(agg_check$changed)) {
+# message("WARNING: params$liana_reduce='", params$liana_reduce, "' not supported in this LIANA. ",
+# "Using aggregate_how='", agg_how_use, "'.")
+# writeLines(
+# paste0("Requested: ", params$liana_reduce, "\nUsing: ", agg_how_use,
+# "\nAllowed (best-effort): ", paste(agg_check$allowed, collapse=", ")),
+# con = file.path("data", "liana_aggregate_how_resolution.txt")
+# )
+# }
+# 
+# agg_args <- list(liana_res = liana_res, verbose = TRUE)
+# 
+# if ("resource" %in% agg_formals) agg_args$resource <- resource_use
+# if ("aggregate_how" %in% agg_formals) agg_args$aggregate_how <- agg_how_use
+# 
+# liana_agg <- do.call(liana::liana_aggregate, agg_args)
+# liana_agg <- as.data.frame(liana_agg)
+# 
+# checkpoint(nrow(liana_agg) > 0, "liana_aggregate returned non-empty table")
+# 
+# # Ensure complex columns exist (some resources may omit them)
+# 
+# if (!"ligand.complex" %in% colnames(liana_agg))   liana_agg$ligand.complex <- liana_agg$ligand
+# if (!"receptor.complex" %in% colnames(liana_agg)) liana_agg$receptor.complex <- liana_agg$receptor
+# 
+# write_csv(liana_agg, file.path("data", "liana_aggregate.csv"))
+# write_csv(liana_agg, file.path("data", "liana_results.csv"))
+# cat("Rows (aggregate):", nrow(liana_agg), "\n")
+# 
+# # Choose rank col for downstream
+# 
+# rank_col <- guess_rank_col(liana_agg, params$liana_rank_col)
+# message("Using rank column for plotting: ", rank_col)
+```
+
+```{r LIANAdotplot}
+#| echo: false
+#| warning: false
+# =========================
+
+# 8) Built-in LIANA dotplot (robust)
+
+# =========================
+
+dp <- liana_agg
+checkpoint("score_mean" %in% colnames(dp), "dp has score_mean for magnitude")
+summary(dp$score_mean)
+length(unique(dp$score_mean))
+# optional focus filters
+
+if (nzchar(params$liana_dotplot_source)) dp <- dp %>% dplyr::filter(source == params$liana_dotplot_source)
+if (nzchar(params$liana_dotplot_target)) dp <- dp %>% dplyr::filter(target == params$liana_dotplot_target)
+
+# keep only best-ranked rows if huge
+
+if (rank_col %in% colnames(dp)) {
+dp <- dp %>% dplyr::arrange(.data[[rank_col]]) %>% dplyr::slice_head(n = max(5000, params$liana_ntop * 200))
+}
+
+dot_formals <- names(formals(liana::liana_dotplot))
+
+# choose magnitude/specificity columns that exist
+
+spec_candidates <- c("edge_specificity", "natmi.edge_specificity", "connectome.edge_specificity", "cellphonedb.pvalue", "pvalue")
+mag_candidates  <- c("sca.LRscore", "LRscore", "lrscore", "cellphonedb.lr.mean", "lr.mean", "prod_weight", "weight_sc")
+
+spec_col <- spec_candidates[spec_candidates %in% colnames(dp)][1]
+# mag_col  <- mag_candidates[mag_candidates %in% colnames(dp)][1]
+mag_col <- "score_mean"
+
+# fallback constants if needed (so plot never hard-fails)
+
+if (is.na(spec_col)) { dp$edge_specificity <- 1; spec_col <- "edge_specificity" }
+if (is.na(mag_col))  { dp$LRscore <- 1;        mag_col  <- "LRscore" }
+
+invert_spec <- grepl("pvalue", tolower(spec_col))  # p-values lower is better
+
+# call robustly depending on signature
+
+dot_args <- list()
+if ("liana_res" %in% dot_formals) {
+dot_args$liana_res <- dp
+dot_args$ntop <- params$liana_ntop
+} else {
+dot_args <- list(dp, ntop = params$liana_ntop)
+}
+
+if ("source_groups" %in% dot_formals) dot_args$source_groups <- if (nzchar(params$liana_dotplot_source)) params$liana_dotplot_source else NULL
+if ("target_groups" %in% dot_formals) dot_args$target_groups <- if (nzchar(params$liana_dotplot_target)) params$liana_dotplot_target else NULL
+if ("specificity" %in% dot_formals) dot_args$specificity <- spec_col
+if ("magnitude" %in% dot_formals)   dot_args$magnitude   <- mag_col
+if ("invert_specificity" %in% dot_formals) dot_args$invert_specificity <- invert_spec
+
+p_dp <- try(do.call(liana::liana_dotplot, dot_args), silent = TRUE)
+
+p_dp <- p_dp +
+  ggplot2::theme(
+    text = ggplot2::element_text(size = 7),
+    axis.text.x = ggplot2::element_text(size = 4, angle = 45, hjust = 1, vjust = 1),
+    axis.text.y = ggplot2::element_text(size = 5),
+    axis.title  = ggplot2::element_text(size = 7),
+    strip.text  = ggplot2::element_text(size = 7),
+    legend.title = ggplot2::element_text(size = 7),
+    legend.text  = ggplot2::element_text(size = 6)
+  )
+p_dp <- p_dp + ggplot2::scale_size(range = c(0.3, 1.2))
+# p_dp <- p_dp +
+#   ggplot2::geom_point(size = 0.6) +
+#   ggplot2::scale_size(range = c(0.3, 2.0))
+
+
+if (!inherits(p_dp, "try-error")) {
+ggsave(file.path("figures/cellcomm/liana", "liana_dotplot_builtin.png"),
+p_dp, width = 11, height = 7.5, dpi = 300)
+p_dp
+} else {
+message("WARNING: built-in liana_dotplot failed, but publication plots will still be produced. Error: ",
+attr(p_dp, "condition")$message)
+writeLines(attr(p_dp, "condition")$message, con = file.path("data", "liana_dotplot_error.txt"))
+NULL
+}
+
+```
+
+```{r TopLRinteractionDotPlot}
+#| echo: false
+#| warning: false
+# =========================
+
+# 9) Publication plot 1: Top LR interactions dotplot (always works)
+
+# =========================
+
+top_lr <- liana_agg %>%
+mutate(
+ligand_plot   = ligand.complex,
+receptor_plot = receptor.complex,
+pair = paste(ligand_plot, receptor_plot, sep=" → "),
+edge = paste(source, target, sep=" → ")
+) %>%
+dplyr::arrange(.data[[rank_col]]) %>%
+dplyr::slice_head(n = params$liana_top_n_plot)
+
+checkpoint(nrow(top_lr) > 0, "Top LR table non-empty for publication plot")
+
+top_edges <- top_lr %>% dplyr::count(edge, sort=TRUE) %>% dplyr::slice_head(n=25) %>% dplyr::pull(edge)
+top_pairs <- top_lr %>% dplyr::count(pair, sort=TRUE) %>% dplyr::slice_head(n=25) %>% dplyr::pull(pair)
+
+plot_df <- top_lr %>% dplyr::filter(edge %in% top_edges, pair %in% top_pairs)
+
+p_top <- ggplot(plot_df, aes(x = edge, y = pair)) +
+  geom_point(aes(size = 1 / pmax(.data[[rank_col]], 1)), alpha = 0.6) +
+  coord_flip() +
+  labs(
+    title    = "LIANA: Top ligand–receptor interactions (aggregate)",
+    subtitle = subtxt,
+    # subtitle = paste0(
+    #   "Resource: ", resource_use,
+    #   " | Methods: ", paste(methods_use, collapse = ", "),
+    #   " | aggregate_how: ", agg_how_use
+    # ),
+    x = "Sender → Receiver",
+    y = "Ligand → Receptor",
+    size = paste0("1 / ", rank_col)
+  ) +
+  theme(
+    axis.text.y = element_text(size = 8),                 # sender/receiver
+    axis.text.x = element_text(size = 7, angle = 45,      # ligand/receptor (after flip)
+                               hjust = 1, vjust = 1)
+  )
+
+ggsave(file.path("figures/cellcomm/liana", "liana_topLR_dotplot.png"),
+p_top, width=10, height=8, dpi=300)
+p_top
+```
+
+##EdgeCountHeatmap
+```{r EdgeCountHeatmap}
+#| echo: false
+#| warning: false
+# =========================
+
+# 10) Publication plot 2: Edge count heatmap
+
+# =========================
+
+hm_df <- liana_agg %>% dplyr::count(source, target, name="n_lr")
+checkpoint(nrow(hm_df) > 0, "Edge count table non-empty for heatmap")
+
+mat <- hm_df %>%
+tidyr::pivot_wider(names_from=target, values_from=n_lr, values_fill=0) %>%
+as.data.frame()
+
+rownames(mat) <- mat$source
+mat$source <- NULL
+mat <- as.matrix(mat)
+
+ht <- Heatmap(mat, name="LR count",
+column_title="Receiver", row_title="Sender",
+cluster_rows=TRUE, cluster_columns=TRUE)
+
+out_png <- file.path("figures/cellcomm/liana", "liana_edgecount_heatmap.png")
+dir.create(dirname(out_png), recursive = TRUE, showWarnings = FALSE)
+
+# sanity: confirm directory exists
+checkpoint(dir.exists(dirname(out_png)), paste0("Output dir exists: ", dirname(out_png)))
+
+# Use tryCatch so we see the REAL error if png() fails
+tryCatch({
+  grDevices::png(filename = out_png, width = 2400, height = 1800, res = 300)
+  ComplexHeatmap::draw(ht)
+  grDevices::dev.off()
+}, error = function(e) {
+  # If png opened but draw failed, close device safely
+  if (grDevices::dev.cur() > 1) grDevices::dev.off()
+  stop("Heatmap save failed: ", conditionMessage(e))
+})
+
+checkpoint(file.exists(out_png), paste0("Saved heatmap PNG: ", out_png))
+
+
+# png(file.path("figures/cellcomm/liana", "liana_edgecount_heatmap.png"),
+# width=2400, height=1800, res=300)
+# draw(ht)
+# dev.off()
+ht
+```
+
+
+```{r Marker}
+#| echo: false
+#| warning: false
+# =========================
+
+# 12) Done marker + session info
+
+# =========================
+
+out_rds <- paste0(params$project_name, "_liana_done.rds")
+saveRDS(list(done=TRUE, timestamp=Sys.time()), file = out_rds)
+```
+
+```{r}
+print(params)
+```
+
+```{r}
+
+sessionInfo()
+
+```

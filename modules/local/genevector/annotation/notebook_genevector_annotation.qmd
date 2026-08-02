@@ -1,0 +1,193 @@
+---
+title: "Module - GeneVector Annotation"
+author: "Andre Fonseca"
+execute:
+  cache: true
+  freeze: auto
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    code-fold: show
+    code-tools: true
+    default-image-extension: svg
+  ipynb: default
+format-links: [ipynb]
+params:
+    project_name: "Project"
+---
+
+```{python scratch-viz-setup}
+#| include: false
+# Publication figure system (python side): rcParams, the same validated palette
+# the R notebooks use, and vector output. Guarded — absent library is a no-op.
+import os, sys
+for _p in (".", "assets/viz", os.environ.get("SCRATCH_VIZ_DIR", ".")):
+    if os.path.exists(os.path.join(_p, "scratch_viz.py")):
+        sys.path.insert(0, _p)
+        try:
+            import scratch_viz as sv
+        except Exception as _e:
+            print("scratch_viz unavailable:", _e)
+        break
+```
+
+# Project Name: `r params$project_name`
+
+## Loading library
+
+```{python library}
+
+import scanpy as sc
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.sparse import csr_matrix
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import collections
+import os
+import pickle
+
+from genevector.data import GeneVectorDataset
+from genevector.model import GeneVector
+from genevector.embedding import GeneEmbedding, CellEmbedding
+
+```
+
+```{python}
+#| echo: False
+#| include: False
+
+project_name       = "Project"
+anndata_object     = "/home/test/Project_annotation_object.h5ad"
+signed_mi          = True
+compute_mi         = True
+init_ortho         = True
+retrain            = False
+entropy_threshold  = 1
+embedding_size     = 100
+alpha              = 0.08
+beta               = 0.02
+gain               = 10
+device             = "cpu"
+
+#annotated_h5ad     = "/Users/ceglian/Data/tcri/includE_tcr_{}_{}_annoated.h5ad".format(disease,subset)
+#mutual_information = "/Users/ceglian/Data/tcri/include_tcr_{}_{}_{}_{}.p".format(disease,subset,signed_mi,str(entropy_threshold).replace(".",""))
+
+# Directory and outputs
+work_directory     = "/home/SCRATCH-Annotation/test"
+vector_file        = "/home/SCRATCH-Annotation/test/genevector_model.vec"
+
+```
+
+```{python}
+
+def removing_receptor_genes(adata):
+    """ Description """
+    genes_to_keep = ~adata.var_names.isin(
+        ["TRAV", "TRAJ", "TRAD", "TRBV", "TRBJ", "TRBD", "TRGV", "TRGJ", "TRGD", "TRDV", "TRDJ", "TRDD"])
+    adata_filtered = adata[:, genes_to_keep]
+    return adata_filtered
+
+```
+
+## Loading data
+
+```{python}
+
+adata = sc.read_h5ad(anndata_object)
+
+```
+
+## Subsetting T-cell
+
+```{python}
+
+for ct in adata.obs['majority_voting'].unique():
+    print(ct)
+
+```
+
+```{python}
+
+adata = adata[adata.obs['majority_voting'].isin(['T cells'])]
+
+```
+
+## Running GeneVector
+
+```{python}
+
+gv_object = GeneVectorDataset(
+    adata, load_expression = retrain, signed_mi = signed_mi, device = device)
+
+```
+
+## Training GeneVector
+
+```{python}
+
+cmps = GeneVector(
+    gv_object,
+    output_file = vector_file,
+    emb_dimension = embedding_size,
+    gain = gain,
+    compute_mi = False,
+    init_ortho = init_ortho,
+    device = device)
+
+```
+
+```{python}
+
+cmps.train(100000, threshold = 1e-6, alpha = alpha, beta = beta, update_interval = 100)
+embed = GeneEmbedding(vector_file, dataset, vector = "average")
+
+```
+
+```{python}
+
+embed = GeneEmbedding(vector_file, dataset, vector = "average")
+cembed = CellEmbedding(dataset, embed)
+adata = cembed.get_adata()
+
+```
+
+## Assigning cell states
+
+```{python}
+
+markers = {
+    "Naive/CM": ["IL7R"],
+    "Memory": ["GZMK"],
+    "Activated": ["GZMB"],
+    "Dysfunctional": ["CXCL13"],
+}
+
+adata, dist = cembed.phenotype_probability(
+    adata, markers, temperature = 0.01, method = "normalized_exponential", return_distances = True)
+
+```
+
+```{python}
+
+fig, ax = plt.subplots(1,1,figsize=(12,4))
+sns.countplot(data=adata.obs, x = "genevector", ax = ax)
+
+```
+
+```{python}
+
+cembed.compare_classification(adata, "cluster", "genevector")
+
+```
+
+## Saving Data object
+
+```{python}
+
+adata.write_csvs("{work_directory}/{cell_model}".format(work_directory = work_directory, cell_model = cell_model.strip(".pkl")))
+
+```

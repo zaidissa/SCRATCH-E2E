@@ -1,0 +1,92 @@
+# SCRATCH-E2E — TME characterisation image.
+#
+# OPT-IN image, used only when `run_scoda = true`. The default TME image
+# (containers/tme/Dockerfile) already runs a compositional test via propeller in
+# R; this one adds scCODA on top for confirmatory work.
+#
+# scCODA implements its sampler on TensorFlow Probability, so `import
+# sccoda.util.comp_ana` drags in TensorFlow. That is a dependency of scCODA, not
+# a choice -- and it is the entire reason this is a separate image rather than
+# part of the default one.
+#
+# Build (the base is linux/amd64; state it explicitly so this is reproducible on
+# an Apple-silicon workstation):
+#
+#   docker build --platform linux/amd64 -f containers/tme/Dockerfile.scoda \
+#     -t syedsazaidi/scratch-tme-scoda:latest .
+#
+# Build context is the REPO ROOT, so the pins come from the single copy in
+# assets/env/ rather than a duplicate that would silently drift out of step.
+#
+# Adds roughly 1.5-2 GB, almost entirely TensorFlow. If you want scCODA without
+# paying that in the image, leave TME on the default image and point
+# `scoda_python` at an external environment built from
+# assets/env/scoda-requirements.txt.
+
+FROM syedsazaidi/scratch-tme:latest
+
+LABEL org.opencontainers.image.title="scratch-tme-scoda" \
+      org.opencontainers.image.description="SCRATCH-E2E TME image plus an isolated scCODA environment (opt-in confirmatory compositional differential abundance)." \
+      org.opencontainers.image.source="https://github.com/syedsazaidi/SCRATCH-E2E"
+
+# Ubuntu 24.04 marks the system interpreter externally-managed (PEP 668), and
+# pinning scipy system-wide would be hostile to whatever else uses it. An
+# isolated venv keeps scCODA's pins from touching the rest of the image.
+ENV SCODA_VENV=/opt/scoda
+ENV SCRATCH_SCODA_PYTHON=${SCODA_VENV}/bin/python
+
+COPY assets/env/scoda-requirements.txt /tmp/scoda-requirements.txt
+
+RUN set -eux; \
+    apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        python3-venv; \
+    rm -rf /var/lib/apt/lists/*; \
+    python3 -m venv "${SCODA_VENV}"; \
+    "${SCODA_VENV}/bin/pip" install --no-cache-dir --upgrade pip; \
+    "${SCODA_VENV}/bin/pip" install --no-cache-dir -r /tmp/scoda-requirements.txt; \
+    rm -f /tmp/scoda-requirements.txt; \
+    # Tasks run as the invoking UID (`-u $(id -u):$(id -g)` in the docker
+    # profile), not root, so the venv has to be readable and executable by all.
+    chmod -R a+rX "${SCODA_VENV}"
+
+# Import check in its OWN layer, on purpose. The two pins in
+# scoda-requirements.txt exist because a bare `pip install sccoda` produces an
+# environment that installs cleanly and then dies on import -- so a successful
+# pip step proves nothing, and this has to be exercised at build time rather
+# than six hours into a pipeline run.
+#
+# The check distinguishes "broken" from "untestable here". This base image is
+# linux/amd64; on an Apple-silicon host TensorFlow either traps on an AVX
+# instruction QEMU cannot emulate (SIGILL, 132) or crawls badly enough to hang
+# the build. Neither says anything about the image. A genuine ImportError -- the
+# failure mode the pins guard against -- exits 1 and still fails the build.
+#
+# So: 0 = verified, 124/132 = could not verify on this host (warn, continue),
+# anything else = real failure.
+RUN set -eu; \
+    set +e; \
+    TF_CPP_MIN_LOG_LEVEL=3 timeout 300 "${SCODA_VENV}/bin/python" -c \
+        "import sccoda, tensorflow, arviz, scipy; \
+         from sccoda.util import comp_ana; \
+         print('VERIFIED scCODA', sccoda.__version__, '| tf', tensorflow.__version__, \
+               '| scipy', scipy.__version__)"; \
+    rc=$?; \
+    set -e; \
+    if [ "$rc" -eq 0 ]; then \
+        echo "scCODA import check passed."; \
+    elif [ "$rc" -eq 132 ] || [ "$rc" -eq 124 ]; then \
+        echo "WARNING: scCODA import check could not run on this build host"; \
+        echo "  (exit $rc: SIGILL or timeout -- amd64 TensorFlow under emulation)."; \
+        echo "  The image is UNVERIFIED. Rebuild on an amd64 host to confirm."; \
+    else \
+        echo "ERROR: scCODA import check failed (exit $rc) -- this is a real"; \
+        echo "  dependency problem, not an emulation artefact. Check the pins in"; \
+        echo "  assets/env/scoda-requirements.txt."; \
+        exit "$rc"; \
+    fi
+
+# Deliberately NOT added to PATH. Prepending the venv would make `python3`
+# resolve to this interpreter image-wide and shadow the system one, which other
+# tooling in the base image may depend on. The notebook resolves the interpreter
+# through SCRATCH_SCODA_PYTHON (set above), so nothing needs to be on PATH.

@@ -1,0 +1,77 @@
+name: sctype_aggregate_annotation
+description: This module performs aggregation and refinement of cell annotations for single-cell RNA-seq data. Utilizing a Seurat object, it incorporates multiple annotation sources, enhances data with additional metadata, and produces comprehensive visualizations including UMAP plots and dendrograms to display refined annotations and cell type distinctions.
+keywords:
+  - single-cell
+  - annotation
+  - data visualization
+  - aggregation
+tools:
+  - quarto:
+      description: Quarto is a scientific and technical publishing system built on Pandoc.
+      homepage: https://quarto.org/
+      documentation: https://quarto.org/docs/
+      tool_dev_url: https://github.com/quarto-dev/quarto-cli
+      licence: "GPL-3.0"
+  - seurat:
+      description: Seurat is an R package designed for QC, analysis, and exploration of single-cell RNA-seq data.
+      homepage: https://satijalab.org/seurat/
+      documentation: https://satijalab.org/seurat/articles/get_started.html
+      tool_dev_url: https://github.com/satijalab/seurat
+      licence: "GPL-3.0"
+  - readr:
+      description: readr is an R package to read text data quickly and efficiently.
+      homepage: https://readr.tidyverse.org/
+      documentation: https://readr.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/readr
+  - dplyr:
+      description: dplyr is an R package for data manipulation operations.
+      homepage: https://dplyr.tidyverse.org/
+      documentation: https://dplyr.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/dplyr
+  - ggplot2:
+      description: ggplot2 is an R package for creating complex visualizations.
+      homepage: https://ggplot2.tidyverse.org/
+      documentation: https://ggplot2.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/ggplot2
+  - HGNChelper:
+      description: An R package designed to check and correct gene symbols for compatibility with the HGNC database.
+      homepage: "https://bioconductor.org/packages/release/bioc/html/HGNChelper.html"
+      documentation: "https://bioconductor.org/packages/release/bioc/vignettes/HGNChelper/inst/doc/HGNChelper.html"
+input:
+  - notebook_aggregate:
+      type: file
+      description: Quarto notebook file (.qmd) that guides the annotation aggregation process.
+      pattern: "*.qmd"
+      parameters:
+        project_name: 'Project'
+        seurat_object: 'data/Project_major_annotation_object.RDS'
+        cell_annotation_files: 'data/Project_T_Cells_annotation.csv;data/Project_Myeloid_annotation.csv;data/Project_Endothelial_Cells_annotation.csv;data/Project_B_Plasma_Cells_annotation.csv'
+  - seurat_object:
+      type: file
+      description: Seurat object file containing pre-annotated single-cell RNA-seq data.
+      pattern: "*.RDS"
+  - cell_annotation_files:
+      type: file
+      description: Files containing additional cell annotations to be integrated into the Seurat object.
+      pattern: "*.{csv,txt}"
+  - config:
+      type: file
+      description: Configuration file that may contain additional settings or parameters for the notebook rendering.
+      pattern: "*.{yml,yaml,json}"
+output:
+  - cache:
+      type: directory
+      description: Stores intermediate data and settings used during the rendering process.
+      pattern: "_freeze/${notebook.baseName}"
+  - seurat_rds:
+      type: file
+      description: Updated Seurat RDS file containing enhanced annotations.
+      pattern: "data/${params.project_name}_sctype_agg_annotation_object.RDS"
+  - html:
+      type: file
+      description: The rendered HTML report of the annotation aggregation process summarized in the Quarto notebook.
+      pattern: "report/${notebook.baseName}.html"
+authors:
+  - Andre Fonseca (@oandrefonseca)
+maintainers:
+  - Andre Fonseca (@oandrefonseca)

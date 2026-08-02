@@ -1,0 +1,7 @@
+sample_id,multi_config
+GBM_DFCI1_CSF_20260520,/path/to/SCRATCH-QC-main_CR9/assets/cellranger_multi_config_DFCI1.csv
+GBM_DFCI2_CSF_20260520,/path/to/SCRATCH-QC-main_CR9/assets/cellranger_multi_config_DFCI2.csv
+GBM_DFCI3_CSF_20260520,/path/to/SCRATCH-QC-main_CR9/assets/cellranger_multi_config_DFCI3.csv
+GBM_DFCI4_CSF_20260520,/path/to/SCRATCH-QC-main_CR9/assets/cellranger_multi_config_DFCI4.csv
+GBM_DFCI5_CSF_20260520,/path/to/SCRATCH-QC-main_CR9/assets/cellranger_multi_config_DFCI5.csv
+GBM_MSK1_CSF_20260520,/path/to/SCRATCH-QC-main_CR9/assets/cellranger_multi_config_MSK1.csv

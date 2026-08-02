@@ -1,0 +1,247 @@
+---
+title: "Metaprogram — NMF preprocessing"
+author: "Syed Shujaat Ali Zaidi"
+execute:
+  freeze: auto
+  cache: false
+  warning: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    fig-format: png
+    fig-dpi: 300
+    fig-responsive: true
+    fig-align: center
+lightbox:
+  match: auto
+  effect: zoom
+  loop: true
+params:
+  project_name: "project"
+  seurat_object: null          # set by Nextflow
+  work_directory: "."          # set by Nextflow to $PWD
+  subset_col: "azimuth_labels"
+  subset_values: ["Epithelial"]
+  n_threads: 8 
+  n_memory: 16
+  min_cells: 100               # per-sample gate after epithelial subset
+  seed: 1234
+  auto_save: true
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+
+```{r setup, include = FALSE, message = FALSE, warning = FALSE, echo = FALSE}
+
+# Project parameters 
+project_name <- params$project_name
+seurat_object <- params$seurat_object
+subset_col    <- params$subset_col
+subset_values <- as.character(unlist(params$subset_values))
+seed <- params$seed
+
+# Output parameters
+work_directory <- params$work_directory
+auto_save <- params$auto_save
+
+# Dataflow/Computational parameters
+n_threads <- params$n_threads
+n_memory <- params$n_memory
+
+# NFM Parameters
+min_cells <- params$min_cells
+
+```
+## Loading library
+
+```{r library}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(Matrix)
+  library(dplyr)
+  library(data.table)
+})
+
+```
+
+## Folder structure
+
+```{r project_directory}
+set.seed(seed)
+
+# Ensure we run inside the task work dir
+if (!is.null(params$work_directory) && dir.exists(params$work_directory)) {
+  setwd(params$work_directory)
+}
+
+# Output layout (Nextflow publishDir picks these up)
+dir.create("data/per_sample_mat", recursive = TRUE, showWarnings = FALSE)
+dir.create("figures/metaprog",    recursive = TRUE, showWarnings = FALSE)
+dir.create("report",              recursive = TRUE, showWarnings = FALSE)
+out_dir <- file.path(work_directory, "data", "per_sample_mat")
+plot_dir <- file.path(work_directory, "figures", "metaprog")
+message("CWD: ", getwd())
+# # work_directory="../../../../SCRATCH-TumorMetaProgram-DE/"
+# if(!dir.exists(work_directory)) {
+#   dir.create(work_directory, recursive = TRUE)
+# }
+# 
+# for(sub_directory in c('data', 'figures', 'figures/metaprog')) {
+#   dir.create(file.path(work_directory, sub_directory), recursive = TRUE)
+# }
+
+```
+
+``` {r loading configurations}
+stopifnot(!is.null(seurat_object))
+seu <- readRDS(seurat_object)
+stopifnot(inherits(seu, "Seurat"))
+
+# Required metadata
+if (!("orig.ident" %in% colnames(seu@meta.data))) {
+  stop("meta.data does not contain 'orig.ident' — required to split per sample.")
+}
+if (!(subset_col %in% colnames(seu@meta.data))) {
+  stop("subset_col '", subset_col, "' not found in meta.data.")
+}
+
+# Drop precomputed graphs to avoid Seurat v5 subsetting edge cases
+if (length(seu@graphs) > 0) seu@graphs <- list()
+
+
+```
+
+```{r SPLIT EPITHELIAL}
+# Epithelial subset
+vals <- seu@meta.data[[subset_col]]
+keep <- rownames(seu@meta.data)[ vals %in% as.character(unlist(subset_values)) ]
+if (!length(keep)) {
+  stop("No cells matched ", subset_col, " ∈ {",
+       paste(subset_values, collapse=", "), "}")
+}
+seu_sub <- subset(seu, cells = keep)
+
+# Use RNA by default if present
+if ("RNA" %in% names(seu_sub@assays)) {
+  DefaultAssay(seu_sub) <- "RNA"
+} else {
+  DefaultAssay(seu_sub) <- names(seu_sub@assays)[1]
+}
+
+# Split by sample
+seu_list  <- SplitObject(seu_sub, split.by = "orig.ident")
+sample_ls <- names(seu_list)
+length(sample_ls)
+
+```
+
+``` {r EXTRACT & SAVE RAW COUNTS}
+# helper for Seurat v5 / v4 compatibility
+get_counts <- function(obj, assay = DefaultAssay(obj)) {
+  # v5: prefer layers
+  layers_ok <- tryCatch(Layers(obj[[assay]]), error = function(e) character())
+  if ("counts" %in% layers_ok) {
+    return(GetAssayData(obj, assay = assay, layer = "counts"))
+  }
+  # fallback (v4-style)
+  GetAssayData(obj, assay = assay, slot = "counts")
+}
+
+cell_counts <- integer(length(sample_ls))
+names(cell_counts) <- sample_ls
+
+for (s in sample_ls) {
+  sobj <- seu_list[[s]]
+  mat  <- get_counts(sobj, assay = DefaultAssay(sobj))
+  if (!is(mat, "dgCMatrix")) mat <- as(mat, "dgCMatrix")
+  mat  <- mat[, Matrix::colSums(mat) > 0, drop = FALSE]
+  cell_counts[s] <- ncol(mat)
+
+  # Gate: skip tiny samples early
+  if (ncol(mat) < min_cells) {
+    message(sprintf("[Skip] %s: %d cells < min_cells=%d", s, ncol(mat), min_cells))
+    next
+  }
+
+  saveRDS(mat, file = file.path(out_dir, paste0(s, "_raw.rds")))
+}
+
+# Save a small run log for debugging
+counts_df <- data.frame(sample = names(cell_counts), cells = as.integer(cell_counts))
+fwrite(counts_df, file.path(out_dir, "_sample_cell_counts.tsv"))
+counts_df
+
+```
+
+``` {r PREPROCESS FOR NMF}
+raw_files <- list.files(out_dir, pattern = "_raw\\.rds$", full.names = TRUE)
+if (!length(raw_files)) stop("No samples passed min_cells gate; nothing to preprocess.")
+
+# if (!length(raw_files)) {
+#   warning("No *_raw.rds files found after gating; downstream NMF step will be a no-op.")
+# }
+
+for (f in raw_files) {
+  s    <- sub("_raw\\.rds$", "", basename(f))
+  mat  <- readRDS(f)
+
+  # log-CPM/10
+  sf   <- 1e6 / pmax(colSums(mat), 1)  # guard against divide-by-zero
+  mat  <- log2(1 + sweep(mat, 2, sf, "*") / 10)
+
+  # variance filter
+  v    <- Matrix::rowMeans(mat^2) - rowMeans(mat)^2
+  mat  <- mat[v > 0, , drop = FALSE]
+
+  # low-expression filter
+  mat  <- mat[rowMeans(mat) > 0.4, , drop = FALSE]
+
+  # center + clip at 0
+  matc <- sweep(mat, 1, rowMeans(mat), "-")
+  matc[matc < 0] <- 0
+
+  saveRDS(matc, file = file.path(out_dir, paste0(s, "_preprocessed.rds")))
+}
+
+list.files(out_dir, pattern = "_preprocessed\\.rds$", full.names = TRUE)
+
+
+```
+
+## Parameters log
+
+```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
+
+print(params)
+
+```
+
+## Session info
+
+```{r session_info, message = FALSE, warning = FALSE, echo = FALSE}
+
+sessionInfo()
+
+```
+
+

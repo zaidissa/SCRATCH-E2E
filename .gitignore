@@ -1,0 +1,32 @@
+# Nextflow runtime
+work/
+.nextflow/
+.nextflow.log*
+*.nextflow.log
+trace-*.txt
+timeline-*.html
+report-*.html
+dag-*.html
+
+# Pipeline outputs
+results/
+outdir/
+test_results*/
+
+# Quarto / knitr
+*_files/
+*_cache/
+.quarto/
+
+# R / Python
+.Rhistory
+.RData
+.Rproj.user/
+__pycache__/
+*.pyc
+.venv/
+scoda_env/
+
+# OS
+.DS_Store
+Thumbs.db

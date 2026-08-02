@@ -1,0 +1,38 @@
+name: cellranger_count
+description: Runs Cell Ranger count to process Chromium single-cell RNA-seq data for gene expression analysis.
+keywords:
+  - single-cell
+  - gene expression
+  - RNA-seq
+  - 10x Genomics
+tools:
+  - cellranger:
+      description: Cell Ranger by 10x Genomics processes Chromium single-cell RNA-seq data to align reads, generate feature-barcode matrices, and perform gene expression analysis.
+      homepage: https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/what-is-cell-ranger
+      documentation: https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/using/tutorial-ov
+      tool_dev_url: https://github.com/10XGenomics/cellranger
+      licence: 10x Genomics EULA
+input:
+  - sample:
+      type: string
+      description: Unique identifier for the sample being processed.
+  - reads:
+      type: file
+      description: Directory containing FastQ files preprocessed to meet Cell Ranger requirements.
+      pattern: "*.{fastq,fastq.gz}"
+  - reference:
+      type: directory
+      description: Directory containing the reference transcriptome data necessary for the gene expression analysis.
+output:
+  - outs:
+      type: directory
+      description: Directory containing all outputs from the Cell Ranger count analysis, including feature-barcode matrices and various summary files.
+      pattern: "${sample}/outs/*"
+  - versions:
+      type: file
+      description: File containing the versions of the Cell Ranger software and the reference used in the analysis.
+      pattern: "versions.yml"
+authors:
+  - Andre Fonseca (@oandrefonseca)
+maintainers:
+  - Andre Fonseca (@oandrefonseca)

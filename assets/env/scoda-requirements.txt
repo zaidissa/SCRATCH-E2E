@@ -1,0 +1,26 @@
+# Python environment for bin/scratch_scoda.py (compositional differential
+# abundance). Only needed when TME runs with `run_scoda: true`; the notebook
+# degrades with a visible warning if this environment is absent.
+#
+#   python3 -m venv scoda_env && ./scoda_env/bin/pip install -r scoda-requirements.txt
+#
+# Point the notebook at it with `-P scoda_python:/path/to/scoda_env/bin/python`
+# or `export SCRATCH_SCODA_PYTHON=/path/to/scoda_env/bin/python`.
+#
+# The two pins below are NOT cosmetic -- a bare `pip install sccoda` produces an
+# environment that imports and then fails:
+#
+#   scipy<1.13   scCODA 0.1.9 pulls arviz 0.17, which imports
+#                `scipy.signal.gaussian`. That alias was removed in scipy 1.13
+#                (it moved to scipy.signal.windows), so the import dies.
+#   tf-keras     tensorflow-probability 0.25 needs Keras 2. TF 2.16+ ships
+#                Keras 3, and TFP does not install the compatibility shim
+#                itself, so `import sccoda` fails on a clean install.
+#
+# Verified working combination (macOS arm64, 2026-08-01): scCODA 0.1.9,
+# tensorflow 2.20.0, tensorflow-probability 0.25.0, arviz 0.17.1, numpy 1.26.4,
+# scipy 1.12.0, pandas 2.3.3, Python 3.9.
+
+sccoda==0.1.9
+scipy<1.13
+tf-keras

@@ -1,0 +1,390 @@
+---
+title: "SCRATCH-E2E — Cross-stage analysis"
+execute:
+  freeze: false
+  cache: false
+  warning: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 3
+    embed-resources: true
+    code-fold: true
+    fig-format: png
+    fig-dpi: 300
+    fig-align: center
+params:
+  cell_table: null
+  stage_inputs: "stage_inputs"
+  work_directory: "."
+  project_name: "project"
+  celltype_col: "celltype"
+  sample_col: "sample_id"
+  condition_col: "condition"
+  interactive: true
+  seed: 1234
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r setup, include = FALSE}
+suppressPackageStartupMessages({
+  library(data.table)
+  library(ggplot2)
+  library(scales)
+})
+
+set.seed(params$seed)
+if (!is.null(params$work_directory) && dir.exists(params$work_directory)) {
+  setwd(params$work_directory)
+}
+dir.create("data",    showWarnings = FALSE, recursive = TRUE)
+dir.create("figures", showWarnings = FALSE, recursive = TRUE)
+
+# ---------------------------------------------------------------------------
+# Palette
+#
+# Categorical hues are assigned in FIXED slot order and never cycled: a series
+# keeps its colour when other series are filtered out. Sequential magnitude uses
+# a single hue, light->dark. Diverging uses two poles with a neutral grey
+# midpoint. Text never wears a series colour.
+# ---------------------------------------------------------------------------
+CAT <- c("#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+         "#e87ba4", "#008300", "#4a3aa7", "#e34948")
+
+SEQ_LOW  <- "#cde2fb"; SEQ_HIGH <- "#0d366b"           # one hue, light -> dark
+DIV_LOW  <- "#2a78d6"; DIV_MID  <- "#f0efec"; DIV_HIGH <- "#e34948"
+
+INK      <- "#0b0b0b"; INK_2 <- "#52514e"; MUTED <- "#898781"
+GRID     <- "#e1e0d9"; AXIS  <- "#c3c2b7"; SURFACE <- "#fcfcfb"
+
+theme_scratch <- function(base_size = 12) {
+  theme_minimal(base_size = base_size) +
+    theme(
+      plot.background   = element_rect(fill = SURFACE, colour = NA),
+      panel.background  = element_rect(fill = SURFACE, colour = NA),
+      panel.grid.major  = element_line(colour = GRID, linewidth = 0.3),
+      panel.grid.minor  = element_blank(),
+      axis.line         = element_line(colour = AXIS, linewidth = 0.4),
+      axis.text         = element_text(colour = MUTED),
+      axis.title        = element_text(colour = INK_2),
+      plot.title        = element_text(colour = INK, face = "bold", size = base_size * 1.15),
+      plot.subtitle     = element_text(colour = INK_2, size = base_size * 0.9),
+      legend.text       = element_text(colour = INK_2),
+      legend.title      = element_text(colour = INK_2),
+      strip.text        = element_text(colour = INK_2, face = "bold")
+    )
+}
+
+# Cap categorical series at the number of validated slots; the remainder folds
+# into "Other" rather than generating new hues.
+fold_other <- function(x, max_levels = 8L) {
+  x <- as.character(x)
+  keep <- names(sort(table(x), decreasing = TRUE))[seq_len(min(max_levels, length(unique(x))))]
+  factor(ifelse(x %in% keep, x, "Other"), levels = c(keep, "Other"))
+}
+
+save_fig <- function(p, name, w = 9, h = 5.5) {
+  ggsave(file.path("figures", paste0(name, ".png")), p, width = w, height = h, dpi = 400)
+  p
+}
+
+has_cols <- function(dt, cols) all(cols %in% names(dt))
+note <- function(...) cat("_", ..., "_\n\n", sep = "")
+```
+
+```{r load}
+stopifnot(!is.null(params$cell_table))
+cells <- fread(params$cell_table)
+cat("Per-cell table:", nrow(cells), "cells x", ncol(cells), "columns\n")
+
+# Resolve the metadata columns, tolerating the naming drift between stages.
+pick_col <- function(dt, preferred, fallbacks) {
+  cand <- c(preferred, fallbacks)
+  hit  <- cand[cand %in% names(dt)]
+  if (length(hit)) hit[1] else NA_character_
+}
+
+col_ct     <- pick_col(cells, params$celltype_col,
+                       c("azimuth_labels", "celltype", "cell_type", "annotation", "sctype", "sctype_agg", "sctype_labels"))
+col_sample <- pick_col(cells, params$sample_col, c("sample_id", "orig.ident", "patient_id", "sample"))
+col_cond   <- pick_col(cells, params$condition_col, c("condition", "timepoint", "group"))
+
+cat("Resolved columns -> celltype:", col_ct, "| sample:", col_sample, "| condition:", col_cond, "\n")
+
+cnv_cols  <- grep("^cnv",       names(cells), value = TRUE)
+mp_cols   <- grep("^metaprog_", names(cells), value = TRUE)
+traj_cols <- grep("^traj",      names(cells), value = TRUE)
+tcr_cols  <- grep("^tcr",       names(cells), value = TRUE)
+
+available <- c(cnv = length(cnv_cols) > 0, metaprog = length(mp_cols) > 0,
+               trajectory = length(traj_cols) > 0, tcr = length(tcr_cols) > 0)
+print(available)
+```
+
+## Overview
+
+These analyses each require **two or more stages at once**, so none of them were
+reachable while the pipelines ran separately. Any section whose input stages did
+not run is skipped and says so.
+
+```{r stage-availability, fig.width = 7, fig.height = 2.6}
+av <- data.table(stage = names(available), present = as.logical(available))
+av[, label := ifelse(present, "ran", "not run")]
+
+p <- ggplot(av, aes(x = reorder(stage, present), y = 1, fill = present)) +
+  geom_tile(colour = SURFACE, linewidth = 2) +          # 2px surface gap between fills
+  geom_text(aes(label = label), colour = "#ffffff", fontface = "bold", size = 3.6) +
+  scale_fill_manual(values = c(`TRUE` = "#0ca30c", `FALSE` = "#898781"), guide = "none") +
+  coord_flip() +
+  labs(title = "Stages contributing to this analysis", x = NULL, y = NULL) +
+  theme_scratch() +
+  theme(axis.text.x = element_blank(), panel.grid = element_blank())
+save_fig(p, "stage_availability", 7, 2.6)
+```
+
+## Malignant compartment vs cell type
+
+Joins the CNV calls to the annotation labels: what fraction of each annotated
+population is called aneuploid, and does that agree between callers.
+
+```{r cnv-celltype, fig.width = 9, fig.height = 5.5}
+mal_col <- grep("malig|pred|copykat|subclone|class", cnv_cols, value = TRUE, ignore.case = TRUE)
+
+if (length(mal_col) && !is.na(col_ct)) {
+  mc <- mal_col[1]
+  dt <- cells[!is.na(get(mc)) & !is.na(get(col_ct))]
+
+  if (nrow(dt)) {
+    dt[, ct := fold_other(get(col_ct), 8L)]
+    dt[, call := fold_other(get(mc), 4L)]
+
+    comp <- dt[, .N, by = .(ct, call)][, frac := N / sum(N), by = ct]
+
+    p <- ggplot(comp, aes(x = ct, y = frac, fill = call)) +
+      geom_col(width = 0.72, colour = SURFACE, linewidth = 1) +   # 2px surface gap
+      scale_fill_manual(values = CAT, name = "CNV call") +
+      scale_y_continuous(labels = percent_format(accuracy = 1), expand = expansion(mult = c(0, .02))) +
+      labs(title = "CNV call composition by annotated cell type",
+           subtitle = paste("Column:", mc),
+           x = NULL, y = "share of cells") +
+      theme_scratch() +
+      theme(axis.text.x = element_text(angle = 35, hjust = 1))
+    print(save_fig(p, "cnv_by_celltype"))
+
+    fwrite(comp, "data/cnv_by_celltype.csv")
+    knitr::kable(dcast(comp, ct ~ call, value.var = "frac", fill = 0), digits = 3)
+  } else note("CNV and cell-type columns present but share no cells.")
+} else {
+  note("Needs the CNV and annotation stages; skipped.")
+}
+```
+
+## Metaprograms vs the malignant compartment
+
+Metaprograms are derived from the epithelial/tumour compartment, so their
+distribution across CNV states is a direct check that the two stages agree about
+which cells are malignant.
+
+```{r mp-cnv, fig.width = 9, fig.height = 5.5}
+if (length(mp_cols) && length(mal_col) && "metaprog_assigned" %in% names(cells)) {
+  mc <- mal_col[1]
+  dt <- cells[!is.na(metaprog_assigned) & !is.na(get(mc))]
+
+  if (nrow(dt)) {
+    dt[, call := fold_other(get(mc), 4L)]
+    tab <- dt[, .N, by = .(metaprog_assigned, call)][, frac := N / sum(N), by = call]
+
+    # Sequential encoding: one hue, light -> dark. Cells carry visible values,
+    # which is also the relief required by the palette's contrast check.
+    p <- ggplot(tab, aes(x = call, y = metaprog_assigned, fill = frac)) +
+      geom_tile(colour = SURFACE, linewidth = 2) +
+      geom_text(aes(label = percent(frac, accuracy = 1)),
+                colour = ifelse(tab$frac > 0.5, "#ffffff", INK), size = 3.2) +
+      scale_fill_gradient(low = SEQ_LOW, high = SEQ_HIGH,
+                          labels = percent_format(accuracy = 1), name = "share") +
+      labs(title = "Metaprogram usage within each CNV state",
+           x = "CNV call", y = "assigned metaprogram") +
+      theme_scratch() + theme(panel.grid = element_blank())
+    print(save_fig(p, "metaprogram_by_cnv"))
+
+    fwrite(tab, "data/metaprogram_by_cnv.csv")
+  } else note("Metaprogram and CNV columns present but share no cells.")
+} else {
+  note("Needs the metaprogram and CNV stages; skipped.")
+}
+```
+
+## Metaprogram sharing across samples
+
+A metaprogram recurring in many samples is a candidate shared programme; one
+confined to a single sample is more likely patient-specific.
+
+```{r mp-recurrence, fig.width = 9, fig.height = 5}
+if ("metaprog_assigned" %in% names(cells) && !is.na(col_sample)) {
+  dt <- cells[!is.na(metaprog_assigned)]
+  rec <- dt[, .(samples = uniqueN(get(col_sample)), cells = .N), by = metaprog_assigned]
+  setorder(rec, -samples, -cells)
+
+  # Single series: no legend box, the title names the measure.
+  p <- ggplot(rec, aes(x = reorder(metaprog_assigned, samples), y = samples)) +
+    geom_col(fill = CAT[1], width = 0.7) +
+    geom_text(aes(label = samples), hjust = -0.35, colour = INK_2, size = 3.4) +
+    coord_flip() +
+    scale_y_continuous(expand = expansion(mult = c(0, .12))) +
+    labs(title = "Number of samples each metaprogram appears in",
+         subtitle = "Higher = more recurrent across the cohort",
+         x = NULL, y = "samples") +
+    theme_scratch()
+  print(save_fig(p, "metaprogram_recurrence"))
+
+  fwrite(rec, "data/metaprogram_recurrence.csv")
+  knitr::kable(rec)
+} else {
+  note("Needs the metaprogram stage and a sample column; skipped.")
+}
+```
+
+## Clonal expansion along pseudotime
+
+Joins the TCR clonotypes to the trajectory pseudotime: whether expanded clones
+sit at a particular point in the differentiation ordering.
+
+```{r tcr-pseudotime, fig.width = 9, fig.height = 5}
+pt_col    <- grep("pseudotime|slingshot|monocle|cytotrace", traj_cols, value = TRUE, ignore.case = TRUE)
+clone_col <- grep("clone|freq|expan|proportion", tcr_cols, value = TRUE, ignore.case = TRUE)
+
+if (length(pt_col) && length(clone_col)) {
+  pc <- pt_col[1]; cc <- clone_col[1]
+  dt <- cells[!is.na(get(pc)) & !is.na(get(cc))]
+  dt[, pt := suppressWarnings(as.numeric(get(pc)))]
+  dt[, cl := suppressWarnings(as.numeric(get(cc)))]
+  dt <- dt[is.finite(pt) & is.finite(cl)]
+
+  if (nrow(dt) > 20) {
+    # Bin pseudotime and summarise: a trend over a continuous axis, one series,
+    # so it reads as a line rather than an unreadable per-cell scatter.
+    dt[, bin := cut(pt, breaks = 20, labels = FALSE)]
+    summ <- dt[, .(pt = mean(pt), clone = mean(cl), n = .N), by = bin][order(pt)]
+
+    p <- ggplot(summ, aes(x = pt, y = clone)) +
+      geom_line(colour = CAT[1], linewidth = 0.8) +
+      geom_point(colour = CAT[1], size = 2.2) +
+      labs(title = "Mean clonal expansion along pseudotime",
+           subtitle = paste0("pseudotime: ", pc, "  |  clone measure: ", cc,
+                             "  |  ", nrow(dt), " cells in 20 bins"),
+           x = "pseudotime", y = "mean clone size") +
+      theme_scratch()
+    print(save_fig(p, "clonal_expansion_pseudotime"))
+
+    fwrite(summ, "data/clonal_expansion_pseudotime.csv")
+
+    ct_test <- suppressWarnings(cor.test(dt$pt, dt$cl, method = "spearman"))
+    cat(sprintf("\nSpearman rho = %.3f (p = %.3g, n = %d)\n",
+                unname(ct_test$estimate), ct_test$p.value, nrow(dt)))
+  } else note("Too few cells with both pseudotime and clone size.")
+} else {
+  note("Needs the trajectory and TCR stages; skipped.")
+}
+```
+
+## Cell-type composition by condition
+
+```{r composition, fig.width = 9, fig.height = 5.5}
+if (!is.na(col_ct) && !is.na(col_cond) && uniqueN(cells[[col_cond]]) > 1) {
+  dt <- cells[!is.na(get(col_ct)) & !is.na(get(col_cond))]
+  dt[, ct := fold_other(get(col_ct), 8L)]
+
+  comp <- dt[, .N, by = .(cond = get(col_cond), ct)][, frac := N / sum(N), by = cond]
+
+  p <- ggplot(comp, aes(x = cond, y = frac, fill = ct)) +
+    geom_col(width = 0.7, colour = SURFACE, linewidth = 1) +
+    scale_fill_manual(values = CAT, name = "cell type") +
+    scale_y_continuous(labels = percent_format(accuracy = 1), expand = expansion(mult = c(0, .02))) +
+    labs(title = "Cell-type composition by condition", x = NULL, y = "share of cells") +
+    theme_scratch()
+  print(save_fig(p, "composition_by_condition"))
+
+  fwrite(comp, "data/composition_by_condition.csv")
+} else {
+  note("Needs an annotation column and more than one condition; skipped.")
+}
+```
+
+## Ligand-receptor activity vs malignant fraction
+
+Reads the LIANA results directly and relates per-sample interaction load to the
+malignant fraction computed above.
+
+```{r lr-malignant, fig.width = 9, fig.height = 5.5}
+lr_files <- list.files(params$stage_inputs, pattern = "liana_results\\.csv$",
+                       recursive = TRUE, full.names = TRUE)
+
+if (length(lr_files) && length(mal_col)) {
+  lr <- tryCatch(fread(lr_files[1]), error = function(e) NULL)
+
+  if (!is.null(lr) && nrow(lr)) {
+    src <- intersect(c("source", "ligand.complex", "sender"), names(lr))
+    tgt <- intersect(c("target", "receptor.complex", "receiver"), names(lr))
+
+    if (length(src) && length(tgt)) {
+      top <- lr[, .N, by = .(source = get(src[1]), target = get(tgt[1]))]
+      setorder(top, -N)
+      top <- head(top, 200)
+
+      p <- ggplot(top, aes(x = source, y = target, fill = N)) +
+        geom_tile(colour = SURFACE, linewidth = 1) +
+        scale_fill_gradient(low = SEQ_LOW, high = SEQ_HIGH, name = "interactions") +
+        labs(title = "Ligand-receptor interaction load between populations",
+             subtitle = "Top 200 sender-receiver pairs from LIANA",
+             x = "sender", y = "receiver") +
+        theme_scratch() +
+        theme(axis.text.x = element_text(angle = 40, hjust = 1), panel.grid = element_blank())
+      print(save_fig(p, "lr_interaction_load"))
+
+      fwrite(top, "data/lr_interaction_load.csv")
+    } else note("LIANA output present but sender/receiver columns were not recognised.")
+  } else note("LIANA results file was empty.")
+} else {
+  note("Needs the cell-communication and CNV stages; skipped.")
+}
+```
+
+## Summary table
+
+```{r summary}
+summary_dt <- data.table(
+  analysis = c("CNV x cell type", "Metaprogram x CNV", "Metaprogram recurrence",
+               "Clonal expansion x pseudotime", "Composition x condition",
+               "Ligand-receptor x malignant"),
+  produced = c(file.exists("data/cnv_by_celltype.csv"),
+               file.exists("data/metaprogram_by_cnv.csv"),
+               file.exists("data/metaprogram_recurrence.csv"),
+               file.exists("data/clonal_expansion_pseudotime.csv"),
+               file.exists("data/composition_by_condition.csv"),
+               file.exists("data/lr_interaction_load.csv"))
+)
+fwrite(summary_dt, "data/cross_analysis_summary.csv")
+knitr::kable(summary_dt)
+```
+
+## Session info
+
+```{r session, echo = FALSE}
+sessionInfo()
+```

@@ -1,0 +1,1768 @@
+---
+title: "Module — Batch Correction (non-tumor)"
+author: "Syed Shujaat Ali Zaidi"
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    df-print: paged
+    fig-format: png
+    fig-dpi: 300
+    fig-responsive: true
+    fig-align: center
+lightbox:
+  match: auto
+  effect: zoom
+  loop: true
+execute:
+  echo: true
+  error: false
+  message: true
+  warning: false
+params:
+  # inputs (support both your older names and the pipeline one)
+  project_name: 'Project'
+  project_object: './data/project_Azimuth_annotation_object.RDS'
+  seurat_object: null
+  input_seurat_object: null           # <-- used by nextflow process; preferred if set
+  target_rds: './data/NonTumor_preprocessed.RDS'
+  work_directory: '.'
+
+  # integration
+  input_integration_method: 'all'     # all|cca|rpca|harmony|mnn
+  input_target_variables: 'batch'     # semicolon-delimited is OK
+
+  input_batch_step: 'main'
+
+  # tumor subsetting
+  # include_labels: 'Epithelial'        # <-- KEEP ONLY these labels (semicolon-delimited)
+  exclude_labels: 'Epithelial'        # <-- KEEP ONLY these labels (semicolon-delimited)
+  label_candidates: 'azimuth_labels;celltype;cell_type;annotation;cell_label;celllabel'
+
+  # optional: if you still keep these elsewhere, they’re ignored here
+  # exclude_labels: null
+  celltype_column: 'celltype'
+
+  # compute knobs
+  n_threads: 8
+  n_memory: 16
+  n_hvgs: 3000
+  n_pcs: 50
+
+  auto_save: true
+  seed: 2203
+  
+  # evaluation controls
+  do_evaluation: true               # run evaluation if methods=='all'
+  input_label_key: null             # default will fall back to label_col you detected
+  input_lisi_variables: 'cLISI;iLISI'
+  input_auto_selection: true
+  thr_npc: 'auto'
+  thr_resolution: 0.25
+  thr_cell_proportion: 0.30
+  
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r setup}
+# Pull params
+project_name   <- params$project_name
+project_object <- params$project_object
+# SOURCE_RDS     <- if (!is.null(params$input_seurat_object) && nzchar(params$input_seurat_object))
+#                     params$input_seurat_object
+#                   else if (!is.null(params$seurat_object) && nzchar(params$seurat_object))
+#                     params$seurat_object
+#                   else
+#                     project_object
+SOURCE_RDS               <- if (!is.null(params$seurat_object) && nzchar(params$seurat_object)) params$seurat_object else project_object
+
+TARGET_RDS               <- params$target_rds
+input_integration_method <- tolower(params$input_integration_method)
+
+# split semicolon-delimited fields
+input_target_variables <- trimws(unlist(strsplit(params$input_target_variables, ";", fixed = TRUE)))
+exclude_labels         <- trimws(unlist(strsplit(params$exclude_labels, ";", fixed = TRUE)))
+label_candidates       <- trimws(unlist(strsplit(params$label_candidates, ";", fixed = TRUE)))
+
+input_batch_step <- params$input_batch_step
+N_HVGS           <- as.integer(params$n_hvgs)
+N_PCS            <- as.integer(params$n_pcs)
+n_threads        <- as.integer(params$n_threads)
+n_memory         <- as.numeric(params$n_memory)
+auto_save        <- isTRUE(params$auto_save)
+set.seed(as.integer(params$seed))
+
+# safer root dir handling
+wd <- params$work_directory; if (is.null(wd) || !nzchar(wd)) wd <- "."
+# try(knitr::opts_knit$set(root.dir = wd), silent = TRUE)
+# try(setwd(wd), silent = TRUE)
+
+knitr::opts_chunk$set(
+	echo = FALSE,
+	cache = FALSE,
+	cache.lazy = FALSE
+)
+```
+
+```{r Libraries, error=TRUE}
+#| echo: false
+suppressPackageStartupMessages({
+  library(readr); library(dplyr); library(ggplot2)
+  library(Seurat); library(SeuratObject); library(SeuratWrappers)
+  library(harmony); library(batchelor); library(kBET); library(future)
+  library(patchwork)
+})
+
+```
+
+```{r StructuringFolders, error=TRUE}
+#| include: false
+dir.create("data", recursive = TRUE, showWarnings = FALSE)
+dir.create("report", recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path("figures"), recursive = TRUE, showWarnings = FALSE)
+
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+.safe_assays <- function(obj) {
+  out <- tryCatch(SeuratObject::Assays(obj), error = function(e) names(obj@assays))
+  as.character(out %||% character(0))
+}
+.safe_layers <- function(obj, assay) {
+  tryCatch(SeuratObject::Layers(obj[[assay]]), error = function(e) character(0))
+}
+has_layer <- function(obj, assay, layer) {
+  tryCatch(layer %in% SeuratObject::Layers(obj[[assay]]), error = function(e) FALSE)
+}
+has_red <- function(obj, nm) nm %in% names(obj@reductions)
+
+```
+
+```{r LoadFile, error=TRUE}
+#| echo: false
+stopifnot(file.exists(SOURCE_RDS))
+message("Reading: ", SOURCE_RDS)
+obj <- readRDS(SOURCE_RDS)
+if (ncol(obj) == 0) stop("Input object has zero cells.")
+
+# 1) pick a label column
+label_col <- intersect(label_candidates, colnames(obj@meta.data))[1]
+if (length(label_col) == 0 || is.na(label_col)) {
+  stop("Could not find any label column among: ", paste(label_candidates, collapse = ", "),
+       ". To proceed, set params$label_candidates accordingly.")
+}
+# 2) Identify epithelial/tumor labels to EXCLUDE (case-insensitive)
+labs_raw <- as.character(obj@meta.data[[label_col]])
+labs_lwr <- tolower(labs_raw)
+exclude_set <- tolower(exclude_labels[exclude_labels != ""])
+
+keep_epi_cells <- rownames(obj@meta.data)[
+  !is.na(labs_lwr) & labs_lwr %in% exclude_set
+]
+
+if (length(keep_epi_cells) == 0L) {
+  message("No cells matched exclude_labels = {",
+          paste(exclude_labels, collapse = ";"),
+          "} in '", label_col, "'. Proceeding with ALL cells as non-tumor.")
+  non_tumor_cells <- colnames(obj)
+} else {
+  # EXCLUDE epithelial: keep all other cells
+  non_tumor_cells <- setdiff(colnames(obj), keep_epi_cells)
+  if (length(non_tumor_cells) == 0L) {
+    stop("All cells were labeled in exclude_labels; nothing left after exclusion.")
+  }
+}
+
+# Subset to NON-TUMOR
+obj_non_tumor <- subset(obj, cells = non_tumor_cells)
+
+message(
+  "Kept NON-TUMOR (excluded labels: ", paste(exclude_labels, collapse = ";"),
+  ") via '", label_col, "': n=", ncol(obj_non_tumor),
+  " (excluded=", length(setdiff(colnames(obj), non_tumor_cells)),
+  ", total=", ncol(obj), ")"
+)
+
+
+## ---------- NEW: quick post-subset summaries ----------
+cat("\n[Summary] Cell counts after excluding labels:\n")
+cat("  Total cells kept:", ncol(obj_non_tumor), "\n\n")
+
+# Counts by biological label
+tab_label <- sort(table(obj_non_tumor@meta.data[[label_col]]), decreasing = TRUE)
+print(head(tab_label, 30))
+
+# If your batch column(s) are known (from params$input_target_variables), show by-batch too
+if (all(input_target_variables %in% colnames(obj_non_tumor@meta.data))) {
+  batch_key <- if (length(input_target_variables) == 1) {
+    input_target_variables[1]
+  } else {
+    "__subset_batch__"
+  }
+  if (batch_key == "__subset_batch__") {
+    obj_non_tumor@meta.data[[batch_key]] <- apply(
+      obj_non_tumor@meta.data[, input_target_variables, drop = FALSE],
+      1, paste, collapse = "_"
+    )
+  }
+  cat("\n[Summary] Cells by batch level:\n")
+  tab_batch <- sort(table(obj_non_tumor@meta.data[[batch_key]]), decreasing = TRUE)
+  print(head(tab_batch, 30))
+
+  cat("\n[Summary] Cells by (batch x label):\n")
+  tab_bl <- sort(table(
+    obj_non_tumor@meta.data[[batch_key]],
+    obj_non_tumor@meta.data[[label_col]]
+  ), decreasing = TRUE)
+  print(head(tab_bl, 30))
+}
+## ---------- END summaries ---------
+
+
+
+# # 2) keep ONLY tumor labels (epithelial by default)
+# labs <- as.character(obj@meta.data[[label_col]])
+# 
+# keep_nonepi_cells <- rownames(obj@meta.data)[
+#   !is.na(labs) & tolower(labs) %in% tolower(exclude_labels)
+# ]
+# 
+# 
+# if (length(keep_nonepi_cells) == 0L) {
+#   stop("After filtering to exclude_labels = {", paste(exclude_labels, collapse=";"),
+#        "} none of the cells remain. Check your label column '", label_col, "'.")
+# }
+# 
+# # EXCLUDE epithelial: keep all other cells
+# non_tumor_cells <- setdiff(colnames(obj), keep_nonepi_cells)
+# if (length(non_tumor_cells) == 0L) {
+#   stop("All cells were labeled epithelial/tumor — nothing left after exclusion.")
+# }
+# 
+# obj_non_tumor <- subset(obj, cells = non_tumor_cells)
+# # obj_non_tumor     <- subset(obj, cells = keep_nonepi_cells)
+# 
+# # message("Kept TUMOR (", paste(exclude_labels, collapse=";"),
+# #         ") via '", label_col, "': n=", ncol(obj_non_tumor))
+# message(
+#   "Kept NON-TUMOR (excluded: ", paste(exclude_labels, collapse = ";"),
+#   ") via '", label_col, "': n=", ncol(obj_non_tumor),
+#   " (from total ", ncol(obj), ")"
+# )
+# (optional) free memory
+# rm(obj); invisible(gc())
+```
+
+```{r CheckPoint, error=TRUE}
+#| echo: false
+message("--- [Diagnostic] Checking duplicate names ---")
+if (any(duplicated(colnames(obj_non_tumor)))) {
+  message("Cell names duplicated: fixing…")
+  obj_non_tumor <- RenameCells(obj_non_tumor, new.names = make.unique(colnames(obj_non_tumor)))
+} else message("Cell names OK.")
+
+da0 <- DefaultAssay(obj_non_tumor)
+feature_names <- rownames(obj_non_tumor[[da0]])
+if (any(duplicated(feature_names))) {
+  message("Duplicate gene names: fixing…")
+  assay_data <- GetAssayData(obj_non_tumor, assay = da0)   # counts preferred if present
+  rownames(assay_data) <- make.unique(rownames(assay_data))
+  obj_non_tumor[[da0]] <- CreateAssayObject(counts = assay_data)
+  message("Gene names fixed.")
+} else message("Gene names OK.")
+
+```
+
+```{r BatchColCheck, error=TRUE}
+#| echo: false
+if (!all(input_target_variables %in% colnames(obj_non_tumor@meta.data))) {
+  missing <- setdiff(input_target_variables, colnames(obj_non_tumor@meta.data))
+  stop("Missing batch column(s): ", paste(missing, collapse = ", "))
+}
+```
+
+```{r Preprocessing, error=TRUE}
+#| echo: false
+assays <- .safe_assays(obj_non_tumor)
+if (!length(assays)) stop("No assays found in object.")
+DefaultAssay(obj_non_tumor) <- if ("SCT" %in% assays) "SCT" else if ("RNA" %in% assays) "RNA" else assays[1]
+assay <- DefaultAssay(obj_non_tumor)
+
+# Normalize only if RNA (SCT already normalized)
+if (assay == "RNA" && !"data" %in% .safe_layers(obj_non_tumor, "RNA")) {
+  obj_non_tumor <- NormalizeData(obj_non_tumor, assay = "RNA", verbose = FALSE)
+}
+
+# HVGs
+obj_non_tumor <- FindVariableFeatures(obj_non_tumor, assay = assay, selection.method = "vst",
+                                  nfeatures = N_HVGS, verbose = FALSE)
+
+# Scale HVGs
+hvgs <- VariableFeatures(obj_non_tumor, assay = assay)
+obj_non_tumor <- ScaleData(obj_non_tumor, assay = assay, features = hvgs, verbose = FALSE)
+
+# PCA
+obj_non_tumor <- RunPCA(obj_non_tumor, npcs = N_PCS, verbose = FALSE)
+
+cat("Summary after preprocessing:\n")
+cat("  Cells:", ncol(obj_non_tumor), "\n",
+    "  Assay:", DefaultAssay(obj_non_tumor), "\n",
+    "  HVGs :", length(VariableFeatures(obj_non_tumor, assay = assay)), "\n",
+    "  PCA? :", "pca" %in% Reductions(obj_non_tumor), " | PCs=",
+    if ("pca" %in% Reductions(obj_non_tumor)) ncol(Embeddings(obj_non_tumor, "pca")) else 0, "\n")
+
+# Save the preprocessed tumor-only object
+saveRDS(obj_non_tumor, TARGET_RDS)
+message("Wrote NON-tumor preprocessed object to: ", TARGET_RDS)
+
+# hand-off for integration blocks
+seurat_object <- obj_non_tumor
+seurat_object_eval <- obj_non_tumor
+```
+
+```{r SeuratCheck, error=TRUE}
+#| echo: false
+stopifnot(all(input_target_variables %in% colnames(seurat_object@meta.data)))
+batch_key <- if (length(input_target_variables) == 1) {
+  input_target_variables[1]
+} else {
+  seurat_object$.__batch__ <- apply(
+    seurat_object@meta.data[, input_target_variables, drop = FALSE],
+    1, paste, collapse = "_"
+  )
+  ".__batch__"
+}
+```
+
+```{r ProcessSelector, error=TRUE}
+#| echo: true
+valid_methods <- c("all","cca","rpca","harmony","mnn")
+if (!input_integration_method %in% valid_methods)
+  stop("input_integration_method must be one of: ", paste(valid_methods, collapse = ", "),
+       " (got '", input_integration_method, "')")
+
+vec <- switch(input_integration_method,
+  'all'     = c(TRUE, TRUE, TRUE, TRUE),
+  'cca'     = c(TRUE, FALSE, FALSE, FALSE),
+  'rpca'    = c(FALSE, TRUE, FALSE, FALSE),
+  'harmony' = c(FALSE, FALSE, TRUE, FALSE),
+  'mnn'     = c(FALSE, FALSE, FALSE, TRUE)
+)
+run_cca     <- isTRUE(vec[[1]])
+run_rpca    <- isTRUE(vec[[2]])
+run_harmony <- isTRUE(vec[[3]])
+run_mnn     <- isTRUE(vec[[4]])
+message(sprintf("Selected methods → CCA:%s | RPCA:%s | Harmony:%s | MNN:%s",
+                run_cca, run_rpca, run_harmony, run_mnn))
+```
+
+```{r CCA, error=TRUE}
+#| echo: false
+if (run_cca) {
+  dir.create("./data/CCA", recursive = TRUE, showWarnings = FALSE)
+  dir.create(file.path("figures","CCA"), recursive = TRUE, showWarnings = FALSE)
+  has_red   <- function(obj, nm) nm %in% SeuratObject::Reductions(obj)
+  has_layer <- function(obj, assay, layer) {
+    tryCatch(layer %in% SeuratObject::Layers(obj[[assay]]), error = function(e) FALSE)
+  }
+
+  # check if IntegrateLayers supports group.by
+  has_arg <- function(fun, arg) {
+    x <- try(names(formals(fun)), silent = TRUE)
+    !inherits(x, "try-error") && (arg %in% x)
+  }
+  use_group_by <- has_arg(Seurat::IntegrateLayers, "group.by")
+
+  # Assay v5 compatibility
+  assay_names <- tryCatch(names(seurat_object@assays), error = function(e) character(0))
+  DefaultAssay(seurat_object) <- if ("SCT" %in% assay_names) "SCT" else if ("RNA" %in% assay_names) "RNA" else assay_names[[1]]
+  da <- DefaultAssay(seurat_object)
+  if (!(inherits(seurat_object[[da]], "Assay5") || inherits(seurat_object[[da]], "SCTAssay"))) {
+    if ("RNA" %in% assay_names) {
+      seurat_object[["RNA"]] <- as(seurat_object[["RNA"]], Class = "Assay5")
+      DefaultAssay(seurat_object) <- "RNA"; da <- "RNA"
+    } else {
+      seurat_object <- SCTransform(seurat_object, assay = da, new.assay.name = "SCT", verbose = FALSE)
+      DefaultAssay(seurat_object) <- "SCT"; da <- "SCT"
+    }
+  }
+  if (da == "RNA" && !has_layer(seurat_object, "RNA", "data")) {
+    seurat_object <- NormalizeData(seurat_object, assay = "RNA", verbose = FALSE)
+  }
+  if (length(VariableFeatures(seurat_object, assay = da)) == 0) {
+    seurat_object <- FindVariableFeatures(seurat_object, assay = da, nfeatures = 2000, verbose = FALSE)
+  }
+  if (!has_red(seurat_object, "pca")) {
+    seurat_object <- ScaleData(seurat_object, assay = da,
+                               features = VariableFeatures(seurat_object, assay = da),
+                               verbose = FALSE)
+    seurat_object <- RunPCA(seurat_object, npcs = 30, verbose = FALSE)
+  }
+
+  # Wrapper attempt
+  tmp <- try({
+    if (use_group_by) {
+      IntegrateLayers(
+        object         = seurat_object,
+        method         = CCAIntegration,
+        orig.reduction = "pca",
+        new.reduction  = "integrated.cca",
+        group.by       = batch_key,
+        verbose        = FALSE
+      )
+    } else {
+      IntegrateLayers(
+        object         = seurat_object,
+        method         = CCAIntegration,
+        orig.reduction = "pca",
+        new.reduction  = "integrated.cca",
+        verbose        = FALSE
+      )
+    }
+  }, silent = TRUE)
+
+  ok_wrap <- (!inherits(tmp, "try-error")) && ("integrated.cca" %in% SeuratObject::Reductions(tmp))
+  if (ok_wrap) {
+    seurat_object <- tmp
+  } else {
+    message("CCA wrapper unavailable/failed; falling back to anchors.")
+    .prep <- function(x) {
+      DefaultAssay(x) <- da
+      if (da == "RNA" && !has_layer(x, "RNA", "data")) x <- NormalizeData(x, assay = "RNA", verbose = FALSE)
+      if (length(VariableFeatures(x, assay = da)) == 0) x <- FindVariableFeatures(x, assay = da, nfeatures = 2000, verbose = FALSE)
+      x <- ScaleData(x, assay = da, features = VariableFeatures(x, assay = da), verbose = FALSE)
+      if (!has_red(x, "pca")) x <- RunPCA(x, npcs = 30, verbose = FALSE)
+      x
+    }
+    obj_list <- lapply(SplitObject(seurat_object, split.by = batch_key), .prep)
+    features  <- SelectIntegrationFeatures(object.list = obj_list, nfeatures = 2000)
+    pcs_avail <- ncol(Embeddings(seurat_object, "pca"))
+    dims_use  <- 1:min(30, pcs_avail)
+
+    anchors <- FindIntegrationAnchors(
+      object.list     = obj_list,
+      anchor.features = features,
+      reduction       = "cca",
+      dims            = dims_use
+    )
+
+    if ("IntegrateEmbeddings" %in% getNamespaceExports("Seurat")) {
+      stopifnot("pca" %in% SeuratObject::Reductions(seurat_object))
+      seurat_object <- Seurat::IntegrateEmbeddings(
+        anchorset          = anchors,
+        reductions         = seurat_object[["pca"]],
+        new.reduction.name = "integrated.cca"
+      )
+    } else {
+      integrated <- IntegrateData(anchorset = anchors, dims = dims_use)
+      DefaultAssay(integrated) <- "integrated"
+      feats <- rownames(GetAssayData(integrated, assay = "integrated", layer = "data"))
+      integrated <- ScaleData(integrated, features = feats, verbose = FALSE)
+      integrated <- RunPCA(integrated, npcs = max(dims_use), reduction.name = "integrated.cca", verbose = FALSE)
+      seurat_object <- integrated
+    }
+  }
+
+  # ensure UMAP
+  if (("integrated.cca" %in% SeuratObject::Reductions(seurat_object)) &&
+      !("umap.cca" %in% SeuratObject::Reductions(seurat_object))) {
+    dims_cca <- 1:min(30, ncol(Embeddings(seurat_object, "integrated.cca")))
+    seurat_object <- RunUMAP(seurat_object, reduction="integrated.cca", dims=dims_cca,
+                             reduction.name="umap.cca", reduction.key="umapCCA_",
+                             umap.method="uwot", metric="cosine")
+  }
+
+  # BEFORE embedding (fresh) + plots (same look)
+  dir.create(file.path("figures","CCA"), recursive = TRUE, showWarnings = FALSE)
+  baseline_assay <- if ("SCT" %in% SeuratObject::Assays(seurat_object)) "SCT" else
+                    if ("RNA" %in% SeuratObject::Assays(seurat_object)) "RNA" else
+                      SeuratObject::DefaultAssay(seurat_object)
+  SeuratObject::DefaultAssay(seurat_object) <- baseline_assay
+  if (baseline_assay == "RNA" && !"data" %in% SeuratObject::Layers(seurat_object[["RNA"]])) {
+    seurat_object <- NormalizeData(seurat_object, assay = "RNA", verbose = FALSE)
+  }
+  if (length(VariableFeatures(seurat_object, assay = baseline_assay)) == 0) {
+    seurat_object <- FindVariableFeatures(seurat_object, assay = baseline_assay, nfeatures = 2000, verbose = FALSE)
+  }
+  seurat_object <- ScaleData(seurat_object, assay = baseline_assay,
+                             features = VariableFeatures(seurat_object, assay = baseline_assay), verbose = FALSE)
+  seurat_object <- RunPCA(seurat_object, npcs = 30, reduction.name = "pca.before", verbose = FALSE)
+  seurat_object <- RunUMAP(seurat_object, reduction = "pca.before", dims = 1:30,
+                           reduction.name = "umap.before", umap.method = "uwot", metric = "cosine")
+
+  plot_umap_save <- function(obj, red, group_by, title, file_stub) {
+    stopifnot(red %in% SeuratObject::Reductions(obj))
+    stopifnot(group_by %in% colnames(obj@meta.data))
+    p <- DimPlot(obj, reduction = red, group.by = group_by, pt.size = 0.3) + ggtitle(title)
+    f <- file.path("figures","CCA", paste0(file_stub, ".png"))
+    ggsave(f, p, width = 7, height = 5, dpi = 400)
+    message("Saved: ", normalizePath(f, winslash = "/"))
+    p
+  }
+  batch_col <- if (batch_key %in% colnames(seurat_object@meta.data)) batch_key else
+               if (".__batch__" %in% colnames(seurat_object@meta.data)) ".__batch__" else stop("No batch column to plot.")
+  p_before_batch <- plot_umap_save(seurat_object, "umap.before", batch_col, "Before (baseline) — batch", "umap_before_batch")
+  p_after_batch  <- plot_umap_save(seurat_object, "umap.cca",    batch_col, "After CCA — batch",        "umap_afterCCA_batch")
+  ggsave(file.path("figures","CCA","compare_batch_before_vs_after_CCA.png"),
+         p_before_batch | p_after_batch, width = 12, height = 5, dpi = 400)
+  # show the two UMAPs
+  print(p_before_batch | p_after_batch)
+
+  saveRDS(seurat_object, file.path("data/CCA", paste0(project_name, "_", input_batch_step, "_postCCA_withBEFORE.RDS")))
+  
+  ## optional: elbow + kBET
+  if ("pca.before" %in% SeuratObject::Reductions(seurat_object)) {
+    p_elbow <- ElbowPlot(seurat_object, reduction = "pca.before",
+                         ndims = min(50, ncol(Embeddings(seurat_object, "pca.before"))))
+    ggsave(file.path("figures","CCA","pca_before_elbow.png"), p_elbow, width = 5, height = 4, dpi = 400)
+    print(p_elbow)
+  }
+  if (requireNamespace("kBET", quietly = TRUE) &&
+      "pca.before" %in% SeuratObject::Reductions(seurat_object) &&
+      "integrated.cca" %in% SeuratObject::Reductions(seurat_object)) {
+
+    run_kbet <- function(obj, reduction, batch_col, ndims = 20, n_max = 5000, k = 40) {
+      emb <- Embeddings(obj, reduction); nd <- min(ndims, ncol(emb))
+      cells <- colnames(obj); if (length(cells) > n_max) cells <- sample(cells, n_max)
+      X <- emb[cells, 1:nd, drop = FALSE]
+      b <- droplevels(as.factor(obj@meta.data[cells, batch_col, drop = TRUE]))
+      k0 <- max(10, min(k, floor(0.1 * length(cells))))
+      kb <- suppressWarnings(kBET::kBET(df = X, batch = b, k0 = k0, do.pca = FALSE, heuristic = FALSE, verbose = FALSE))
+      if (!is.null(kb$summary) && "kBET.observed" %in% names(kb$summary)) 1 - kb$summary$kBET.observed
+      else if (!is.null(kb$results) && !is.null(kb$results$kBET.pvalue)) 1 - mean(kb$results$kBET.pvalue < 0.05, na.rm = TRUE)
+      else NA_real_
+    }
+    kb <- rbind(
+      data.frame(method = "pca.before",      kBET_acceptance = run_kbet(seurat_object, "pca.before",      batch_col, ndims = 20)),
+      data.frame(method = "integrated.cca", kBET_acceptance = run_kbet(seurat_object, "integrated.cca", batch_col, ndims = 20))
+    )
+    p_kbet <- ggplot(kb, aes(x = method, y = kBET_acceptance)) +
+      geom_col() + coord_cartesian(ylim = c(0,1)) +
+      labs(title = "kBET Acceptance (higher = better mixing)", x = NULL, y = "Acceptance") +
+      theme_bw(base_size = 12)
+    ggsave(file.path("figures","CCA","kBET_before_vs_after_CCA.png"),
+           p_kbet, width = 6.5, height = 4, dpi = 400)
+    print(p_kbet)
+  }
+  saveRDS(seurat_object, file.path("data/CCA", paste0(project_name, "_", input_batch_step, "_postCCA_withBEFORE.RDS")))
+}
+
+```
+
+```{r RPCA, error=TRUE}
+#| echo: false
+if (run_rpca) {
+  dir.create("./data", recursive = TRUE, showWarnings = FALSE)
+  dir.create("./data/RPCA", recursive = TRUE, showWarnings = FALSE)
+  dir.create(file.path("figures", "integration","RPCA"), recursive = TRUE, showWarnings = FALSE)
+
+  # tiny helpers
+  has_red   <- function(obj, nm) nm %in% names(obj@reductions)
+
+  ## 0) Keep it like CCA: work on RNA and ensure basic prereqs (use legacy Assay, not Assay5)
+  assay_names <- tryCatch(names(seurat_object@assays), error = function(e) character(0))
+  stopifnot(length(assay_names) > 0)
+  DefaultAssay(seurat_object) <- if ("RNA" %in% assay_names) "RNA" else assay_names[[1]]
+  da <- DefaultAssay(seurat_object)
+
+  # IMPORTANT: use legacy Assay for RPCA to avoid Assay5 edge cases
+  if (inherits(seurat_object[[da]], "Assay5")) {
+    seurat_object[[da]] <- as(seurat_object[[da]], Class = "Assay")
+  }
+
+  if (da == "RNA" && (is.null(seurat_object[["RNA"]]@data) || nrow(seurat_object[["RNA"]]@data) == 0)) {
+    seurat_object <- NormalizeData(seurat_object, assay = "RNA", verbose = FALSE)
+  }
+  if (length(VariableFeatures(seurat_object, assay = da)) == 0) {
+    seurat_object <- FindVariableFeatures(seurat_object, assay = da, nfeatures = 3000, verbose = FALSE)
+  }
+  if (!has_red(seurat_object, "pca")) {
+    seurat_object <- ScaleData(seurat_object, assay = da,
+                               features = VariableFeatures(seurat_object, assay = da),
+                               verbose = FALSE)
+    seurat_object <- RunPCA(seurat_object, npcs = 30, verbose = FALSE)
+  }
+
+  ## 1) Batch key (same as earlier) + drop NA / tiny levels
+  input_target_variables <- as.character(input_target_variables)
+  stopifnot(all(input_target_variables %in% colnames(seurat_object@meta.data)))
+  batch_key <- if (length(input_target_variables) == 1) {
+    input_target_variables[1]
+  } else {
+    seurat_object$.__batch__ <- apply(
+      seurat_object@meta.data[, input_target_variables, drop = FALSE],
+      1, paste, collapse = "_"
+    )
+    ".__batch__"
+  }
+  na_cells <- rownames(seurat_object@meta.data)[is.na(seurat_object@meta.data[[batch_key]])]
+  if (length(na_cells)) {
+    message("RPCA: dropping ", length(na_cells), " cells with NA in '", batch_key, "'.")
+    seurat_object <- subset(seurat_object, cells = setdiff(colnames(seurat_object), na_cells))
+  }
+  tb <- table(seurat_object@meta.data[[batch_key]])
+  if (length(tb) < 2) stop("RPCA needs ≥2 non-empty batches.")
+  if (any(tb < 10)) stop("RPCA: some batch levels have <10 cells. Merge or filter them.")
+
+  ## 2) Try the v5 wrapper first (fast path); else anchors ourselves
+  pcs_avail <- if ("pca" %in% SeuratObject::Reductions(seurat_object)) ncol(Embeddings(seurat_object, "pca")) else 0L
+  dims_use  <- 1:min(30L, pcs_avail)
+
+  tmp <- try(
+    IntegrateLayers(
+      object         = seurat_object,
+      method         = RPCAIntegration,
+      orig.reduction = "pca",
+      new.reduction  = "integrated.rpca",
+      group.by       = batch_key,
+      verbose        = FALSE
+    ),
+    silent = TRUE
+  )
+  use_wrapper <- (!inherits(tmp, "try-error")) && ("integrated.rpca" %in% SeuratObject::Reductions(tmp))
+
+  if (use_wrapper) {
+    seurat_object <- tmp
+
+  } else {
+    message("RPCA wrapper unavailable/failed; falling back to anchors (legacy Assay, ref-based, no k.filter).")
+
+    ## 3) Split by batch; keep legacy Assay & shared features; consistent PCA
+    .prep <- function(x) {
+      DefaultAssay(x) <- da
+      if (inherits(x[[da]], "Assay5")) x[[da]] <- as(x[[da]], Class = "Assay")
+      if (da == "RNA" && (is.null(x[["RNA"]]@data) || nrow(x[["RNA"]]@data) == 0)) {
+        x <- NormalizeData(x, assay = "RNA", verbose = FALSE)
+      }
+      x
+    }
+    obj_list <- lapply(SplitObject(seurat_object, split.by = batch_key), .prep)
+    obj_list <- Filter(function(o) ncol(o) > 0, obj_list)
+
+    # shared genes
+    common_genes <- Reduce(intersect, lapply(obj_list, function(o) rownames(o[[da]])))
+    if (length(common_genes) < 1000) stop("RPCA: too few shared genes across splits (", length(common_genes), ").")
+
+    # pick features only from shared genes (stabilizes RPCA)
+    features_all <- SelectIntegrationFeatures(object.list = obj_list, nfeatures = 3000)
+    features     <- intersect(features_all, common_genes)
+    if (length(features) < 1000) stop("RPCA: shared feature set too small (", length(features), ").")
+
+    # unified PCA per split
+    npcs_target <- as.integer(min(30L, length(features)))
+    obj_list <- lapply(
+      obj_list,
+      function(x) {
+        DefaultAssay(x) <- da
+        VariableFeatures(x) <- features
+        x <- ScaleData(x, features = features, verbose = FALSE)
+        x <- RunPCA(x, features = features, npcs = npcs_target, verbose = FALSE)
+        x
+      }
+    )
+    split_pcs   <- vapply(obj_list, function(o) as.integer(ncol(Embeddings(o, "pca"))), integer(1))
+    npcs_common <- as.integer(min(npcs_target, split_pcs))
+    dims_use    <- seq_len(max(10L, min(30L, npcs_common)))
+
+    # reference = largest split
+    sizes  <- vapply(obj_list, function(o) as.integer(ncol(o)), integer(1))
+    ref_ix <- which.max(sizes)
+
+    # run anchors (no k.filter); try a few knobs if needed
+    anchor_try <- function(dims_vec, kscore) {
+      FindIntegrationAnchors(
+        object.list     = obj_list,
+        reference       = ref_ix,
+        anchor.features = features,
+        reduction       = "rpca",
+        dims            = dims_vec,
+        k.anchor        = 5L,
+        k.filter        = NA,
+        k.score         = as.integer(kscore)
+      )
+    }
+    anchors <- try(anchor_try(dims_use, 10L), silent = TRUE)
+    if (inherits(anchors, "try-error")) anchors <- try(anchor_try(dims_use[1:min(20L, length(dims_use))], 5L),  silent = TRUE)
+    if (inherits(anchors, "try-error")) anchors <- try(anchor_try(dims_use[1:min(15L, length(dims_use))], 3L),  silent = TRUE)
+    if (inherits(anchors, "try-error")) anchors <- try(anchor_try(dims_use[1:min(10L, length(dims_use))], 1L),  silent = TRUE)
+    if (inherits(anchors, "try-error")) stop("RPCA anchors failed even after retries.")
+
+    # integrate to reduction
+    if ("IntegrateEmbeddings" %in% getNamespaceExports("Seurat") &&
+        "pca" %in% SeuratObject::Reductions(seurat_object)) {
+      seurat_object <- Seurat::IntegrateEmbeddings(
+        anchorset          = anchors,
+        reductions         = seurat_object[["pca"]],
+        new.reduction.name = "integrated.rpca",
+        dims               = dims_use
+      )
+    } else {
+      integrated <- IntegrateData(anchorset = anchors, dims = dims_use)
+      DefaultAssay(integrated) <- "integrated"
+      feats_int <- rownames(GetAssayData(integrated, assay = "integrated", layer = "data"))
+      integrated <- ScaleData(integrated, features = feats_int, verbose = FALSE)
+      integrated <- RunPCA(integrated, npcs = length(dims_use), reduction.name = "integrated.rpca", verbose = FALSE)
+      seurat_object <- integrated
+    }
+  }
+
+  # ensure AFTER-RPCA UMAP
+  if ("integrated.rpca" %in% SeuratObject::Reductions(seurat_object) &&
+      !"umap.rpca" %in% SeuratObject::Reductions(seurat_object)) {
+    dims_rpca <- 1:min(30L, ncol(Embeddings(seurat_object, "integrated.rpca")))
+    seurat_object <- RunUMAP(
+      seurat_object,
+      reduction      = "integrated.rpca",
+      dims           = dims_rpca,
+      reduction.name = "umap.rpca",
+      reduction.key  = "umapRPCA_",
+      umap.method    = "uwot",
+      metric         = "cosine"
+    )
+  }
+
+  ## BEFORE/AFTER plots (same look)
+  suppressPackageStartupMessages({ if (!"patchwork" %in% .packages()) library(patchwork) })
+  if (!"umap.before" %in% SeuratObject::Reductions(seurat_object)) {
+    baseline_assay <- if ("SCT" %in% SeuratObject::Assays(seurat_object)) "SCT" else
+      if ("RNA" %in% SeuratObject::Assays(seurat_object)) "RNA" else
+        SeuratObject::DefaultAssay(seurat_object)
+    SeuratObject::DefaultAssay(seurat_object) <- baseline_assay
+    if (baseline_assay == "RNA" && !"data" %in% SeuratObject::Layers(seurat_object[["RNA"]])) {
+      seurat_object <- NormalizeData(seurat_object, assay = "RNA", verbose = FALSE)
+    }
+    if (length(VariableFeatures(seurat_object, assay = baseline_assay)) == 0) {
+      seurat_object <- FindVariableFeatures(seurat_object, assay = baseline_assay, nfeatures = 2000, verbose = FALSE)
+    }
+    seurat_object <- ScaleData(seurat_object, assay = baseline_assay,
+                               features = VariableFeatures(seurat_object, assay = baseline_assay),
+                               verbose = FALSE)
+    seurat_object <- RunPCA(seurat_object, npcs = 30,
+                            reduction.name = "pca.before", reduction.key = "pcaBefore_",
+                            verbose = FALSE)
+    seurat_object <- RunUMAP(seurat_object, reduction = "pca.before", dims = 1:30,
+                             reduction.name = "umap.before", reduction.key = "umapBefore_",
+                             umap.method = "uwot", metric = "cosine")
+  }
+  plot_umap_save <- function(obj, red, group_by, title, file_stub) {
+    stopifnot(red %in% SeuratObject::Reductions(obj))
+    stopifnot(group_by %in% colnames(obj@meta.data))
+    p <- DimPlot(obj, reduction = red, group.by = group_by, pt.size = 0.3) + ggtitle(title)
+    outdir <- file.path("figures","RPCA"); if (!dir.exists(outdir)) dir.create(outdir, recursive = TRUE)
+    f <- file.path(outdir, paste0(file_stub, ".png"))
+    ggsave(f, p, width = 7, height = 5, dpi = 400)
+    message("Saved: ", normalizePath(f, winslash = "/"))
+    p
+  }
+  batch_col <- if (batch_key %in% colnames(seurat_object@meta.data)) batch_key else
+               if (".__batch__" %in% colnames(seurat_object@meta.data)) ".__batch__" else stop("No batch column to plot.")
+
+  p_before_batch <- plot_umap_save(seurat_object, "umap.before", batch_col, "Before (baseline) — batch", "rpca_before_batch")
+  p_after_batch  <- plot_umap_save(seurat_object, "umap.rpca",    batch_col, "After RPCA — batch",       "rpca_after_batch")
+  ggsave(file.path("figures","RPCA","compare_batch_before_vs_after_RPCA.png"),
+         p_before_batch | p_after_batch, width = 12, height = 5, dpi = 400)
+  print (p_before_batch | p_after_batch)
+
+  # checkpoint
+  saveRDS(seurat_object, file.path("data/RPCA", paste0(project_name, "_", input_batch_step, "_postRPCA_withBEFORE.RDS")))
+
+  ## optional: elbow + kBET
+  if ("pca.before" %in% SeuratObject::Reductions(seurat_object)) {
+    p_elbow <- ElbowPlot(seurat_object, reduction = "pca.before",
+                         ndims = min(50, ncol(Embeddings(seurat_object, "pca.before"))))
+    ggsave(file.path("figures","RPCA","pca_before_elbow.png"), p_elbow, width = 5, height = 4, dpi = 400)
+    print (p_elbow)
+  }
+  if (requireNamespace("kBET", quietly = TRUE) &&
+      "pca.before" %in% SeuratObject::Reductions(seurat_object) &&
+      "integrated.rpca" %in% SeuratObject::Reductions(seurat_object)) {
+
+    run_kbet <- function(obj, reduction, batch_col, ndims = 20, n_max = 5000, k = 40) {
+      emb <- Embeddings(obj, reduction); nd <- min(ndims, ncol(emb))
+      cells <- colnames(obj); if (length(cells) > n_max) cells <- sample(cells, n_max)
+      X <- emb[cells, 1:nd, drop = FALSE]
+      b <- droplevels(as.factor(obj@meta.data[cells, batch_col, drop = TRUE]))
+      k0 <- max(10, min(k, floor(0.1 * length(cells))))
+      kb <- suppressWarnings(kBET::kBET(df = X, batch = b, k0 = k0, do.pca = FALSE, heuristic = FALSE, verbose = FALSE))
+      if (!is.null(kb$summary) && "kBET.observed" %in% names(kb$summary)) 1 - kb$summary$kBET.observed
+      else if (!is.null(kb$results) && !is.null(kb$results$kBET.pvalue)) 1 - mean(kb$results$kBET.pvalue < 0.05, na.rm = TRUE)
+      else NA_real_
+    }
+    kb <- rbind(
+      data.frame(method = "pca.before",      kBET_acceptance = run_kbet(seurat_object, "pca.before",      batch_col, ndims = 20)),
+      data.frame(method = "integrated.rpca", kBET_acceptance = run_kbet(seurat_object, "integrated.rpca", batch_col, ndims = 20))
+    )
+    p_kbet <- ggplot(kb, aes(x = method, y = kBET_acceptance)) +
+      geom_col() + coord_cartesian(ylim = c(0,1)) +
+      labs(title = "kBET Acceptance (higher = better mixing)", x = NULL, y = "Acceptance") +
+      theme_bw(base_size = 12)
+    ggsave(file.path("figures","RPCA","kBET_before_vs_after_RPCA.png"),
+           p_kbet, width = 6.5, height = 4, dpi = 400)
+    print (p_kbet)
+  }
+  # checkpoint
+  saveRDS(seurat_object, file.path("data/RPCA", paste0(project_name, "_", input_batch_step, "_postRPCA_withBEFORE.RDS")))
+}
+
+```
+
+```{r Harmony, error=TRUE}
+#| echo: false
+if (run_harmony) {
+  dir.create("./data", recursive = TRUE, showWarnings = FALSE)
+  dir.create("./data/Harmony", recursive = TRUE, showWarnings = FALSE)
+  dir.create(file.path("figures", "integration","Harmony"), recursive = TRUE, showWarnings = FALSE)
+
+  # minimal prereqs (mirror CCA)
+  assay_names <- tryCatch(names(seurat_object@assays), error = function(e) character(0))
+  stopifnot(length(assay_names) > 0)
+
+  SeuratObject::DefaultAssay(seurat_object) <-
+    if ("SCT" %in% assay_names) "SCT" else if ("RNA" %in% assay_names) "RNA" else assay_names[[1]]
+  da <- SeuratObject::DefaultAssay(seurat_object)
+
+  if (!(inherits(seurat_object[[da]], "Assay5") || inherits(seurat_object[[da]], "SCTAssay"))) {
+    if ("RNA" %in% assay_names) {
+      seurat_object[["RNA"]] <- as(seurat_object[["RNA"]], Class = "Assay5")
+      SeuratObject::DefaultAssay(seurat_object) <- "RNA"; da <- "RNA"
+    } else {
+      seurat_object <- SCTransform(seurat_object, assay = da, new.assay.name = "SCT", verbose = FALSE)
+      SeuratObject::DefaultAssay(seurat_object) <- "SCT"; da <- "SCT"
+    }
+  }
+  if (da == "RNA" && !has_layer(seurat_object, "RNA", "data")) {
+    seurat_object <- NormalizeData(seurat_object, assay = "RNA", verbose = FALSE)
+  }
+  if (length(VariableFeatures(seurat_object, assay = da)) == 0) {
+    seurat_object <- FindVariableFeatures(seurat_object, assay = da, nfeatures = 2000, verbose = FALSE)
+  }
+  if (!has_red(seurat_object, "pca")) {
+    seurat_object <- ScaleData(
+      seurat_object, assay = da,
+      features = VariableFeatures(seurat_object, assay = da),
+      verbose  = FALSE
+    )
+    seurat_object <- RunPCA(seurat_object, npcs = 30, verbose = FALSE)
+  }
+
+  # ---- grouping column (NA/blank-safe factor) ----
+  input_target_variables <- as.character(input_target_variables)
+  stopifnot(all(input_target_variables %in% colnames(seurat_object@meta.data)))
+
+  harm_col <- ".__harm_group__"
+  if (length(input_target_variables) == 1) {
+    v <- as.character(seurat_object@meta.data[[input_target_variables[1]]])
+  } else {
+    v <- apply(seurat_object@meta.data[, input_target_variables, drop = FALSE], 1, function(r) paste(r, collapse = "_"))
+  }
+  v <- trimws(v); v[!nzchar(v) | is.na(v)] <- "__NA__"
+  seurat_object@meta.data[[harm_col]] <- factor(v)
+
+  # ---- Run Harmony on existing PCA ----
+  if (!requireNamespace("harmony", quietly = TRUE))
+    stop("Package 'harmony' is required for RunHarmony(). Install it first.")
+
+  pcs_avail <- if ("pca" %in% SeuratObject::Reductions(seurat_object)) ncol(Embeddings(seurat_object, "pca")) else 0
+  dims_use  <- 1:min(20, pcs_avail)
+
+  suppressWarnings({
+    seurat_object <- RunHarmony(
+      object         = seurat_object,
+      group.by.vars  = harm_col,
+      reduction      = "pca",
+      dims.use       = dims_use,
+      reduction.save = "harmony",
+      verbose        = FALSE
+    )
+  })
+
+  # ensure an AFTER-Harmony UMAP exists
+  if ("harmony" %in% SeuratObject::Reductions(seurat_object) &&
+      !"umap.harmony" %in% SeuratObject::Reductions(seurat_object)) {
+    dims_harm <- 1:min(20, ncol(Embeddings(seurat_object, "harmony")))
+    suppressWarnings({
+      seurat_object <- RunUMAP(
+        seurat_object,
+        reduction      = "harmony",
+        dims           = dims_harm,
+        reduction.name = "umap.harmony",
+        reduction.key  = "umapHARM_",
+        umap.method    = "uwot",
+        metric         = "cosine",
+        n.neighbors    = 25,
+        n.epochs       = 150
+      )
+    })
+  }
+
+  # checkpoint
+  saveRDS(seurat_object, file.path("data/Harmony", paste0(project_name, "_", input_batch_step, "_postHARMONY.RDS")))
+
+  ## BEFORE/AFTER plots
+  dir.create(file.path("figures","Harmony"), recursive = TRUE, showWarnings = FALSE)
+  if (!"umap.before" %in% SeuratObject::Reductions(seurat_object)) {
+    baseline_assay <- if ("SCT" %in% SeuratObject::Assays(seurat_object)) "SCT" else
+      if ("RNA" %in% SeuratObject::Assays(seurat_object)) "RNA" else
+        SeuratObject::DefaultAssay(seurat_object)
+    SeuratObject::DefaultAssay(seurat_object) <- baseline_assay
+    if (baseline_assay == "RNA" && !"data" %in% SeuratObject::Layers(seurat_object[["RNA"]])) {
+      seurat_object <- NormalizeData(seurat_object, assay = "RNA", verbose = FALSE)
+    }
+    if (length(VariableFeatures(seurat_object, assay = baseline_assay)) == 0) {
+      seurat_object <- FindVariableFeatures(seurat_object, assay = baseline_assay, nfeatures = 2000, verbose = FALSE)
+    }
+    seurat_object <- ScaleData(seurat_object, assay = baseline_assay,
+                               features = VariableFeatures(seurat_object, assay = baseline_assay),
+                               verbose = FALSE)
+    seurat_object <- RunPCA(seurat_object, npcs = 30,
+                            reduction.name = "pca.before", reduction.key = "pcaBefore_",
+                            verbose = FALSE)
+    seurat_object <- RunUMAP(seurat_object, reduction = "pca.before", dims = 1:30,
+                             reduction.name = "umap.before", reduction.key = "umapBefore_",
+                             umap.method = "uwot", metric = "cosine")
+  }
+
+  plot_umap_save <- function(obj, red, group_by, title, file_stub) {
+    stopifnot(red %in% SeuratObject::Reductions(obj))
+    stopifnot(group_by %in% colnames(obj@meta.data))
+    p <- DimPlot(obj, reduction = red, group.by = group_by, pt.size = 0.3) + ggtitle(title)
+    outdir <- file.path("figures","Harmony"); if (!dir.exists(outdir)) dir.create(outdir, recursive = TRUE)
+    f <- file.path(outdir, paste0(file_stub, ".png"))
+    ggsave(f, p, width = 7, height = 5, dpi = 400)
+    message("Saved: ", normalizePath(f, winslash = "/"))
+    p
+  }
+  batch_col <- if (batch_key %in% colnames(seurat_object@meta.data)) batch_key else
+               if (".__batch__" %in% colnames(seurat_object@meta.data)) ".__batch__" else stop("No batch column to plot.")
+  p_before_batch <- plot_umap_save(seurat_object, "umap.before",  batch_col, "Before (baseline) — batch", "umap_before_batch")
+  p_after_batch  <- plot_umap_save(seurat_object, "umap.harmony", batch_col, "After Harmony — batch",     "umap_afterHARMONY_batch")
+  ggsave(file.path("figures","Harmony","compare_batch_before_vs_after_HARMONY.png"),
+         p_before_batch | p_after_batch, width = 12, height = 5, dpi = 400)
+  print(p_before_batch | p_after_batch)
+
+  # elbow + kBET (optional)
+  if ("pca.before" %in% SeuratObject::Reductions(seurat_object)) {
+    p_elbow <- ElbowPlot(seurat_object, reduction = "pca.before",
+                         ndims = min(50, ncol(Embeddings(seurat_object, "pca.before"))))
+    ggsave(file.path("figures","Harmony","pca_before_elbow.png"), p_elbow, width = 5, height = 4, dpi = 400)
+    print (p_elbow)
+  }
+  if (requireNamespace("kBET", quietly = TRUE) &&
+      "pca.before" %in% SeuratObject::Reductions(seurat_object) &&
+      "harmony"    %in% SeuratObject::Reductions(seurat_object)) {
+
+    run_kbet <- function(obj, reduction, batch_col, ndims = 20, n_max = 5000, k = 40) {
+      emb <- Embeddings(obj, reduction); nd <- min(ndims, ncol(emb))
+      cells <- colnames(obj); if (length(cells) > n_max) cells <- sample(cells, n_max)
+      X <- emb[cells, 1:nd, drop = FALSE]
+      b <- droplevels(as.factor(obj@meta.data[cells, batch_col, drop = TRUE]))
+      k0 <- max(10, min(k, floor(0.1 * length(cells))))
+      kb <- suppressWarnings(kBET::kBET(df = X, batch = b, k0 = k0, do.pca = FALSE, heuristic = FALSE, verbose = FALSE))
+      if (!is.null(kb$summary) && "kBET.observed" %in% names(kb$summary)) 1 - kb$summary$kBET.observed
+      else if (!is.null(kb$results) && !is.null(kb$results$kBET.pvalue)) 1 - mean(kb$results$kBET.pvalue < 0.05, na.rm = TRUE)
+      else NA_real_
+    }
+    kb <- rbind(
+      data.frame(method = "pca.before", kBET_acceptance = run_kbet(seurat_object, "pca.before", batch_col, ndims = 20)),
+      data.frame(method = "harmony",    kBET_acceptance = run_kbet(seurat_object, "harmony",    batch_col, ndims = 20))
+    )
+    p_kbet <- ggplot(kb, aes(x = method, y = kBET_acceptance)) +
+      geom_col() + coord_cartesian(ylim = c(0,1)) +
+      labs(title = "kBET Acceptance (higher = better mixing)", x = NULL, y = "Acceptance") +
+      theme_bw(base_size = 12)
+    ggsave(file.path("figures","Harmony","kBET_before_vs_after_HARMONY.png"),
+           p_kbet, width = 6.5, height = 4, dpi = 400)
+    print (p_kbet)
+  }
+}
+```
+
+```{r MNN, error=TRUE}
+#| echo: false
+if (run_mnn) {
+  dir.create("./data", recursive = TRUE, showWarnings = FALSE)
+  dir.create("./data/MNN", recursive = TRUE, showWarnings = FALSE)
+  dir.create(file.path("figures", "integration","MNN"), recursive = TRUE, showWarnings = FALSE)
+
+  # minimal prereqs (mirror CCA/Harmony)
+  assay_names <- tryCatch(names(seurat_object@assays), error = function(e) character(0))
+  stopifnot(length(assay_names) > 0)
+
+  SeuratObject::DefaultAssay(seurat_object) <-
+    if ("SCT" %in% assay_names) "SCT" else if ("RNA" %in% assay_names) "RNA" else assay_names[[1]]
+  da <- SeuratObject::DefaultAssay(seurat_object)
+
+  if (!(inherits(seurat_object[[da]], "Assay5") || inherits(seurat_object[[da]], "SCTAssay"))) {
+    if ("RNA" %in% assay_names) {
+      seurat_object[["RNA"]] <- as(seurat_object[["RNA"]], Class = "Assay5")
+      SeuratObject::DefaultAssay(seurat_object) <- "RNA"; da <- "RNA"
+    } else {
+      seurat_object <- SCTransform(seurat_object, assay = da, new.assay.name = "SCT", verbose = FALSE)
+      SeuratObject::DefaultAssay(seurat_object) <- "SCT"; da <- "SCT"
+    }
+  }
+  if (da == "RNA" && !has_layer(seurat_object, "RNA", "data")) {
+    seurat_object <- NormalizeData(seurat_object, assay = "RNA", verbose = FALSE)
+  }
+  if (length(VariableFeatures(seurat_object, assay = da)) == 0) {
+    seurat_object <- FindVariableFeatures(seurat_object, assay = da, nfeatures = 2000, verbose = FALSE)
+  }
+  if (!has_red(seurat_object, "pca")) {
+    seurat_object <- ScaleData(
+      seurat_object, assay = da,
+      features = VariableFeatures(seurat_object, assay = da),
+      verbose  = FALSE
+    )
+    seurat_object <- RunPCA(seurat_object, npcs = 30, reduction.name = "pca", verbose = FALSE)
+  }
+
+  # grouping column (NA/blank-safe factor)
+  input_target_variables <- as.character(input_target_variables)
+  stopifnot(all(input_target_variables %in% colnames(seurat_object@meta.data)))
+
+  mnn_col <- ".__mnn_group__"
+  if (length(input_target_variables) == 1) {
+    v <- as.character(seurat_object@meta.data[[input_target_variables[1]]])
+  } else {
+    v <- apply(seurat_object@meta.data[, input_target_variables, drop = FALSE], 1, function(r) paste(r, collapse = "_"))
+  }
+  v <- trimws(v); v[!nzchar(v) | is.na(v)] <- "__NA__"
+  seurat_object@meta.data[[mnn_col]] <- factor(v)
+
+  # try the Seurat v5 wrapper first
+  tmp <- try(
+    IntegrateLayers(
+      object         = seurat_object,
+      method         = FastMNNIntegration,
+      orig.reduction = "pca",
+      new.reduction  = "integrated.mnn",
+      group.by       = mnn_col,
+      verbose        = FALSE
+    ),
+    silent = TRUE
+  )
+  use_wrapper <- (!inherits(tmp, "try-error")) && ("integrated.mnn" %in% SeuratObject::Reductions(tmp))
+
+  # fallback: RunFastMNN with identical gene rows per batch
+  if (!use_wrapper) {
+    if (inherits(tmp, "try-error") && !grepl("unused argument \\(group.by", as.character(tmp))) {
+      message("FastMNN wrapper error (passing to fallback): ", as.character(tmp))
+    } else {
+      message("FastMNN wrapper unavailable/failed; falling back to RunFastMNN().")
+    }
+
+    .prep <- function(x) {
+      DefaultAssay(x) <- da
+      if (da == "RNA" && !has_layer(x, "RNA", "data")) x <- NormalizeData(x, assay = "RNA", verbose = FALSE)
+      if (length(VariableFeatures(x, assay = da)) == 0) x <- FindVariableFeatures(x, assay = da, nfeatures = 2000, verbose = FALSE)
+      x
+    }
+    obj_list <- lapply(SplitObject(seurat_object, split.by = mnn_col), .prep)
+
+    # identical feature rows across splits (fastMNN hard requirement)
+    gene_per_split <- lapply(
+      obj_list,
+      function(o) {
+        if (has_layer(o, da, "counts")) {
+          rownames(GetAssayData(o, assay = da, layer = "counts"))
+        } else if (has_layer(o, da, "data")) {
+          rownames(GetAssayData(o, assay = da, layer = "data"))
+        } else stop("Assay '", da, "' has neither 'counts' nor 'data' layer.")
+      }
+    )
+    genes_common <- Reduce(intersect, gene_per_split)
+    if (length(genes_common) < 200L) stop("FastMNN: too few common genes across batches (", length(genes_common), ").")
+    obj_list <- lapply(obj_list, function(o) subset(o, features = genes_common))
+
+    features <- SelectIntegrationFeatures(object.list = obj_list, nfeatures = min(2000L, length(genes_common)))
+
+    if ("RunFastMNN" %in% getNamespaceExports("Seurat")) {
+      mnn_fun <- Seurat::RunFastMNN
+    } else if (requireNamespace("SeuratWrappers", quietly = TRUE) &&
+               "RunFastMNN" %in% getNamespaceExports("SeuratWrappers")) {
+      mnn_fun <- SeuratWrappers::RunFastMNN
+    } else stop("RunFastMNN not found. Install Seurat (>=5) or SeuratWrappers.")
+
+    seurat_object <- mnn_fun(
+      object.list    = obj_list,
+      features       = features,
+      reduction.name = "integrated.mnn",
+      verbose        = FALSE
+    )
+  } else {
+    seurat_object <- tmp
+  }
+
+  # ensure AFTER-MNN UMAP
+  mnn_red <- if ("integrated.mnn" %in% SeuratObject::Reductions(seurat_object)) "integrated.mnn" else
+             if ("mnn"            %in% SeuratObject::Reductions(seurat_object)) "mnn" else
+               stop("FastMNN produced no reduction named 'integrated.mnn' or 'mnn'.")
+
+  if (!("umap.mnn" %in% SeuratObject::Reductions(seurat_object))) {
+    dims_mnn <- 1:min(30, ncol(Embeddings(seurat_object, mnn_red)))
+    seurat_object <- RunUMAP(
+      seurat_object,
+      reduction      = mnn_red,
+      dims           = dims_mnn,
+      reduction.name = "umap.mnn",
+      reduction.key  = "umapMNN_",
+      umap.method    = "uwot",
+      metric         = "cosine"
+    )
+  }
+
+  # checkpoint
+  saveRDS(seurat_object, file.path("data/MNN", paste0(project_name, "_", input_batch_step, "_postMNN.RDS")))
+
+  ## BEFORE/AFTER plots
+  if (!"umap.before" %in% SeuratObject::Reductions(seurat_object)) {
+    baseline_assay <- if ("SCT" %in% SeuratObject::Assays(seurat_object)) "SCT" else
+      if ("RNA" %in% SeuratObject::Assays(seurat_object)) "RNA" else
+        SeuratObject::DefaultAssay(seurat_object)
+    SeuratObject::DefaultAssay(seurat_object) <- baseline_assay
+    if (baseline_assay == "RNA" && !"data" %in% SeuratObject::Layers(seurat_object[["RNA"]])) {
+      seurat_object <- NormalizeData(seurat_object, assay = "RNA", verbose = FALSE)
+    }
+    if (length(VariableFeatures(seurat_object, assay = baseline_assay)) == 0) {
+      seurat_object <- FindVariableFeatures(seurat_object, assay = baseline_assay, nfeatures = 2000, verbose = FALSE)
+    }
+    seurat_object <- ScaleData(seurat_object, assay = baseline_assay,
+                               features = VariableFeatures(seurat_object, assay = baseline_assay),
+                               verbose = FALSE)
+    seurat_object <- RunPCA(seurat_object, npcs = 30,
+                            reduction.name = "pca.before", reduction.key = "pcaBefore_",
+                            verbose = FALSE)
+    seurat_object <- RunUMAP(seurat_object, reduction = "pca.before", dims = 1:30,
+                             reduction.name = "umap.before", reduction.key = "umapBefore_",
+                             umap.method = "uwot", metric = "cosine")
+  }
+
+  plot_umap_save <- function(obj, red, group_by, title, file_stub) {
+    stopifnot(red %in% SeuratObject::Reductions(obj))
+    stopifnot(group_by %in% colnames(obj@meta.data))
+    p <- DimPlot(obj, reduction = red, group.by = group_by, pt.size = 0.3) + ggtitle(title)
+    outdir <- file.path("figures","MNN"); if (!dir.exists(outdir)) dir.create(outdir, recursive = TRUE)
+    f <- file.path(outdir, paste0(file_stub, ".png"))
+    ggsave(f, p, width = 7, height = 5, dpi = 400)
+    message("Saved: ", normalizePath(f, winslash = "/"))
+    p
+  }
+  batch_col <- if (batch_key %in% colnames(seurat_object@meta.data)) batch_key else
+               if (".__batch__" %in% colnames(seurat_object@meta.data)) ".__batch__" else stop("No batch column to plot.")
+  p_before_batch <- plot_umap_save(seurat_object, "umap.before", batch_col, "Before (baseline) — batch", "umap_before_batch")
+  p_after_batch  <- plot_umap_save(seurat_object, "umap.mnn",    batch_col, "After FastMNN — batch",     "umap_afterMNN_batch")
+  ggsave(file.path("figures","MNN","compare_batch_before_vs_after_MNN.png"),
+         p_before_batch | p_after_batch, width = 12, height = 5, dpi = 400)
+  print (p_before_batch | p_after_batch)
+
+  # optional: kBET
+  if (requireNamespace("kBET", quietly = TRUE)) {
+    mnn_red <- if ("integrated.mnn" %in% SeuratObject::Reductions(seurat_object)) "integrated.mnn" else
+               if ("mnn"            %in% SeuratObject::Reductions(seurat_object)) "mnn" else NA_character_
+    if (!is.na(mnn_red) && "pca.before" %in% SeuratObject::Reductions(seurat_object)) {
+
+      run_kbet <- function(obj, reduction, batch_col, ndims = 20, n_max = 5000, k = 40) {
+        emb <- Embeddings(obj, reduction)
+        nd  <- min(ndims, ncol(emb))
+        cells <- colnames(obj); if (length(cells) > n_max) cells <- sample(cells, n_max)
+        X <- emb[cells, 1:nd, drop = FALSE]
+        b <- droplevels(factor(obj@meta.data[cells, batch_col, drop = TRUE]))
+        k0 <- max(10, min(k, floor(0.1 * length(cells))))
+        kb <- try(suppressWarnings(
+          kBET::kBET(df = X, batch = b, k0 = k0, do.pca = FALSE, heuristic = FALSE, verbose = FALSE)
+        ), silent = TRUE)
+        if (inherits(kb, "try-error")) return(NA_real_)
+        if (!is.null(kb$summary) && "kBET.observed" %in% names(kb$summary)) 1 - kb$summary$kBET.observed
+        else if (!is.null(kb$results) && !is.null(kb$results$kBET.pvalue)) 1 - mean(kb$results$kBET.pvalue < 0.05, na.rm = TRUE)
+        else NA_real_
+      }
+
+      kb <- rbind(
+        data.frame(method = "pca.before", kBET_acceptance = run_kbet(seurat_object, "pca.before", batch_col, ndims = 20)),
+        data.frame(method = mnn_red,      kBET_acceptance = run_kbet(seurat_object, mnn_red,      batch_col, ndims = 20))
+      )
+      p_kbet <- ggplot(kb, aes(x = method, y = kBET_acceptance)) +
+        geom_col() + coord_cartesian(ylim = c(0,1)) +
+        labs(title = "kBET Acceptance (higher = better mixing)", x = NULL, y = "Acceptance") +
+        theme_bw(base_size = 12)
+      ggsave(file.path("figures","MNN","kBET_before_vs_after_MNN.png"),
+             p_kbet, width = 6.5, height = 4, dpi = 400)
+      print (p_kbet)
+    } else {
+      message("kBET skipped: need both 'pca.before' and FastMNN reduction ('integrated.mnn' or 'mnn').")
+    }
+  } else {
+    message("Package 'kBET' not installed; skipping kBET plot for FastMNN.")
+  }
+
+  message("FastMNN block complete.")
+}
+```
+
+```{r BatchEval}
+#| echo: false
+# ---- CONSOLIDATE: build one Seurat with all reductions ----
+if (identical(input_integration_method, "all")) {
+  dir.create("data/evaluation", recursive = TRUE, showWarnings = FALSE)
+  # ---- helper (once, near top of the doc) ----
+  if (!exists("attach_reduction", mode = "function")) {
+    attach_reduction <- function(dst, src, red_from, red_to = red_from) {
+      if (!red_from %in% SeuratObject::Reductions(src)) return(dst)
+      common <- intersect(colnames(dst), colnames(src))
+      if (!length(common)) stop("No shared cells to attach reduction: ", red_from)
+      if (!identical(colnames(dst), common)) dst <- subset(dst, cells = common)
+      red <- src[[red_from]]
+      red@cell.embeddings <- red@cell.embeddings[common, , drop = FALSE]
+      dst[[red_to]] <- red
+      dst
+    }
+  }
+
+  # start from the *original* cells (or from any one of your outputs)
+  master <- seurat_object_eval
+
+  # discover files produced by the earlier blocks
+  f_cca <- list.files("data/CCA",     pattern = "\\.RDS$", full.names = TRUE)
+  f_rp  <- list.files("data/RPCA",    pattern = "\\.RDS$", full.names = TRUE)
+  f_har <- list.files("data/Harmony", pattern = "\\.RDS$", full.names = TRUE)
+  f_mnn <- list.files("data/MNN",     pattern = "\\.RDS$", full.names = TRUE)
+
+  obj_cca <- if (length(f_cca)) try(readRDS(f_cca[[1]]), silent = TRUE) else NULL
+  obj_rp  <- if (length(f_rp )) try(readRDS(f_rp [[1]]), silent = TRUE) else NULL
+  obj_har <- if (length(f_har)) try(readRDS(f_har[[1]]), silent = TRUE) else NULL
+  obj_mnn <- if (length(f_mnn)) try(readRDS(f_mnn[[1]]), silent = TRUE) else NULL
+
+  # intersect to a common cell set across everything that exists
+  cell_lists <- list(colnames(master))
+  add_cells <- function(x) if (!is.null(x) && !inherits(x, "try-error")) cell_lists <<- c(cell_lists, list(colnames(x)))
+  add_cells(obj_cca); add_cells(obj_rp); add_cells(obj_har); add_cells(obj_mnn)
+  common_cells <- Reduce(intersect, cell_lists)
+  if (length(common_cells) < 10) warning("Very few common cells across methods; check filtering/NA batches.")
+  master <- subset(master, cells = common_cells)
+  if (!is.null(obj_cca) && !inherits(obj_cca, "try-error")) obj_cca <- subset(obj_cca, cells = common_cells)
+  if (!is.null(obj_rp ) && !inherits(obj_rp , "try-error")) obj_rp  <- subset(obj_rp , cells = common_cells)
+  if (!is.null(obj_har) && !inherits(obj_har, "try-error")) obj_har <- subset(obj_har, cells = common_cells)
+  if (!is.null(obj_mnn) && !inherits(obj_mnn, "try-error")) obj_mnn <- subset(obj_mnn, cells = common_cells)
+
+  # attach each integration reduction (and their UMAPs if present)
+  if (!is.null(obj_cca) && !inherits(obj_cca, "try-error")) {
+    master <- attach_reduction(master, obj_cca, "integrated.cca")
+    if ("umap.cca" %in% SeuratObject::Reductions(obj_cca))
+      master <- attach_reduction(master, obj_cca, "umap.cca")
+  }
+  if (!is.null(obj_rp) && !inherits(obj_rp, "try-error")) {
+    master <- attach_reduction(master, obj_rp, "integrated.rpca")
+    if ("umap.rpca" %in% SeuratObject::Reductions(obj_rp))
+      master <- attach_reduction(master, obj_rp, "umap.rpca")
+  }
+  if (!is.null(obj_har) && !inherits(obj_har, "try-error")) {
+    master <- attach_reduction(master, obj_har, "harmony")
+    if ("umap.harmony" %in% SeuratObject::Reductions(obj_har))
+      master <- attach_reduction(master, obj_har, "umap.harmony")
+  }
+  if (!is.null(obj_mnn) && !inherits(obj_mnn, "try-error")) {
+    red_mnn <- if ("integrated.mnn" %in% SeuratObject::Reductions(obj_mnn)) "integrated.mnn" else
+               if ("mnn" %in% SeuratObject::Reductions(obj_mnn)) "mnn" else NA_character_
+    if (!is.na(red_mnn)) master <- attach_reduction(master, obj_mnn, red_mnn, "integrated.mnn")
+    if ("umap.mnn" %in% SeuratObject::Reductions(obj_mnn))
+      master <- attach_reduction(master, obj_mnn, "umap.mnn")
+  }
+
+  # optional: make sure a plain PCA exists too (for convenience)
+  if (!"pca" %in% SeuratObject::Reductions(master)) {
+    da <- SeuratObject::DefaultAssay(master)
+    if (length(VariableFeatures(master, assay = da)) == 0)
+      master <- FindVariableFeatures(master, assay = da, nfeatures = 2000, verbose = FALSE)
+    master <- ScaleData(master, assay = da,
+                        features = VariableFeatures(master, assay = da), verbose = FALSE)
+    master <- RunPCA(master, npcs = 30, verbose = FALSE)
+  }
+
+  saveRDS(master, file.path("data/evaluation", paste0(project_name, "_with_all_integrations.RDS")))
+  message("Saved master Seurat with all reductions at: ",
+          normalizePath(file.path("data/evaluation", paste0(project_name, "_with_all_integrations.RDS")), winslash = "/"))
+  
+  seurat_object <- master
+
+  # ---- evaluation helpers (no extra packages) ----
+  .get_neighbor_index_list <- function(G) {
+    mat <- as(G, "dgCMatrix")
+    indptr <- mat@p; indices <- mat@i
+    n <- nrow(mat)
+    out <- vector("list", n)
+    for (i in seq_len(n)) {
+      col_start <- indptr[i] + 1L
+      col_end   <- indptr[i + 1L]
+      if (col_end >= col_start) {
+        idx <- indices[col_start:col_end] + 1L
+        out[[i]] <- idx[idx != i]
+      } else out[[i]] <- integer(0)
+    }
+    out
+  }
+  .entropy01 <- function(x) {
+    if (!length(x)) return(NA_real_)
+    p <- table(x) / length(x)
+    H <- -sum(p * log(p))
+    Hmax <- log(length(p))
+    if (Hmax == 0) return(0)
+    H / Hmax
+  }
+  .knn_batch_entropy <- function(neigh, batch_vec) {
+    vapply(seq_along(neigh), function(i) .entropy01(batch_vec[neigh[[i]]]), numeric(1))
+  }
+  .knn_label_agree <- function(neigh, label_vec) {
+    vapply(seq_along(neigh), function(i) {
+      nb <- neigh[[i]]; if (!length(nb)) return(NA_real_)
+      mean(label_vec[nb] == label_vec[i])
+    }, numeric(1))
+  }
+  .pc_regression_inverse <- function(emb, batch) {
+    batch <- factor(batch)
+    if (nlevels(batch) < 2) return(NA_real_)
+    r2 <- apply(emb, 2, function(pc) {
+      f <- lm(pc ~ batch)
+      a <- summary(aov(f))[[1]][["Sum Sq"]]
+      if (length(a) >= 2) a[1] / sum(a) else NA_real_
+    })
+    1 - mean(r2, na.rm = TRUE)
+  }
+  .ari_base <- function(labels_true, labels_pred) {
+    a <- as.integer(factor(labels_true))
+    b <- as.integer(factor(labels_pred))
+    n <- length(a)
+    tab <- table(a, b)
+    nij <- as.vector(tab)
+    ai <- rowSums(tab)
+    bj <- colSums(tab)
+    c2 <- function(x) x * (x - 1) / 2
+    sum_nij2 <- sum(c2(nij))
+    sum_ai2  <- sum(c2(ai))
+    sum_bj2  <- sum(c2(bj))
+    total2   <- c2(n)
+    expected <- (sum_ai2 * sum_bj2) / total2
+    maxidx  <- 0.5 * (sum_ai2 + sum_bj2)
+    if (maxidx == expected) return(0)
+    (sum_nij2 - expected) / (maxidx - expected)
+  }
+  .sum_z <- function(df, higher_better) {
+    Z <- scale(df)
+    Z[, !higher_better] <- -Z[, !higher_better]
+    rowSums(Z, na.rm = TRUE)
+  }
+
+  # choose dimensions
+  thr_npc_eval <- params$thr_npc
+  if (identical(thr_npc_eval, "auto")) {
+    thr_npc_eval <- ifelse(ncol(seurat_object) < 50000, 25L, 50L)
+  }
+  thr_npc_eval   <- as.integer(thr_npc_eval)
+  thr_resolution <- as.numeric(params$thr_resolution)
+  thr_frac       <- as.numeric(params$thr_cell_proportion)
+  n_threads      <- as.integer(params$n_threads)
+
+  # pick biology label column
+  label_key <- if (!is.null(params$input_label_key) && nzchar(params$input_label_key) &&
+                   params$input_label_key %in% colnames(seurat_object@meta.data)) {
+    params$input_label_key
+  } else label_col
+
+  # optional downsample per (batch,label)
+  if (thr_frac > 0 && thr_frac < 1) {
+    meta <- seurat_object@meta.data |>
+      tibble::rownames_to_column("cell") |>
+      dplyr::select("cell", all_of(c(batch_key, label_key)))
+    keep <- meta |>
+      dplyr::group_by(.data[[batch_key]], .data[[label_key]]) |>
+      dplyr::sample_frac(size = thr_frac) |>
+      dplyr::pull(cell)
+    seurat_object <- subset(seurat_object, cells = keep)
+    seurat_object[["barcode"]] <- colnames(seurat_object)
+  }
+  op <- options(future.globals.maxSize = 8 * 1024^3)
+  on.exit(options(op), add = TRUE)
+  plan("multicore", workers = n_threads)
+
+  methods_avail <- intersect(
+    c("integrated.cca","integrated.rpca","harmony","integrated.mnn"),
+    names(seurat_object@reductions)
+  )
+  stopifnot(length(methods_avail) > 0)
+
+  .nd_ok <- function(obj, red, target) {
+    if (!(red %in% names(obj@reductions))) return(0L)
+    ncol(Embeddings(obj, red)) |> as.integer() |> (\(n) min(n, as.integer(target)))()
+  }
+
+  metrics_list <- list()
+  for (meth in methods_avail) {
+    nd <- .nd_ok(seurat_object, meth, thr_npc_eval)
+    if (nd < 2L) { message("Skipping ", meth, " (only ", nd, " dim available)."); next }
+    dims_idx <- 1:nd
+    seurat_object <- FindNeighbors(
+      seurat_object, reduction = meth, dims = dims_idx,
+      graph.name = paste0("snn_npc", nd)
+    )
+    seurat_object <- FindClusters(
+      seurat_object,
+      graph.name   = paste0("snn_npc", nd),
+      cluster.name = paste0(meth, "_cluster"),
+      resolution   = thr_resolution
+    )
+    umap_name <- paste0("umap_", meth)
+    if (!(umap_name %in% names(seurat_object@reductions))) {
+      seurat_object <- RunUMAP(
+        seurat_object, reduction = meth, dims = dims_idx,
+        reduction.name = umap_name, seed.use = params$seed
+      )
+    }
+    emb <- Embeddings(seurat_object, meth)
+    emb_trunc <- emb[, dims_idx, drop = FALSE]
+
+    kbet_mean <- tryCatch({
+      if (!"seurat_clusters" %in% colnames(seurat_object@meta.data)) {
+        seurat_object <- FindClusters(
+          seurat_object, graph.name = paste0("snn_npc", nd),
+          cluster.name = "seurat_clusters", resolution = thr_resolution
+        )
+      }
+      cls <- unique(seurat_object$seurat_clusters)
+      vals <- vapply(cls, function(cl) {
+        tmp <- subset(seurat_object, subset = seurat_clusters == cl)
+        X <- Embeddings(tmp, meth)[, dims_idx, drop = FALSE]
+        b <- tmp@meta.data[[batch_key]]
+        out <- suppressWarnings(kBET::kBET(df = X, batch = b, plot = FALSE))
+        if (!is.null(out$summary$kBET.observed)) out$summary$kBET.observed[1] else NA_real_
+      }, numeric(1))
+      mean(vals, na.rm = TRUE)
+    }, error = function(e) NA_real_)
+
+    Gname <- paste0("snn_npc", nd)
+    stopifnot(Gname %in% names(seurat_object@graphs))
+    neigh <- .get_neighbor_index_list(seurat_object@graphs[[Gname]])
+    batch_vec <- as.character(seurat_object@meta.data[[batch_key]])
+    label_vec <- as.character(seurat_object@meta.data[[label_key]])
+
+    knn_batch_H  <- mean(.knn_batch_entropy(neigh, batch_vec), na.rm = TRUE)
+    knn_label_ag <- mean(.knn_label_agree(neigh, label_vec),   na.rm = TRUE)
+    pc_invR2     <- .pc_regression_inverse(emb_trunc, batch_vec)
+    clu          <- seurat_object@meta.data[[paste0(meth, "_cluster")]]
+    ari          <- .ari_base(labels_true = label_vec, labels_pred = clu)
+
+    metrics_list[[meth]] <- data.frame(
+      kBET_observed = kbet_mean,
+      kNN_batchH    = knn_batch_H,
+      kNN_labelAgree= knn_label_ag,
+      PCinvR2       = pc_invR2,
+      ARI_label     = ari,
+      check.names = FALSE
+    )
+  }
+
+  metrics_df <- dplyr::bind_rows(metrics_list, .id = "method")
+
+  higher_better <- c(
+    kBET_observed = FALSE,
+    kNN_batchH    = TRUE,
+    kNN_labelAgree= TRUE,
+    PCinvR2       = TRUE,
+    ARI_label     = TRUE
+  )
+  score <- .sum_z(metrics_df[ , names(higher_better)], higher_better = higher_better)
+  metrics_df$CompositeZ <- as.numeric(score)
+  best_integration <- metrics_df$method[which.max(metrics_df$CompositeZ)]
+  message(sprintf("Selected best integration (no scPOP/lisi): %s", best_integration))
+
+  if (isTRUE(params$input_auto_selection)) {
+    readr::write_lines(best_integration, "./data/batch_method.selected.txt")
+  }
+
+  p_sum <- ggplot(metrics_df, aes(x = method, y = CompositeZ)) +
+    geom_col() + theme_bw(base_size = 12) + labs(title = "Composite score (Z-sum)")
+  dir.create("figures/evaluation", recursive = TRUE, showWarnings = FALSE)
+  ggsave(file.path("figures","evaluation","composite_scores.png"), p_sum, width = 7, height = 4, dpi = 400)
+  print(p_sum)
+
+  stopifnot(requireNamespace("kBET", quietly = TRUE))
+  if (!requireNamespace("ggplot2", quietly = TRUE)) stop("Please install ggplot2")
+
+  # ===============================
+  # CONSISTENT kBET (uniform setup)
+  # ===============================
+  batch_col <- if (exists("batch_key") && batch_key %in% colnames(seurat_object@meta.data)) {
+    batch_key
+  } else if (".__batch__" %in% colnames(seurat_object@meta.data)) {
+    ".__batch__"
+  } else stop("No batch column found for kBET plot.")
+
+  baseline <- if ("pca.before" %in% SeuratObject::Reductions(seurat_object)) "pca.before" else
+              if ("pca" %in% SeuratObject::Reductions(seurat_object))        "pca"        else
+              stop("No baseline PCA reduction ('pca.before' or 'pca') found.")
+
+  methods_eval <- intersect(
+    c("integrated.cca","integrated.rpca","harmony","integrated.mnn"),
+    SeuratObject::Reductions(seurat_object)
+  )
+  methods_ordered <- c(baseline, methods_eval)
+
+  # fixed seed, cells, dims and k0 for all methods
+  set.seed(if (!is.null(params$seed)) params$seed else 2203)
+  cells_all  <- colnames(seurat_object)[!is.na(seurat_object@meta.data[[batch_col]])]
+  n_max_eval <- 5000L
+  cells_eval <- if (length(cells_all) > n_max_eval) sample(cells_all, n_max_eval) else cells_all
+  dims_each  <- vapply(methods_ordered, function(m) ncol(Embeddings(seurat_object, m)), integer(1))
+  nd_eval    <- max(2L, min(20L, min(dims_each)))
+  k0_eval    <- max(10L, floor(0.10 * length(cells_eval)))
+
+  .kb_consistent <- function(obj, reduction, cells_eval, batch_col, nd_eval, k0_eval) {
+    if (!(reduction %in% SeuratObject::Reductions(obj))) return(NA_real_)
+    emb <- Embeddings(obj, reduction)
+    if (ncol(emb) < nd_eval) return(NA_real_)
+    X <- emb[cells_eval, 1:nd_eval, drop = FALSE]
+    b <- droplevels(as.factor(obj@meta.data[cells_eval, batch_col, drop = TRUE]))
+    out <- suppressWarnings(kBET::kBET(df = X, batch = b, k0 = k0_eval,
+                                       do.pca = FALSE, heuristic = FALSE, verbose = FALSE))
+    if (!is.null(out$summary) && "kBET.observed" %in% names(out$summary)) {
+      1 - out$summary$kBET.observed[1]
+    } else NA_real_
+  }
+
+  kb_vals <- vapply(methods_ordered, function(m)
+    .kb_consistent(seurat_object, m, cells_eval, batch_col, nd_eval, k0_eval),
+    numeric(1)
+  )
+  df_kb <- data.frame(method = methods_ordered, acceptance = kb_vals, stringsAsFactors = FALSE)
+
+  # --- save exact values (so individual plots can only show these) ---
+  dir.create("figures/evaluation", recursive = TRUE, showWarnings = FALSE)
+  readr::write_tsv(df_kb, file.path("figures","evaluation","kBET_values.tsv"))
+
+  subtitle_str <- sprintf("N=%d cells | ndims=%d | k0=%d | seed=%s",
+                          length(cells_eval), nd_eval, k0_eval,
+                          if (!is.null(params$seed)) params$seed else 2203)
+
+  p_kbet_all <- ggplot2::ggplot(df_kb, ggplot2::aes(x = factor(method, levels = methods_ordered),
+                                                    y = acceptance)) +
+    ggplot2::geom_col() +
+    ggplot2::coord_cartesian(ylim = c(0, 1)) +
+    ggplot2::labs(title = "kBET Acceptance (higher = better mixing)",
+                  subtitle = subtitle_str,
+                  x = NULL, y = "Acceptance") +
+    ggplot2::theme_bw(base_size = 12) +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 25, hjust = 1))
+  ggsave(file.path("figures","evaluation","kBET_baseline_vs_integrations.png"),
+         p_kbet_all, width = 7.5, height = 4.5, dpi = 400)
+  print(p_kbet_all)
+
+  # per-method "before vs after" plots are strict subsets of df_kb
+  for (meth in methods_eval) {
+    df2 <- subset(df_kb, method %in% c(baseline, meth))
+    # sanity: values must come from the same table as combined
+    stopifnot(nrow(df2) == 2, all(df2$method %in% methods_ordered))
+
+    p_i <- ggplot2::ggplot(df2, ggplot2::aes(x = factor(method, levels = c(meth, baseline)),
+                                             y = acceptance)) +
+      ggplot2::geom_col() +
+      ggplot2::coord_cartesian(ylim = c(0, 1)) +
+      ggplot2::labs(title = "kBET Acceptance (higher = better mixing)",
+                    subtitle = subtitle_str,
+                    x = NULL, y = "Acceptance") +
+      ggplot2::theme_bw(base_size = 12) +
+      ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 25, hjust = 1))
+    fname <- paste0("kBET_before_vs_after_", toupper(gsub("^integrated\\.", "", meth)), ".png")
+    ggsave(file.path("figures","evaluation", fname), p_i, width = 7.5, height = 4.5, dpi = 400)
+    print(p_i)
+  }
+  message(sprintf("kBET consistency: cells=%d, ndims=%d, k0=%d, seed=%s",
+                  length(cells_eval), nd_eval, k0_eval,
+                  if (!is.null(params$seed)) as.character(params$seed) else "2203"))
+
+  if (isTRUE(params$auto_save)) {
+    saveRDS(metrics_df, file = file.path("data", paste0(project_name, "_evaluation_table.RDS")))
+  }
+
+  # ================================
+  # ADD-ON: extra evaluation metrics
+  # ================================
+  .nd_use <- function(obj, red, ndims_target) {
+    if (!(red %in% SeuratObject::Reductions(obj))) return(0L)
+    max(2L, min(as.integer(ndims_target), ncol(Embeddings(obj, red))))
+  }
+  silhouette_scores <- function(obj, red, label_key, batch_key, ndims = 20, n_max = 5000) {
+    if (!requireNamespace("cluster", quietly = TRUE))
+      return(c(ASW_label = NA_real_, ASW_batch = NA_real_))
+    nd <- .nd_use(obj, red, ndims); if (nd < 2) return(c(ASW_label = NA, ASW_batch = NA))
+    emb <- Embeddings(obj, red)[, seq_len(nd), drop = FALSE]
+    cells <- rownames(emb)
+    if (length(cells) > n_max) cells <- sample(cells, n_max)
+    emb <- emb[cells, , drop = FALSE]
+    lab <- as.factor(obj@meta.data[cells, label_key, drop = TRUE])
+    bat <- as.factor(obj@meta.data[cells, batch_key,  drop = TRUE])
+    d <- dist(emb)
+    sil_lab <- try(mean(cluster::silhouette(lab, d)[, "sil_width"]),  silent = TRUE)
+    sil_bat <- try(mean(cluster::silhouette(bat, d)[, "sil_width"]),  silent = TRUE)
+    c(ASW_label = if (inherits(sil_lab, "try-error")) NA_real_ else as.numeric(sil_lab),
+      ASW_batch = if (inherits(sil_bat, "try-error")) NA_real_ else as.numeric(-sil_bat))
+  }
+  graph_connectivity <- function(obj, red, label_key, k.param = 20, ndims = 20) {
+    if (!requireNamespace("igraph", quietly = TRUE)) return(NA_real_)
+    nd <- .nd_use(obj, red, ndims); if (nd < 2) return(NA_real_)
+    gname <- paste0("snn_", red, "_", nd)
+    if (!(gname %in% names(obj@graphs))) {
+      obj <- Seurat::FindNeighbors(obj, reduction = red, dims = 1:nd,
+                                   k.param = k.param, graph.name = gname, verbose = FALSE)
+    }
+    G <- obj@graphs[[gname]]; if (is.null(G)) return(NA_real_)
+    lab <- as.factor(obj@meta.data[[label_key]])
+    lev <- levels(lab)
+    scores <- vapply(lev, function(L) {
+      idx <- which(lab == L); if (length(idx) <= 1) return(NA_real_)
+      gsub <- G[idx, idx, drop = FALSE]
+      ig <- try(igraph::graph_from_adjacency_matrix((as.matrix(gsub) > 0), mode = "undirected"),
+                silent = TRUE)
+      if (inherits(ig, "try-error")) return(NA_real_)
+      cc <- igraph::components(ig)$csize
+      max(cc) / length(idx)
+    }, numeric(1))
+    mean(scores, na.rm = TRUE)
+  }
+  knn_overlap_vs_baseline <- function(obj, baseline_red = "pca.before", red, k = 20, ndims = 20) {
+    if (!requireNamespace("RANN", quietly = TRUE)) return(NA_real_)
+    nd0 <- .nd_use(obj, baseline_red, ndims); nd1 <- .nd_use(obj, red, ndims)
+    if (nd0 < 2 || nd1 < 2) return(NA_real_)
+    E0 <- Embeddings(obj, baseline_red)[, seq_len(nd0), drop = FALSE]
+    E1 <- Embeddings(obj, red)[,          seq_len(nd1), drop = FALSE]
+    nbh0 <- RANN::nn2(E0, E0, k = k + 1)$nn.idx[, -1, drop = FALSE]
+    nbh1 <- RANN::nn2(E1, E1, k = k + 1)$nn.idx[, -1, drop = FALSE]
+    ov <- vapply(seq_len(nrow(E0)), function(i) {
+      length(intersect(nbh0[i, ], nbh1[i, ])) / k
+    }, numeric(1))
+    mean(ov, na.rm = TRUE)
+  }
+  trustworthiness_umap <- function(obj, red, k = 12, ndims = 20, umap_name = NULL) {
+    if (!requireNamespace("RANN", quietly = TRUE)) return(NA_real_)
+    nd <- .nd_use(obj, red, ndims); if (nd < 2) return(NA_real_)
+    X  <- Embeddings(obj, red)[, seq_len(nd), drop = FALSE]
+    if (is.null(umap_name)) umap_name <- paste0("umap_", red)
+    if (!(umap_name %in% SeuratObject::Reductions(obj))) return(NA_real_)
+    Y  <- Embeddings(obj, umap_name)
+    nx <- RANN::nn2(X, X, k = k + 1)$nn.idx[, -1, drop = FALSE]
+    ny <- RANN::nn2(Y, Y, k = k + 1)$nn.idx[, -1, drop = FALSE]
+    n  <- nrow(X); K <- k
+    penalty <- 0
+    for (i in seq_len(n)) {
+      inv <- setdiff(ny[i, ], nx[i, ])
+      if (length(inv)) penalty <- penalty + sum(match(inv, ny[i, ]))
+    }
+    1 - (2 / (n * K * (2 * n - 3 * K - 1))) * penalty
+  }
+
+  baseline_red <- if ("pca.before" %in% names(seurat_object@reductions)) "pca.before" else
+                  if ("pca"        %in% names(seurat_object@reductions)) "pca"        else NA_character_
+
+  extra_list <- list()
+  for (meth in methods_avail) {
+    nd <- .nd_use(seurat_object, meth, thr_npc_eval)
+    if (nd < 2L) {
+      extra_list[[meth]] <- data.frame(
+        method = meth,
+        ASW_label = NA_real_,
+        ASW_batch_flipped = NA_real_,
+        GraphConnectivity = NA_real_,
+        kNNoverlap = NA_real_,
+        Trustworthiness = NA_real_
+      )
+      next
+    }
+    asw <- silhouette_scores(
+      obj = seurat_object, red = meth,
+      label_key = label_key, batch_key = batch_key, ndims = thr_npc_eval
+    )
+    conn <- try(graph_connectivity(
+      obj = seurat_object, red = meth, label_key = label_key, k.param = 20, ndims = thr_npc_eval
+    ), silent = TRUE); conn <- if (inherits(conn, "try-error")) NA_real_ else conn
+    knn_over <- if (is.na(baseline_red)) NA_real_ else try(knn_overlap_vs_baseline(
+      obj = seurat_object, baseline_red = baseline_red, red = meth, k = 20, ndims = thr_npc_eval
+    ), silent = TRUE); knn_over <- if (inherits(knn_over, "try-error")) NA_real_ else knn_over
+    tw <- try(trustworthiness_umap(
+      obj = seurat_object, red = meth, k = 12, ndims = thr_npc_eval,
+      umap_name = paste0("umap_", meth)
+    ), silent = TRUE); tw <- if (inherits(tw, "try-error")) NA_real_ else tw
+
+    extra_list[[meth]] <- data.frame(
+      method            = meth,
+      ASW_label         = unname(asw["ASW_label"]),
+      ASW_batch_flipped = unname(asw["ASW_batch"]),
+      GraphConnectivity = conn,
+      kNNoverlap        = knn_over,
+      Trustworthiness   = tw,
+      check.names = FALSE
+    )
+  }
+  extra_df <- dplyr::bind_rows(extra_list)
+  metrics_df <- dplyr::left_join(metrics_df, extra_df, by = "method")
+
+  higher_better_ext <- c(
+    kBET_observed     = FALSE,
+    kNN_batchH        = TRUE,
+    kNN_labelAgree    = TRUE,
+    PCinvR2           = TRUE,
+    ARI_label         = TRUE,
+    ASW_label         = TRUE,
+    ASW_batch_flipped = TRUE,
+    GraphConnectivity = TRUE,
+    kNNoverlap        = TRUE,
+    Trustworthiness   = TRUE
+  )
+  cols_present <- intersect(names(higher_better_ext), colnames(metrics_df))
+  if (length(cols_present) == 0L) {
+    metrics_df$CompositeZ_ext <- NA_real_
+  } else {
+    z_mat_list <- lapply(cols_present, function(col) {
+      v <- metrics_df[[col]]
+      mu <- mean(v, na.rm = TRUE)
+      sdv <- stats::sd(v, na.rm = TRUE)
+      z <- (v - mu) / ifelse(is.finite(sdv) && sdv > 0, sdv, 1)
+      if (!higher_better_ext[[col]]) z <- -z
+      z[!is.finite(z)] <- 0
+      z
+    })
+    Zext <- do.call(cbind, z_mat_list)
+    colnames(Zext) <- cols_present
+    metrics_df$CompositeZ_ext <- rowSums(Zext, na.rm = TRUE)
+  }
+}
+
+```
+
+
+
+```{r Autosave, error=TRUE}
+#| echo: false
+if (auto_save) {
+  saveRDS(seurat_object, file = file.path('data', paste0(project_name, '_', input_batch_step, '_batch_object.RDS')))
+}
+```
+
+```{r Parameters, error=TRUE}
+#| echo: false
+print(params)
+sessionInfo()
+```

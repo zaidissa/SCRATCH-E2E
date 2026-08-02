@@ -1,0 +1,454 @@
+---
+title: "Module - META PROGRAM & DIFFERENTIAL EXPRESSION"
+author: "Syed Shujaat Ali Zaidi"
+execute:
+  freeze: auto
+  cache: false
+  warning: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    fig-format: png
+    fig-dpi: 300
+    fig-responsive: true
+    fig-align: center
+lightbox:
+  match: auto
+  effect: zoom
+  loop: true
+params:
+  # paths & context
+  seurat_object: null          # path to input .RDS (Seurat object)
+  project_name: "project"      # used in filenames where relevant
+  work_directory: "."          # Nextflow passes $PWD
+
+  # epithelial subsetting
+  subset_col: "azimuth_labels"
+  subset_values: "Epithelial"  # comma/semicolon/pipe-separated ok
+  min_cells_per_sample_epith: 150
+  use_leiden: false
+
+  # QC / Leiden / signatures
+  complexity_filter: 1000
+  mito_filter: 20
+  hvg_keep: 7000
+  dims_use_max: 50
+  resolution: 1.0
+  genes_per_program: 50
+  sig_th: 0.005
+
+  # MP clustering
+  mp_num: 13
+  mp_min_size: 4
+  mp_max_size_frac: 0.5
+  seed: 1234
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+
+```{r setup}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(Matrix)
+  library(dplyr)
+  library(ggplot2)
+  library(data.table)
+  library(stringr)
+  library(reshape2)
+  library(colorspace)
+  library(scalop)     
+  library(patchwork) 
+  library(future)
+  library(future.apply)
+})
+
+set.seed(params$seed)
+
+# If Nextflow provided a working directory, use it
+if (!is.null(params$work_directory) && dir.exists(params$work_directory)) {
+  setwd(params$work_directory)
+}
+
+# Local output layout (picked up by Nextflow publishDir)
+dir.create("figures/metaprog", recursive = TRUE, showWarnings = FALSE)
+dir.create("data",             recursive = TRUE, showWarnings = FALSE)
+dir.create("fig",              recursive = TRUE, showWarnings = FALSE)  
+dir.create("orig",             recursive = TRUE, showWarnings = FALSE)
+
+# ---- Parallelism / threads ----
+guess_threads <- function() {
+  v <- Sys.getenv("OMP_NUM_THREADS", unset = NA)
+  if (is.na(v) || !nzchar(v)) v <- Sys.getenv("R_PARALLEL_NUM_THREADS", unset = NA)
+  n <- suppressWarnings(as.integer(v))
+  if (is.na(n) || n < 1) n <- parallel::detectCores()
+  if (is.na(n) || n < 1) n <- 1L
+  n
+}
+n_workers <- guess_threads()
+
+ok <- TRUE
+tryCatch({
+  if (.Platform$OS.type == "unix") {
+    future::plan(future::multicore, workers = n_workers)
+  } else {
+    future::plan(future::multisession, workers = n_workers)
+  }
+}, error = function(e) { ok <<- FALSE })
+if (!ok) future::plan(future::multisession, workers = max(1L, n_workers))
+
+options(future.globals.maxSize = 8 * 1024^3)
+
+```
+
+```{r Load object & epithelial subset}
+#| echo: false
+stopifnot(!is.null(params$seurat_object))
+seu <- readRDS(params$seurat_object)
+
+assay    <- "RNA"
+split_by <- "orig.ident"
+
+stopifnot(split_by %in% colnames(seu@meta.data))
+stopifnot(assay %in% names(seu@assays))
+DefaultAssay(seu) <- assay
+
+# Drop precomputed graphs (avoids Seurat v5 subset()->as.Graph() dimname errors)
+if (!is.null(seu@graphs) && length(seu@graphs) > 0) seu@graphs <- list()
+
+# Subset to epithelial cells
+stopifnot(params$subset_col %in% colnames(seu@meta.data))
+vals <- seu@meta.data[[params$subset_col]]
+
+# Allow comma/semicolon/pipe separated input
+epi_vals <- unlist(strsplit(params$subset_values, "[,;|]")) |>
+  stringr::str_trim()
+epi_vals <- epi_vals[nzchar(epi_vals)]
+
+keep <- rownames(seu@meta.data)[ vals %in% epi_vals ]
+if (!length(keep))
+  stop("No cells matched ", params$subset_col, " ∈ {", paste(epi_vals, collapse=", "), "}")
+
+seu_sub <- subset(seu, cells = keep)
+message("Retained ", ncol(seu_sub), " epithelial cells")
+
+```
+
+```{r Gate samples by epithelial size}
+#| echo: false
+stopifnot(split_by %in% colnames(seu_sub@meta.data))
+epi_counts <- sort(table(seu_sub@meta.data[[split_by]]), decreasing = TRUE)
+
+write.table(
+  data.frame(sample = names(epi_counts), epithelial_cells = as.integer(epi_counts)),
+  file = file.path("data", "epithelial_counts_per_sample.tsv"),
+  sep = "\t", quote = FALSE, row.names = FALSE
+)
+
+keep_samples <- names(epi_counts)[epi_counts >= params$min_cells_per_sample_epith]
+message(sprintf("[Gate] Keeping %d/%d samples (≥ %d epithelial cells)",
+                length(keep_samples), length(epi_counts), params$min_cells_per_sample_epith))
+if (!length(keep_samples))
+  stop("No samples passed the epithelial cell gate; nothing to process.")
+
+```
+
+```{r Per-sample Leiden → markers → per-cluster top genes}
+#| echo: false
+genes_list   <- list()   # per-sample/cluster top genes
+spots_assign <- list()   # per-sample cell→cluster
+markers_all  <- list()   # per-sample FindAllMarkers
+
+for (i in seq_along(keep_samples)) {
+  s <- keep_samples[i]
+  message(sprintf("[Leiden] %d/%d: %s", i, length(keep_samples), s))
+
+  # subset *from epithelial object*
+  sobj <- subset(seu_sub, subset = !!as.name(split_by) == s)
+  DefaultAssay(sobj) <- assay
+
+  # QC fields
+  nCount_col <- paste0("nCount_", assay)
+  if (!nCount_col %in% colnames(sobj@meta.data)) {
+    sobj@meta.data[[nCount_col]] <- Matrix::colSums(
+      GetAssayData(sobj, assay = assay, layer = "counts")
+    )
+  }
+  if (!"percent.mt" %in% colnames(sobj@meta.data)) {
+    sobj[["percent.mt"]] <- PercentageFeatureSet(sobj, pattern = "^MT-")
+  }
+
+  # QC filter -> explicit subset
+  qc_keep <- rownames(sobj@meta.data)[
+    sobj@meta.data[[nCount_col]] > params$complexity_filter &
+      sobj@meta.data[["percent.mt"]] < params$mito_filter
+  ]
+  sobj <- subset(sobj, cells = qc_keep)
+
+  # guard tiny samples
+  if (ncol(sobj) < 50) {
+    warning(sprintf("Sample %s has <50 post-QC epithelial cells; skipping.", s))
+    next
+  }
+
+  # Normalize -> HVGs -> Scale
+  sobj <- NormalizeData(sobj, assay = assay, normalization.method = "LogNormalize",
+                        scale.factor = 10000, verbose = FALSE)
+  sobj <- FindVariableFeatures(sobj, selection.method = "vst",
+                               nfeatures = min(params$hvg_keep, nrow(sobj)),
+                               verbose   = FALSE)
+  if (length(VariableFeatures(sobj)) < 200) {
+    warning(sprintf("Sample %s has <200 HVGs after filtering; skipping.", s))
+    next
+  }
+  sobj <- ScaleData(sobj, verbose = FALSE)
+
+  # PCA (dynamic dims)
+  sobj <- RunPCA(sobj, features = VariableFeatures(sobj), verbose = FALSE)
+  npcs_avail <- ncol(Embeddings(sobj, "pca"))
+  if (is.null(npcs_avail) || npcs_avail < 2) {
+    warning(sprintf("Sample %s: <2 PCs; skipping.", s)); next
+  }
+  dims_use <- seq_len(min(params$dims_use_max, npcs_avail))
+
+  # Graph & clusters (Leiden if R 'leiden' available, else Louvain)
+  sobj <- FindNeighbors(sobj, dims = dims_use, verbose = FALSE)
+  LEIDEN_OK <- isTRUE(params$use_leiden) &&
+               requireNamespace("reticulate", quietly = TRUE) &&
+               tryCatch(reticulate::py_module_available("leidenalg"), error = function(e) FALSE)
+  
+  algo <- if (LEIDEN_OK) 4L else 3L
+  if (!LEIDEN_OK)
+    message("Using Louvain (algorithm=3). Set params$use_leiden: true AND have python 'leidenalg' to use Leiden.")
+
+  sobj <- FindClusters(sobj, algorithm = algo, resolution = params$resolution, verbose = FALSE)
+
+  # Markers per cluster (positive only)
+  set.seed(params$seed + i)
+  mk <- tryCatch(
+    FindAllMarkers(sobj, only.pos = TRUE, return.thresh = params$sig_th, verbose = FALSE),
+    error = function(e) {
+      warning(sprintf("FindAllMarkers failed for sample %s: %s", s, e$message))
+      NULL
+    }
+  )
+  if (is.null(mk) || !nrow(mk)) {
+    warning(sprintf("No markers returned for sample %s; skipping.", s))
+    next
+  }
+  mk$sample <- s
+  markers_all[[s]] <- mk
+
+  # per cluster top N by avg_log2FC
+  clids <- sort(unique(mk$cluster))
+  for (k in clids) {
+    mk_k <- mk[mk$cluster == k, , drop = FALSE]
+    ord  <- order(mk_k$avg_log2FC, decreasing = TRUE)
+    topg <- mk_k$gene[ord][seq_len(min(params$genes_per_program, nrow(mk_k)))]
+    genes_list[[paste0(s, "_", k)]] <- topg
+  }
+
+  # cell→cluster assignment
+  spots_assign[[s]] <- data.frame(
+    barcodes = colnames(sobj),
+    cluster  = sobj$seurat_clusters,
+    sample   = s,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Persist tables
+if (!length(genes_list))
+  stop("No programs collected from any sample (after QC/gating).")
+
+spots_assign_df <- do.call(rbind, spots_assign)
+markers_all_df  <- data.table::rbindlist(markers_all, fill = TRUE)
+
+saveRDS(genes_list,      file.path("orig", "leiden_programs_list.rds"))
+saveRDS(spots_assign_df, file.path("data", "spot_assignments.rds"))
+saveRDS(markers_all_df,  file.path("data", "markers_all.rds"))
+
+write.table(spots_assign_df, file.path("data", "spot_assignments.tsv"),
+            sep = "\t", quote = FALSE, row.names = FALSE)
+fwrite(markers_all_df, file.path("data", "markers_all.tsv"))
+
+
+```
+
+```{r}
+#| label: Jaccard
+#| echo: false
+jac_mat <- scalop::Jaccard(genes_list)   # programs × programs
+jac_mat <- as.matrix(jac_mat); attr(jac_mat, "class") <- "matrix"
+
+# order programs
+if (requireNamespace("seriation", quietly = TRUE)) {
+  hc  <- hclust(as.dist(1 - jac_mat), method = "average")
+  ord <- seriation::get_order(
+    seriation::seriate(as.dist(1 - jac_mat), method = "OLO", control = list(hclust = hc))
+  )
+} else {
+  message("Package 'seriation' not available; using hierarchical clustering order.")
+  ord <- hclust(as.dist(1 - jac_mat), method = "average")$order
+}
+jac_matord <- jac_mat[ord, ord, drop = FALSE]
+
+# cut into mp_num, then enforce group size caps
+hc2  <- hclust(as.dist(1 - jac_matord), method = "average")
+cut  <- cutree(hc2, k = params$mp_num)
+groups0 <- split(names(cut), cut)
+
+enforce_group_sizes <- function(groups, sim, min.size = 4L, max.frac = 0.5) {
+  sim <- as.matrix(sim)
+  if (!isSymmetric(sim)) sim <- (sim + t(sim))/2
+  diag(sim) <- 1
+  nprog <- ncol(sim)
+  max.size <- max(1L, floor(max.frac * nprog))
+
+  queue <- groups
+  out <- list()
+  while (length(queue)) {
+    g <- queue[[1]]; queue <- queue[-1]
+    g <- intersect(g, colnames(sim))
+    if (length(g) < min.size) next
+    if (length(g) <= max.size) { out[[length(out)+1]] <- g; next }
+    sub <- sim[g, g, drop = FALSE]
+    hc  <- hclust(as.dist(1 - sub), method = "average")
+    lab <- cutree(hc, k = 2)
+    sp  <- split(g, lab)
+    queue <- c(queue, sp)
+  }
+  names(out) <- paste0("G", seq_along(out))
+  out
+}
+groups <- enforce_group_sizes(groups0, jac_matord,
+                              min.size = params$mp_min_size,
+                              max.frac = params$mp_max_size_frac)
+
+# group label per program
+clusterCut <- unlist(lapply(names(groups), function(i) {
+  x <- rep(i, length(groups[[i]])); names(x) <- groups[[i]]; x
+}))
+
+# Build MP gene sets: ≥25% frequency in group (min 3), cap 50 genes
+MPs <- lapply(groups, function(pr_names) {
+  tbl <- sort(table(unlist(genes_list[pr_names])), decreasing = TRUE)
+  cutoff <- max(3L, ceiling(0.25 * length(pr_names)))
+  names(tbl)[tbl >= cutoff][1:min(50, length(tbl))]
+})
+
+# Save MP artifacts
+saveRDS(jac_matord, file.path("orig", "leiden_jaccard_matrix_ordered.rds"))
+saveRDS(groups,     file.path("orig", "leiden_groups.rds"))
+saveRDS(MPs,        file.path("data", "leiden_metaprograms.rds"))
+fwrite(data.frame(MP = names(MPs),
+                  genes = sapply(MPs, function(v) paste(v, collapse=","))),
+       file.path("data", "leiden_metaprograms.csv"))
+
+```
+
+```{r Plots (heatmap + annotated 3-panel)}
+#| echo: false
+# Plain heatmap (capped scale)
+long <- reshape2::melt(jac_matord)
+cap  <- 0.35
+long$value[long$value >= cap] <- cap
+p_heat_only <- ggplot(long, aes(Var1, Var2, fill = value)) +
+  geom_raster() +
+  scale_fill_gradientn(colours = colorspace::sequential_hcl(9, palette="YlOrRd", rev=TRUE),
+                       limits = c(0, cap), name = "Jaccard\nIndex") +
+  theme_void() + theme(legend.position = "bottom")
+ggsave(file.path("figures", "metaprog", "leiden_jaccard_heatmap.pdf"),
+       p_heat_only, width = 9, height = 7)
+
+print(p_heat_only)
+# Annotated 3-panel (heatmap + MP bar + sample bar)
+jac_plot <- reshape2::melt(jac_matord)
+jac_plot$value[jac_plot$value >= 0.35] <- 0.35
+p_heat <- ggplot(jac_plot, aes(Var1, Var2, fill = value)) +
+  geom_raster() +
+  scale_fill_gradientn(colours = colorspace::sequential_hcl(9, palette="YlOrRd", rev=TRUE),
+                       limits = c(0, 0.35), name = "Jaccard\nIndex") +
+  theme_void() + theme(legend.position = "bottom")
+
+prog_ordered <- colnames(jac_matord)
+metaprog_df <- data.frame(
+  program = prog_ordered,
+  MP      = factor(clusterCut[prog_ordered]),
+  sample  = sub("_.*$", "", prog_ordered),
+  stringsAsFactors = FALSE
+)
+
+ann_bar <- function(df, fill_col, ylab_text) {
+  ggplot(df, aes(x = factor(program, levels = prog_ordered), y = 1)) +
+    geom_raster(aes(fill = .data[[fill_col]])) +
+    labs(x = NULL, y = ylab_text) +
+    theme(
+      legend.position = "none",
+      axis.ticks = element_blank(),
+      axis.text  = element_blank(),
+      axis.title.x = element_blank(),
+      panel.background = element_rect(fill = "white"),
+      axis.line = element_blank()
+    )
+}
+p_mp     <- ann_bar(metaprog_df, "MP",     "MP")
+p_sample <- ann_bar(metaprog_df, "sample", "sample")
+
+MP_plot <- p_heat / p_mp / p_sample + plot_layout(heights = c(40, 2, 1))
+ggsave(file.path("figures", "metaprog", "leiden_jaccard_with_annotations.pdf"),
+       MP_plot, width = 9, height = 8)
+print(MP_plot)
+# Optional: save program metadata
+saveRDS(metaprog_df, file.path("data", "leiden_metaprog_df.rds"))
+write.table(metaprog_df, file.path("data", "leiden_metaprog_df.tsv"),
+            sep = "\t", quote = FALSE, row.names = FALSE)
+
+# ---- Barrier artifact for Nextflow ----
+out_rds <- paste0(params$project_name, "_leiden.rds")
+barrier <- list(
+  done = TRUE,
+  n_epith_cells = ncol(seu_sub),
+  samples = sort(unique(seu_sub@meta.data[[params$subset_col]])),
+  timestamp = Sys.time()
+)
+saveRDS(barrier, file = out_rds) 
+
+```
+
+## Parameters log
+
+```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
+
+print(params)
+
+```
+
+## Session info
+
+```{r session_info, message = FALSE, warning = FALSE, echo = FALSE}
+
+sessionInfo()
+
+```
+
+

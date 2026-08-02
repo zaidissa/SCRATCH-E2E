@@ -1,0 +1,529 @@
+---
+title: "Module - Clustering"
+description: | 
+  Description
+execute:
+  freeze: auto
+  cache: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    df-print: paged
+    fig-align: center
+lightbox:
+    match: auto
+    effect: zoom
+    loop: true
+params:
+  project_name: 'Test'
+  seurat_object: './data/project_reduction_object-5.RDS'
+  input_features_plot: 'LYZ;CCL5;IL32;PTPRCAP;FCGR3A;PF4;PTPRC'
+  input_group_plot: 'patient_id;timepoint'
+  input_integration_dimension: 'auto'
+  thr_quantile: 'q01'
+  thr_npc: 'auto'
+  thr_resolution: 0.25
+  thr_proportion: 0.25
+  n_threads: 8
+  n_memory: 8
+  work_directory: !expr here::here()
+  auto_save: TRUE
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r setup, include = FALSE, message = FALSE, warning = FALSE, echo = FALSE}
+#| include: false
+
+# Project parameters 
+project_name <- params$project_name
+seurat_object <- params$seurat_object
+
+# Inputs and thresholds
+input_integration_dimension <- params$input_integration_dimension
+input_features_plot <- strsplit(
+  params$input_features_plot, split = ';')[[1]]
+input_group_plot <- strsplit(
+  params$input_group_plot, split = ';')[[1]]
+
+thr_npc <- params$thr_npc
+thr_resolution <- params$thr_resolution
+thr_proportion <- params$thr_proportion
+thr_quantile <- params$thr_quantile
+
+# Dataflow/Computational parameters
+n_threads <- params$n_threads
+n_memory <- params$n_memory
+
+# Output parameters
+work_directory <- params$work_directory
+timestamp <- params$timestamp
+auto_save <- params$auto_save
+
+# Knitr options
+knitr::opts_knit$set(
+  root.dir = work_directory
+  )
+
+```
+
+## Loading library
+
+```{r library}
+#| echo: false
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(Seurat)
+library(ROGUE)
+library(SCP)
+
+```
+
+## Folder structure
+
+```{r project_directory}
+
+if(!dir.exists(work_directory)) {
+  dir.create(work_directory, recursive = T)
+}
+
+for(sub_directory in c('data', 'figures')) {
+  dir.create(paste0(work_directory, '/', sub_directory))
+}
+
+```
+
+## Loading Seurat object
+
+```{r loading_rds}
+#| code-fold: true
+
+# Reading seurat object
+seurat_object <- readRDS(file = seurat_object)
+
+# Cell number
+ncell <- dim(seurat_object)[2]
+
+# Knowledge-based parameters
+if(thr_npc == 'auto') {
+  thr_npc <- ifelse(ncell < 50000, 25, 50)
+}
+
+# Setting random seed
+random_seed <- 2203
+set.seed(random_seed)
+
+```
+
+## Unifying sample layers
+
+```{r seurat_rejoin}
+#| code-fold: true
+
+if(length(seurat_object@assays$RNA@layers) > 1) {
+  
+  seurat_object <- JoinLayers(seurat_object)  
+
+}
+
+```
+
+## Input validation
+
+```{r basic_input_validation}
+
+# Extracting gene names and metadata columns
+metadata_columns <- colnames(seurat_object@meta.data)
+features_names <- row.names(seurat_object)
+
+# Checking input variables
+input_features_plot <- intersect(input_features_plot, features_names)
+input_group_plot <- intersect(input_group_plot, metadata_columns)
+
+# Setting reduction variable
+integration_method <- function(
+    method = c('pca', 'integrated.mnn', 'integrated.rpca', 'integrated.cca', 'harmony', 'auto')) {
+
+  # Default reduction
+  reduction_variable <- 'pca'
+  
+  # Programmatic choices
+  if(method == 'auto') {
+    if(file.exists('./batch_method.selected.txt')) {
+      reduction_variable <- read_lines(file = "./batch_method.selected.txt")
+    } 
+  }
+  
+  if(method %in% names(seurat_object@reductions)) {
+    reduction_variable <- method
+  } 
+  
+  return(reduction_variable)
+  
+}
+
+reduction_variable <- integration_method(method = input_integration_dimension)
+
+```
+
+::: {.callout-warning}
+The clustering step will be performed over the **`r reduction_variable`** reduction.
+:::
+
+## Finding neighbors and clusters
+
+```{r finding_neighbors}
+#| code-fold: true
+#| warning: false
+
+# Finding clusters
+seurat_object <- FindNeighbors(
+  object = seurat_object, 
+  reduction = reduction_variable, 
+  dims = 1:thr_npc,
+  graph.name = paste0('snn_npc', thr_npc)
+)
+
+seurat_object <- FindClusters(
+  object = seurat_object,
+  graph.name = paste0('snn_npc', thr_npc),
+  resolution = thr_resolution
+)
+
+# Running UMAP reduction
+seurat_object <- RunUMAP(
+  object = seurat_object,
+  reduction = reduction_variable, 
+  dims = 1:thr_npc,
+  seed.use = random_seed
+)
+
+```
+
+```{r umap_main_plot, fig.height = 12}
+#| label: fig-umap-plot
+#| fig-cap: 'UMAP'
+#| fig-cap-location: top
+#| fig-height: 10
+#| fig-width: 10
+
+# Plotting UMAP based on Seurat clusters
+SCP::CellDimPlot(
+  srt = seurat_object, 
+  group.by = "seurat_clusters",
+  reduction = "umap",
+  label = TRUE, 
+  label_repel = TRUE,
+  show_stat = TRUE,
+  theme_use = "theme_blank"
+)
+
+```
+
+:::{.callout-tip}
+The @fig-umap-plot presentind the overall clustering after running Leiden algorithm.
+:::
+
+```{r clusters_composition}
+
+seurat_cluster_composition <- seurat_object@meta.data %>%
+  group_by(seurat_clusters, orig.ident) %>%
+  summarise(
+    n_cell = n()
+  )
+
+seurat_cluster_composition <- seurat_cluster_composition %>%
+  group_by(seurat_clusters) %>%
+  mutate(
+    total_cell = sum(n_cell),
+    percentage = round((n_cell / total_cell) * 100, digits = 2)
+  )
+
+```
+
+```{r barplot_composition}
+#| label: fig-bar-composition
+#| fig-cap: 'Barplot'
+#| fig-width: 18
+#| fig-height: 10
+#| fig-align: center
+
+# Boxplot
+SCP::CellStatPlot(
+  seurat_object,
+  stat.by = "orig.ident", 
+  group.by = "seurat_clusters", 
+  label = TRUE
+)
+
+```
+
+:::{.callout-tip}
+The @fig-bar-composition provides an overall view of cell composition across distinct clusters on the dataset.
+:::
+
+```{r printing_cluster_table, message = FALSE, warning = FALSE, echo = FALSE}
+
+seurat_cluster_composition %>%
+  distinct(seurat_clusters, total_cell) %>%
+  tidyr::pivot_wider(names_from = seurat_clusters, values_from = total_cell)
+
+rogue_value <- "Skipped"
+
+```
+
+## Clustering performance {.tabset}
+
+```{r clustering_performance}
+#| code-fold: true
+#| warning: false
+#| eval: false
+
+# Sampling cells per cluster
+sample_clusters_members <- seurat_object@meta.data %>%
+  mutate(barcode = row.names(seurat_object@meta.data)) %>%
+  group_by(seurat_clusters) %>%
+  slice_sample(prop = thr_proportion)
+
+sample_clusters_members <- sample_clusters_members %>%
+  dplyr::rename(
+    Patient = patient_id,
+    clusters = seurat_clusters
+  )
+
+# Extracting expression counts
+expression_counts <- GetAssayData(seurat_object, layer = "counts")
+
+# Sampling counts
+expression_counts <- expression_counts[, sample_clusters_members$barcode] %>%
+  as.matrix()
+
+expression_counts <- matr.filter(expression_counts, min.cells = 10, min.genes = 10)
+
+# Computing entropy background
+entropy_result <- SE_fun(expression_counts)
+
+# Avg. ROGUE score across clusters
+rogue_value <- CalculateRogue(entropy_result, platform = "UMI")
+
+# Calculating ROGUE score
+rogue_result <- rogue(expression_counts, 
+                      labels = sample_clusters_members$clusters,
+                      samples = sample_clusters_members$Patient,
+                      platform = "UMI",
+                      span = 0.6
+                      )
+
+rogue_result
+
+```
+
+::: {.callout-warning}
+The ROGUE score for the clustering composition (resolution = **`r thr_resolution`**) is equal to **`r rogue_value`**.
+:::
+
+### SEplot
+
+```{r rogue_seplot}
+#| label: fig-se-plot
+#| fig-cap: 'UMAP'
+#| fig-cap-location: top
+#| eval: false
+
+# Highly variable genes
+SEplot(entropy_result)
+
+```
+
+:::{.callout-tip}
+The @fig-se-plot shows the relationship between S and E. S-E curve identifies highly informative genes.
+:::
+
+### Boxplot
+
+```{r rogue_boxplot}
+#| label: fig-rogue-plot
+#| fig-cap: 'UMAP'
+#| fig-cap-location: top
+#| eval: false
+
+rogue.boxplot(rogue_result) +
+  scale_x_discrete(limits = sort(unique(seurat_object@meta.data$seurat_clusters))) +
+  theme(
+    axis.text = element_text(size = 16)
+  )
+
+```
+
+:::{.callout-tip}
+The @fig-rogue-plot displays boxplot of the ROGUE values for each cluster in different samples.
+:::
+
+## Data visualization {.tabset}
+
+### Sample-based UMAP
+
+```{r umap_sample_plot, fig.height = 12, fig.width = 14}
+#| label: fig-umap-sample
+#| fig-cap: 'UMAP'
+#| fig-width: 15
+#| fig-height: 10
+#| fig-align: center
+
+SCP::CellDimPlot(
+  srt = seurat_object, 
+  group.by = "orig.ident",
+  reduction = "umap",
+  label = TRUE, 
+  label_repel = TRUE,
+  show_stat = TRUE,
+  theme_use = "theme_blank"
+)
+
+```
+
+:::{.callout-tip}
+The @fig-umap-sample sample-based UMAP can be used to evaluate cluster composition. Clusters composed of a single sample can be potentially associated with malignant cells.
+:::
+
+
+
+### Batch-based UMAP
+
+```{r umap_batch_plot}
+#| label: fig-umap-batch
+#| fig-cap: 'UMAP'
+#| fig-width: 15
+#| fig-height: 10
+#| fig-align: center
+
+# SCP::CellDimPlot(
+#   srt = seurat_object, 
+#   group.by = "batch",
+#   reduction = "umap",
+#   label = TRUE, 
+#   label_repel = TRUE,
+#   show_stat = TRUE,
+#   theme_use = "theme_blank"
+# )
+
+# Check if "batch" is in metadata before running the batch-based UMAP
+if ("batch" %in% colnames(seurat_object@meta.data)) {
+  SCP::CellDimPlot(
+    srt = seurat_object, 
+    group.by = "batch",
+    reduction = "umap",
+    label = TRUE, 
+    label_repel = TRUE,
+    show_stat = TRUE,
+    theme_use = "theme_blank"
+  )
+} else {
+  message("Skipping batch-based UMAP: 'batch' column not found in metadata.")
+}
+
+```
+
+:::{.callout-tip}
+The @fig-umap-batch displays the batch effect over the cell clusters.
+:::
+
+### Group-based UMAP
+
+```{r}
+#| label: fig-umap-multi
+#| eval: false
+#| column: screen-inset-shaded
+#| fig-align: center
+#| fig-cap: UMAP
+#| fig-height: 8
+#| fig-width: 12
+#| include: false
+#| layout-nrow: 1
+
+# SCP::CellDimPlot(
+#   srt = seurat_object, 
+#   group.by = input_group_plot,
+#   reduction = "umap",
+#   label = TRUE, 
+#   label_repel = TRUE,
+#   show_stat = TRUE,
+#   theme_use = "theme_blank"
+# )
+
+# Split input_group_plot (it contains "patient_id;timepoint")
+group_vars <- unlist(strsplit(input_group_plot, ";"))
+
+# Check if all group_vars exist in metadata before running the group-based UMAP
+if (all(group_vars %in% colnames(seurat_object@meta.data))) {
+  SCP::CellDimPlot(
+    srt = seurat_object, 
+    group.by = input_group_plot,
+    reduction = "umap",
+    label = TRUE, 
+    label_repel = TRUE,
+    show_stat = TRUE,
+    theme_use = "theme_blank"
+  )
+} else {
+  message("Skipping group-based UMAP: Some columns in 'patient_id;timepoint' not found in metadata.")
+}
+
+
+```
+
+:::{.callout-tip}
+The @fig-umap-multi shows the other study/experimental design features.
+:::
+
+## Saving Seurat object
+
+```{r object_dump}
+
+if(auto_save) {
+  
+  saveRDS(seurat_object, file = paste0('./data/', project_name, '_cluster_object.RDS'))
+  
+}
+
+```
+
+------------------------------------------------------------------------
+
+## Parameters log
+
+```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
+
+print(params)
+
+```
+
+## Session info
+
+```{r session_info, message = FALSE, warning = FALSE, echo = FALSE}
+
+sessionInfo()
+
+```

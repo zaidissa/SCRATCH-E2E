@@ -1,0 +1,566 @@
+---
+title: "SCRATCH CellComm - CellChat"
+author: "Syed Shujaat Ali Zaidi"
+execute:
+  freeze: auto
+  cache: false
+  warning: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    fig-format: png
+    fig-dpi: 300
+    fig-responsive: true
+    fig-align: center
+lightbox:
+  match: auto
+  effect: zoom
+  loop: true
+params:
+  seurat_object: null
+  project_name: "project"
+  work_directory: "."
+  organism: "human"
+  slot: "data"
+  assay: "RNA"
+  layer: "data"              # Seurat v5 uses layer
+  celltype_col: "celltype"
+  min_cells_per_group: 3
+  min_cells_comm: 10         # filterCommunication
+  db_mode: "secreted"        # secreted | all
+  n_workers: 4
+  do_patterns: true
+  do_centrality: true
+  do_embedding: true
+  example_pathway: "CXCL"
+  # Optional: preferred source/target groups (names). If missing, defaults are guessed.
+  sources_use: ["Inflam. FIB"]
+  targets_use: ["cDC1","cDC2","LC","Inflam. DC","TC","Inflam. TC","CD40LG+ TC","NKT"]
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r Setup}
+#| include: false
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(SeuratObject)
+  library(dplyr)
+  library(ggplot2)
+  library(readr)
+  library(CellChat)
+  library(grid)
+  library(ComplexHeatmap)
+  library(presto)
+})
+
+```
+
+
+##Helper
+```{r Helper}
+#| echo: false
+#| warning: false
+####
+# ----------------------------
+# Helpers (ROBUST for PDF output)
+# ----------------------------
+safe <- function(expr) {
+  tryCatch(expr, error = function(e) message("[SKIP] ", conditionMessage(e)))
+}
+
+save_gg <- function(file, p, width=7, height=5, dpi=300) {
+  dir.create(dirname(file), recursive = TRUE, showWarnings = FALSE)
+  ggplot2::ggsave(file, plot = p, width = width, height = height, dpi = dpi)
+}
+
+print_any <- function(x) {
+  if (is.null(x)) return(invisible(NULL))
+
+  # ComplexHeatmap objects
+  if (inherits(x, "Heatmap") || inherits(x, "HeatmapList")) {
+    ComplexHeatmap::draw(x)
+    return(invisible(NULL))
+  }
+
+  # ggplot objects
+  if (inherits(x, "ggplot")) {
+    print(x)
+    return(invisible(NULL))
+  }
+
+  # lists of plots (common in CellChat)
+  if (is.list(x)) {
+    for (xx in x) print_any(xx)
+    return(invisible(NULL))
+  }
+
+  # grobs
+  if (inherits(x, "grob") || inherits(x, "gTree")) {
+    grid::grid.newpage()
+    grid::grid.draw(x)
+    return(invisible(NULL))
+  }
+
+  # last resort
+  try(print(x), silent = TRUE)
+  invisible(NULL)
+}
+
+safe_pdf <- function(file, width = 10, height = 8, expr) {
+  dir.create(dirname(file), recursive = TRUE, showWarnings = FALSE)
+  pdf(file, width = width, height = height)
+
+  ok <- TRUE
+  err <- NULL
+
+  tryCatch(
+    {
+      val <- eval.parent(substitute(expr))
+      if (!is.null(val)) print_any(val)
+    },
+    error = function(e) {
+      ok <<- FALSE
+      err <<- conditionMessage(e)
+    }
+  )
+
+  dev.off()
+
+  sz <- suppressWarnings(file.info(file)$size)
+  if (!ok || is.na(sz) || sz < 2000) {
+    unlink(file)
+    message("[SKIP] ", basename(file), if (!ok) paste0(" (error: ", err, ")") else " (empty output)")
+    return(invisible(FALSE))
+  }
+  message("[OK] ", basename(file))
+  invisible(TRUE)
+}
+
+theme_set(theme_bw(base_size = 12))
+set.seed(1)
+
+if (!is.null(params$work_directory) && dir.exists(params$work_directory)) {
+setwd(params$work_directory)
+}
+
+##output dirs
+
+dir.create("data/cellchat", recursive = TRUE, showWarnings = FALSE)
+dir.create("figures/cellcomm/cellchat", recursive = TRUE, showWarnings = FALSE)
+plot_dir <- "figures/cellcomm/cellchat"
+
+```
+
+```{r Load Seurat}
+#| echo: false
+#| warning: false
+####
+# Load Seurat, resolve celltype column, filter rare groups
+stopifnot(!is.null(params$seurat_object), file.exists(params$seurat_object))
+seu <- readRDS(params$seurat_object)
+stopifnot(inherits(seu, "Seurat"))
+stopifnot(params$assay %in% names(seu@assays))
+DefaultAssay(seu) <- params$assay
+if (!is.null(seu@graphs) && length(seu@graphs) > 0) seu@graphs <- list()
+
+resolve_col <- function(md, preferred, candidates, label) {
+if (!is.null(preferred) && nzchar(preferred) && preferred %in% colnames(md)) return(preferred)
+hit <- candidates[candidates %in% colnames(md)][1]
+if (length(hit) == 0 || is.na(hit) || !nzchar(hit)) {
+stop("No valid ", label, " column found. Tried preferred='", preferred,
+"' and candidates: ", paste(candidates, collapse = ", "))
+}
+hit
+}
+
+CELLTYPE_CANDIDATES <- c(
+"celltype","cell_type","CellType","celltype_final","celltype_refined",
+"azimuth_labels","azimuth_label","predicted.celltype.l2","predicted.celltype.l1",
+"annotation","annot","label","labels","final_annotation","seurat_clusters"
+)
+
+```
+
+
+```{r Preprocess}
+#| echo: false
+#| warning: false
+md <- seu@meta.data
+celltype_col <- resolve_col(md, params$celltype_col, CELLTYPE_CANDIDATES, "celltype")
+readr::write_csv(tibble::tibble(celltype_col = celltype_col), "data/cellchat/resolved_columns.csv")
+
+# drop NA/blank labels
+
+ok <- !is.na(md[[celltype_col]]) & nzchar(as.character(md[[celltype_col]]))
+md <- md[ok, , drop = FALSE]
+
+ct_counts <- md %>%
+dplyr::count(.data[[celltype_col]], name = "n_cells") %>%
+dplyr::arrange(dplyr::desc(n_cells))
+readr::write_csv(ct_counts, "data/cellchat/celltype_counts_prefilter.csv")
+
+keep_ct <- ct_counts %>%
+dplyr::filter(n_cells >= params$min_cells_per_group) %>%
+dplyr::pull(1)
+
+keep_cells <- rownames(md)[md[[celltype_col]] %in% keep_ct]
+stopifnot(length(keep_cells) > 0)
+
+seu <- subset(seu, cells = keep_cells)
+
+ct_counts2 <- seu@meta.data %>%
+dplyr::count(.data[[celltype_col]], name = "n_cells") %>%
+dplyr::arrange(dplyr::desc(n_cells))
+readr::write_csv(ct_counts2, "data/cellchat/celltype_counts_filtered.csv")
+
+p_ct <- ggplot(ct_counts2, aes(x = reorder(.data[[celltype_col]], n_cells), y = n_cells)) +
+geom_col() + coord_flip() +
+labs(title = "Cell-type composition (filtered)", x = "Cell type", y = "# cells")
+ggsave(file.path(plot_dir, "celltype_counts_filtered.png"), p_ct, width=7.5, height=5, dpi=300)
+
+
+
+######
+##Extract normalized expression (Seurat v5 Assay5 safe) and build CellChat object
+assay_use <- params$assay
+
+# If Assay5 and split layers exist, join them
+
+if (inherits(seu[[assay_use]], "Assay5")) {
+layers <- SeuratObject::Layers(seu[[assay_use]])
+if (any(grepl("^data\\.", layers)) || any(grepl("^counts\\.", layers))) {
+message("JoinLayers(): detected split layers in assay ", assay_use)
+seu <- SeuratObject::JoinLayers(seu, assay = assay_use)
+}
+}
+
+# normalized expression matrix (layer="data" by default)
+
+data_input <- SeuratObject::LayerData(seu[[assay_use]], layer = params$layer)
+
+# meta: only labels
+meta <- data.frame(
+  labels = as.character(seu@meta.data[[celltype_col]]),
+  row.names = rownames(seu@meta.data),
+  stringsAsFactors = FALSE
+)
+
+
+# enforce exact overlap & ordering
+
+common_cells <- intersect(colnames(data_input), rownames(meta))
+stopifnot(length(common_cells) > 0)
+data_input <- data_input[, common_cells, drop = FALSE]
+meta <- meta[common_cells, , drop = FALSE]
+stopifnot(identical(colnames(data_input), rownames(meta)))
+
+# Create CellChat
+
+cellchat <- CellChat::createCellChat(object = data_input, meta = meta, group.by = "labels")
+cellchat <- CellChat::setIdent(cellchat, ident.use = "labels")
+
+# DB
+
+if (tolower(params$organism) == "mouse") {
+  data("CellChatDB.mouse", package = "CellChat")
+  CellChatDB <- CellChatDB.mouse
+  } else {
+    data("CellChatDB.human", package = "CellChat")
+    CellChatDB <- CellChatDB.human
+  }
+
+CellChatDB.use <- switch(
+  tolower(params$db_mode),
+  "secreted" = CellChat::subsetDB(CellChatDB, search = "Secreted Signaling", key = "annotation"),
+  "all"      = CellChatDB,
+  CellChatDB
+  )
+cellchat@DB <- CellChatDB.use
+
+# save DB category pies
+# DB category pies (force printing to PDF device)
+# ---- DB pies (FIXED)
+safe_pdf(file.path(plot_dir, "db_category_pies.pdf"), width=12, height=4, {
+  p <- CellChat::showDatabaseCategory(cellchat@DB)
+  print_any(p)
+})
+```
+
+```{r Inference}
+#| echo: false
+#| warning: false
+
+# subset signaling genes
+
+cellchat <- CellChat::subsetData(cellchat)
+
+# future setup (container-safe)
+if (requireNamespace("future", quietly = TRUE)) {
+  if (isTRUE(params$parallel_cellchat)) {
+    options(future.globals.maxSize = 8 * 1024^3)  # 8 GiB
+    future::plan("multisession", workers = params$n_workers)
+  } else {
+    future::plan("sequential")
+  }
+}
+
+cellchat <- CellChat::identifyOverExpressedGenes(cellchat)
+cellchat <- CellChat::identifyOverExpressedInteractions(cellchat)
+
+cellchat <- CellChat::computeCommunProb(cellchat, type = "triMean")
+cellchat <- CellChat::filterCommunication(cellchat, min.cells = params$min_cells_comm)
+cellchat <- CellChat::computeCommunProbPathway(cellchat)
+cellchat <- CellChat::aggregateNet(cellchat)
+
+saveRDS(cellchat, file = "data/cellchat_object.rds")
+
+```
+
+```{r Global network plots}
+#| echo: false
+#| warning: false
+
+
+# ----------------------------
+# Choose a valid pathway (CXCL might not exist)
+# ----------------------------
+pathways.show <- params$example_pathway
+if (!pathways.show %in% cellchat@netP$pathways) {
+  message("[INFO] example_pathway not found: ", pathways.show, " | Using: ", cellchat@netP$pathways[1])
+  pathways.show <- cellchat@netP$pathways[1]
+}
+
+# ----------------------------
+# Global network plots (circle) - base plotting (should be ok)
+# ----------------------------
+groupSize <- as.numeric(table(cellchat@idents))
+safe_pdf(file.path(plot_dir, "net_circle_count_weight.pdf"), width=12, height=6, {
+  par(mfrow=c(1,2), xpd=TRUE)
+  CellChat::netVisual_circle(cellchat@net$count, vertex.weight=groupSize, weight.scale=TRUE,
+                             label.edge=FALSE, title.name="Number of interactions")
+  CellChat::netVisual_circle(cellchat@net$weight, vertex.weight=groupSize, weight.scale=TRUE,
+                             label.edge=FALSE, title.name="Interaction weights/strength")
+})
+
+```
+
+```{r Aggregate}
+#| echo: false
+#| warning: false
+# ----------------------------
+# Pathway-specific: aggregate + heatmap + contribution (FIXED)
+# ----------------------------
+safe_pdf(file.path(plot_dir, paste0("pathway_", pathways.show, "_aggregate.pdf")), width=10, height=8, {
+  CellChat::netVisual_aggregate(cellchat, signaling = pathways.show, layout = "circle")
+  CellChat::netVisual_aggregate(cellchat, signaling = pathways.show, layout = "chord")
+  vertex.receiver <- seq_len(min(4, length(levels(cellchat@idents))))
+  CellChat::netVisual_aggregate(cellchat, signaling = pathways.show, layout="hierarchy", vertex.receiver=vertex.receiver)
+})
+
+safe_pdf(file.path(plot_dir, paste0("pathway_", pathways.show, "_heatmap.pdf")), width=9, height=7, {
+  hm <- CellChat::netVisual_heatmap(cellchat, signaling = pathways.show)
+  print_any(hm)  # draws ComplexHeatmap if returned
+})
+
+safe({
+  gg_contrib <- CellChat::netAnalysis_contribution(cellchat, signaling = pathways.show)
+  save_gg(file.path(plot_dir, paste0("pathway_", pathways.show, "_LR_contribution.png")),
+          gg_contrib, width=4.5, height=3.2, dpi=300)
+})
+
+# ----------------------------
+# Bubble + chord_gene (FIXED: print)
+# ----------------------------
+src <- intersect(unlist(params$sources_use), levels(cellchat@idents))
+tgt <- intersect(unlist(params$targets_use), levels(cellchat@idents))
+
+if (length(src) == 0) src <- intersect(c("Fibroblast","FIB","Inflam. FIB","APOE+ FIB","FBN1+ FIB"), levels(cellchat@idents))[1]
+if (length(tgt) == 0) tgt <- intersect(c("T cell","TC","Inflam. TC","CD40LG+ TC","cDC1","cDC2","LC","Inflam. DC","Macrophage"), levels(cellchat@idents))
+
+src <- src[!is.na(src) & nzchar(src)]
+tgt <- tgt[!is.na(tgt) & nzchar(tgt)]
+
+df_test <- try(CellChat::subsetCommunication(cellchat, sources.use = src, targets.use = tgt), silent = TRUE)
+if (!inherits(df_test, "try-error")) message("[INFO] bubble src/tgt interactions: ", nrow(df_test))
+
+if (!inherits(df_test, "try-error") && nrow(df_test) > 0) {
+  safe_pdf(file.path(plot_dir, "bubble_sources_to_targets.pdf"), width=12, height=6, {
+    p <- CellChat::netVisual_bubble(cellchat, sources.use = src, targets.use = tgt, remove.isolate = FALSE)
+    print_any(p)
+  })
+} else {
+  message("[SKIP] bubble_sources_to_targets: no interactions for selected src/tgt.")
+}
+
+safe_pdf(file.path(plot_dir, "chord_gene_netP_sources_to_targets.pdf"), width=10, height=8, {
+  p <- CellChat::netVisual_chord_gene(cellchat, sources.use = src, targets.use = tgt,
+                                      slot.name = "netP", legend.pos.x = 10, lab.cex = 0.6)
+  print_any(p)
+})
+```
+
+```{r GeneExpression}
+#| echo: false
+#| warning: false
+# ----------------------------
+# plotGeneExpression (FIXED: print)
+# ----------------------------
+safe_pdf(file.path(plot_dir, paste0("plotGeneExpression_", pathways.show, "_violin.pdf")), width=10, height=6, {
+  p <- CellChat::plotGeneExpression(cellchat, signaling = pathways.show, enriched.only = TRUE, type = "violin")
+  print_any(p)
+})
+
+# ----------------------------
+# Centrality + signaling role plots (FIXED: draw heatmaps)
+# ----------------------------
+if (isTRUE(params$do_centrality)) {
+  safe({
+    cellchat <- CellChat::netAnalysis_computeCentrality(cellchat, slot.name = "netP")
+    saveRDS(cellchat, file = "data/cellchat/cellchat_object_with_centrality.rds")
+  })
+
+  safe_pdf(file.path(plot_dir, paste0("signalingRole_network_", pathways.show, ".pdf")), width=10, height=4, {
+    p <- CellChat::netAnalysis_signalingRole_network(cellchat, signaling = pathways.show, width = 8, height = 2.5, font.size = 10)
+    print_any(p)
+  })
+
+  safe({
+    gg1 <- CellChat::netAnalysis_signalingRole_scatter(cellchat)
+    save_gg(file.path(plot_dir, "signalingRole_scatter_all.png"), gg1, width=7, height=5, dpi=300)
+  })
+
+  safe({
+    gg2 <- CellChat::netAnalysis_signalingRole_scatter(cellchat, signaling = intersect(c("CXCL","CCL"), cellchat@netP$pathways))
+    save_gg(file.path(plot_dir, "signalingRole_scatter_selected.png"), gg2, width=7, height=5, dpi=300)
+  })
+
+  safe_pdf(file.path(plot_dir, "signalingRole_heatmap_outgoing.pdf"), width=10, height=6, {
+    ht1 <- CellChat::netAnalysis_signalingRole_heatmap(cellchat, pattern = "outgoing")
+    ComplexHeatmap::draw(ht1)
+  })
+
+  safe_pdf(file.path(plot_dir, "signalingRole_heatmap_incoming.pdf"), width=10, height=6, {
+    ht2 <- CellChat::netAnalysis_signalingRole_heatmap(cellchat, pattern = "incoming")
+    ComplexHeatmap::draw(ht2)
+  })
+}
+```
+
+```{r Communication Patterns}
+#| echo: false
+#| warning: false
+# ----------------------------
+# Communication patterns (FIXED: print + ensure pkgs)
+# ----------------------------
+if (isTRUE(params$do_patterns)) {
+  if (requireNamespace("NMF", quietly=TRUE) && requireNamespace("ggalluvial", quietly=TRUE)) {
+    suppressPackageStartupMessages({
+      library(NMF)
+      library(ggalluvial)
+    })
+
+    safe_pdf(file.path(plot_dir, "selectK_outgoing.pdf"), width=7, height=5, {
+      p <- CellChat::selectK(cellchat, pattern = "outgoing")
+      print_any(p)
+    })
+
+    safe({
+      cellchat <- CellChat::identifyCommunicationPatterns(cellchat, pattern = "outgoing", k = 6)
+    })
+
+    safe_pdf(file.path(plot_dir, "patterns_outgoing_river.pdf"), width=10, height=6, {
+      p <- CellChat::netAnalysis_river(cellchat, pattern = "outgoing")
+      print_any(p)
+    })
+
+    safe_pdf(file.path(plot_dir, "patterns_outgoing_dot.pdf"), width=10, height=6, {
+      p <- CellChat::netAnalysis_dot(cellchat, pattern = "outgoing")
+      print_any(p)
+    })
+
+    safe_pdf(file.path(plot_dir, "selectK_incoming.pdf"), width=7, height=5, {
+      p <- CellChat::selectK(cellchat, pattern = "incoming")
+      print_any(p)
+    })
+
+    safe({
+      cellchat <- CellChat::identifyCommunicationPatterns(cellchat, pattern = "incoming", k = 3)
+    })
+
+    safe_pdf(file.path(plot_dir, "patterns_incoming_river.pdf"), width=10, height=6, {
+      p <- CellChat::netAnalysis_river(cellchat, pattern = "incoming")
+      print_any(p)
+    })
+
+    safe_pdf(file.path(plot_dir, "patterns_incoming_dot.pdf"), width=10, height=6, {
+      p <- CellChat::netAnalysis_dot(cellchat, pattern = "incoming")
+      print_any(p)
+    })
+
+    saveRDS(cellchat, file = "data/cellchat/cellchat_object_with_patterns.rds")
+  } else {
+    message("[SKIP] do_patterns=TRUE but NMF/ggalluvial not available.")
+  }
+}
+```
+
+```{r Similarity-Embedding}
+#| include: false
+
+out_rds <- paste0(params$project_name, "_cellchat_done.rds")
+saveRDS(list(done=TRUE, timestamp=Sys.time()), file = out_rds)
+# # ----------------------------
+# # Similarity / embedding (FIXED: print)
+# # ----------------------------
+# if (isTRUE(params$do_embedding)) {
+#   safe_pdf(file.path(plot_dir, "net_embedding_structural.pdf"), width=8, height=6, {
+#     cellchat <- CellChat::computeNetSimilarity(cellchat, type = "structural")
+#     cellchat <- CellChat::netEmbedding(cellchat, type = "structural")
+#     cellchat <- CellChat::netClustering(cellchat, type = "structural")
+#     p <- CellChat::netVisual_embedding(cellchat, type = "structural", label.size = 3.5)
+#     print_any(p)
+#   })
+# 
+#   safe_pdf(file.path(plot_dir, "net_embedding_structural_zoom.pdf"), width=12, height=8, {
+#     p <- CellChat::netVisual_embeddingZoomIn(cellchat, type = "structural", nCol = 2)
+#     print_any(p)
+#   })
+# 
+#   saveRDS(cellchat, file = "data/cellchat_object_with_embedding.rds")
+# }
+
+```
+
+```{r}
+#| label: Params
+#| warning: false
+print(params)
+```
+
+```{r}
+#| label: SessionInfo
+#| warning: false
+
+sessionInfo()
+
+```

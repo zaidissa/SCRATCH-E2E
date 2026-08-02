@@ -1,0 +1,627 @@
+---
+title: "SCRATCH-E2E — Tumour microenvironment characterisation"
+execute:
+  freeze: false
+  cache: false
+  warning: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 3
+    embed-resources: true
+    code-fold: show
+    fig-format: png
+    fig-dpi: 300
+    fig-align: center
+params:
+  seurat_object: null
+  project_name: "project"
+  work_directory: "."
+  celltype_col: "azimuth_labels"
+  sample_col: "sample_id"
+  condition_col: "condition"
+  patient_col: "patient_id"
+  min_cells_per_group: 30
+  top_n_celltypes: 12
+  seed: 1234
+  run_scoda: false            # opt-in; needs the scCODA image (large)
+  propeller_transform: "logit"
+  min_celltype_frac: 0.005    # rare-type guard: >= 0.5% of cells ...
+  min_celltype_prevalence: 0.5  # ... and present in >= 50% of samples
+  scoda_reference: "automatic"
+  scoda_fdr: 0.05
+  scoda_python: ""   # empty -> $SCRATCH_SCODA_PYTHON, else python3
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r setup, include = FALSE}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(data.table)
+  library(ggplot2)
+  library(scales)
+})
+
+set.seed(params$seed)
+if (!is.null(params$work_directory) && dir.exists(params$work_directory)) {
+  setwd(params$work_directory)
+}
+dir.create("data",    showWarnings = FALSE, recursive = TRUE)
+dir.create("figures", showWarnings = FALSE, recursive = TRUE)
+
+# Categorical hues assigned in fixed slot order and never cycled, so a cell type
+# keeps its colour when others are filtered out. Sequential magnitude uses one
+# hue, light to dark.
+CAT <- c("#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+         "#e87ba4", "#008300", "#4a3aa7", "#e34948")
+SEQ_LOW <- "#cde2fb"; SEQ_HIGH <- "#0d366b"
+DIV_LOW <- "#2a78d6"; DIV_MID <- "#f0efec"; DIV_HIGH <- "#e34948"
+INK <- "#0f1417"; INK2 <- "#4e5a60"; MUTED <- "#898781"
+GRID <- "#e1e0d9"; SURFACE <- "#fcfcfb"
+
+theme_scratch <- function(base = 12) {
+  theme_minimal(base_size = base) +
+    theme(plot.background  = element_rect(fill = SURFACE, colour = NA),
+          panel.background = element_rect(fill = SURFACE, colour = NA),
+          panel.grid.major = element_line(colour = GRID, linewidth = .3),
+          panel.grid.minor = element_blank(),
+          axis.text  = element_text(colour = MUTED),
+          axis.title = element_text(colour = INK2),
+          plot.title = element_text(colour = INK, face = "bold"),
+          plot.subtitle = element_text(colour = INK2, size = base * .9),
+          legend.text = element_text(colour = INK2),
+          legend.title = element_text(colour = INK2),
+          strip.text = element_text(colour = INK2, face = "bold"))
+}
+
+fold_other <- function(x, k) {
+  x <- as.character(x)
+  keep <- names(sort(table(x), decreasing = TRUE))[seq_len(min(k, length(unique(x))))]
+  factor(ifelse(x %in% keep, x, "Other"), levels = c(keep, "Other"))
+}
+note <- function(...) cat("\n_", ..., "_\n\n", sep = "")
+save_fig <- function(p, n, w = 9, h = 5.5) {
+  ggsave(file.path("figures", paste0(n, ".png")), p, width = w, height = h, dpi = 400); p
+}
+```
+
+## Scope
+
+This runs on the **batch-corrected non-malignant compartment** produced by the
+stratification step. Malignant cells are analysed separately by the metaprogram
+stage; excluding them here is what makes composition comparable between
+patients, since tumour content otherwise dominates every proportion.
+
+```{r load}
+stopifnot(!is.null(params$seurat_object))
+obj <- readRDS(params$seurat_object)
+cat("Non-malignant compartment:", ncol(obj), "cells x", nrow(obj), "features\n")
+
+meta <- as.data.table(obj@meta.data, keep.rownames = "cell_id")
+
+pick <- function(pref, alts) {
+  cand <- c(pref, alts); hit <- cand[cand %in% names(meta)]
+  if (length(hit)) hit[1] else NA_character_
+}
+col_ct   <- pick(params$celltype_col,   c("azimuth_labels","celltype","cell_type","annotation","sctype","sctype_agg","sctype_labels"))
+col_smp  <- pick(params$sample_col,     c("sample_id","orig.ident","sample"))
+col_cond <- pick(params$condition_col,  c("condition","timepoint","group","response"))
+col_pat  <- pick(params$patient_col,    c("patient_id","patient","donor"))
+
+cat("Resolved -> celltype:", col_ct, "| sample:", col_smp,
+    "| condition:", col_cond, "| patient:", col_pat, "\n")
+
+if (is.na(col_ct)) stop("No cell-type annotation column found; TME characterisation needs one.")
+meta[, ct := fold_other(get(col_ct), as.integer(params$top_n_celltypes))]
+```
+
+## Composition
+
+```{r composition-sample, fig.width = 10, fig.height = 5.5}
+if (!is.na(col_smp)) {
+  comp <- meta[, .N, by = .(smp = get(col_smp), ct)][, frac := N / sum(N), by = smp]
+  fwrite(comp, "data/tme_composition_by_sample.csv")
+
+  p <- ggplot(comp, aes(x = smp, y = frac, fill = ct)) +
+    geom_col(width = .74, colour = SURFACE, linewidth = 1) +
+    scale_fill_manual(values = CAT, name = "cell type") +
+    scale_y_continuous(labels = percent_format(accuracy = 1), expand = expansion(mult = c(0, .02))) +
+    labs(title = "Microenvironment composition by sample",
+         subtitle = "Non-malignant cells only", x = NULL, y = "share of cells") +
+    theme_scratch() + theme(axis.text.x = element_text(angle = 40, hjust = 1))
+  print(save_fig(p, "tme_composition_by_sample", 10, 5.5))
+} else note("No sample column; per-sample composition skipped.")
+```
+
+```{r composition-condition, fig.width = 9, fig.height = 5.5}
+if (!is.na(col_cond) && uniqueN(meta[[col_cond]]) > 1) {
+  comp <- meta[, .N, by = .(cond = get(col_cond), ct)][, frac := N / sum(N), by = cond]
+  fwrite(comp, "data/tme_composition_by_condition.csv")
+
+  p <- ggplot(comp, aes(x = cond, y = frac, fill = ct)) +
+    geom_col(width = .6, colour = SURFACE, linewidth = 1) +
+    scale_fill_manual(values = CAT, name = "cell type") +
+    scale_y_continuous(labels = percent_format(accuracy = 1), expand = expansion(mult = c(0, .02))) +
+    labs(title = "Microenvironment composition by condition", x = NULL, y = "share of cells") +
+    theme_scratch()
+  print(save_fig(p, "tme_composition_by_condition"))
+} else note("Fewer than two conditions; comparison skipped.")
+```
+
+## Differential abundance
+
+```{r abundance, fig.width = 9, fig.height = 5}
+# Per-sample proportions are the unit of analysis: testing per cell would treat
+# thousands of cells from one patient as independent observations.
+if (!is.na(col_smp) && !is.na(col_cond) && uniqueN(meta[[col_cond]]) > 1) {
+
+  props <- meta[, .N, by = .(smp = get(col_smp), cond = get(col_cond), ct)]
+  props[, total := sum(N), by = smp]
+  props <- props[total >= as.integer(params$min_cells_per_group)]
+  props[, frac := N / total]
+
+  # Fill absent cell type / sample combinations with zero.
+  grid <- CJ(smp = unique(props$smp), ct = unique(props$ct), unique = TRUE)
+  key  <- unique(props[, .(smp, cond)])
+  full <- merge(merge(grid, key, by = "smp"), props[, .(smp, ct, frac)],
+                by = c("smp", "ct"), all.x = TRUE)
+  full[is.na(frac), frac := 0]
+
+  conds <- sort(unique(full$cond))
+
+  # Omnibus test per cell type. Two groups -> Wilcoxon; more -> Kruskal-Wallis.
+  # Either way the unit of observation is the SAMPLE proportion, not the cell:
+  # testing per cell would treat thousands of cells from one patient as
+  # independent and manufacture significance.
+  omni <- full[, {
+    grp <- split(frac, cond)
+    grp <- grp[vapply(grp, length, integer(1)) >= 2]
+    if (length(grp) < 2) {
+      .(test = NA_character_, statistic = NA_real_, p = NA_real_, n_groups = length(grp))
+    } else if (length(grp) == 2) {
+      w <- suppressWarnings(stats::wilcox.test(grp[[1]], grp[[2]]))
+      .(test = "Wilcoxon", statistic = unname(w$statistic), p = w$p.value, n_groups = 2L)
+    } else {
+      k <- suppressWarnings(stats::kruskal.test(frac ~ factor(cond)))
+      .(test = "Kruskal-Wallis", statistic = unname(k$statistic), p = k$p.value,
+        n_groups = length(grp))
+    }
+  }, by = ct]
+  omni[, padj := p.adjust(p, method = "BH")]
+
+  # Mean proportion per condition, joined on so the table is readable alone.
+  means <- dcast(full[, .(m = mean(frac)), by = .(ct, cond)], ct ~ cond, value.var = "m")
+  setnames(means, setdiff(names(means), "ct"), paste0("mean_", setdiff(names(means), "ct")))
+  res <- merge(omni, means, by = "ct")
+  setorder(res, padj, na.last = TRUE)
+  fwrite(res, "data/tme_differential_abundance.csv")
+  knitr::kable(res, digits = 4)
+
+  # Every pairwise contrast, so an omnibus hit can be attributed to a pair.
+  if (length(conds) > 2) {
+    pw <- rbindlist(lapply(utils::combn(conds, 2, simplify = FALSE), function(cc) {
+      full[, {
+        a <- frac[cond == cc[1]]; b <- frac[cond == cc[2]]
+        if (length(a) >= 2 && length(b) >= 2) {
+          w <- suppressWarnings(stats::wilcox.test(a, b))
+          .(group1 = cc[1], group2 = cc[2], mean1 = mean(a), mean2 = mean(b),
+            log2fc = log2((mean(b) + 1e-4) / (mean(a) + 1e-4)), p = w$p.value)
+        } else .(group1 = cc[1], group2 = cc[2], mean1 = mean(a), mean2 = mean(b),
+                 log2fc = NA_real_, p = NA_real_)
+      }, by = ct]
+    }))
+    pw[, padj := p.adjust(p, method = "BH")]      # corrected across ALL contrasts
+    setorder(pw, padj, na.last = TRUE)
+    fwrite(pw, "data/tme_differential_abundance_pairwise.csv")
+  }
+
+  # Plot: two groups -> signed fold change; more -> proportion heatmap with the
+  # omnibus result marked, since a single log2FC has no meaning across >2 levels.
+  if (length(conds) == 2 && nrow(res[is.finite(p)])) {
+    fc <- merge(full[, .(m = mean(frac)), by = .(ct, cond)][, dcast(.SD, ct ~ cond, value.var = "m")],
+                res[, .(ct, padj)], by = "ct")
+    setnames(fc, conds, c("g1", "g2"))
+    fc[, log2fc := log2((g2 + 1e-4) / (g1 + 1e-4))]
+    p <- ggplot(fc, aes(reorder(ct, log2fc), log2fc, fill = log2fc)) +
+      geom_col(width = .68) + geom_hline(yintercept = 0, colour = MUTED, linewidth = .4) +
+      scale_fill_gradient2(low = DIV_LOW, mid = DIV_MID, high = DIV_HIGH, midpoint = 0, guide = "none") +
+      geom_text(aes(label = ifelse(!is.na(padj) & padj < .05, "*", "")), hjust = -.4, size = 5) +
+      coord_flip() +
+      labs(title = sprintf("Differential abundance: %s vs %s", conds[2], conds[1]),
+           subtitle = "Per-sample proportions, Wilcoxon, BH-adjusted; * = padj < 0.05",
+           x = NULL, y = sprintf("log2 fold change (%s / %s)", conds[2], conds[1])) +
+      theme_scratch()
+    print(save_fig(p, "tme_differential_abundance"))
+  } else if (length(conds) > 2) {
+    hm <- full[, .(m = mean(frac)), by = .(ct, cond)]
+    hm <- merge(hm, res[, .(ct, padj)], by = "ct")
+    hm[, lab := ifelse(!is.na(padj) & padj < .05, paste0(ct, " *"), as.character(ct))]
+    p <- ggplot(hm, aes(cond, reorder(lab, m), fill = m)) +
+      geom_tile(colour = SURFACE, linewidth = 2) +
+      geom_text(aes(label = percent(m, accuracy = 1)),
+                colour = ifelse(hm$m > max(hm$m) * .55, "#ffffff", INK), size = 3) +
+      scale_fill_gradient(low = SEQ_LOW, high = SEQ_HIGH, labels = percent_format(accuracy = 1),
+                          name = "mean share") +
+      labs(title = sprintf("Composition across %d conditions", length(conds)),
+           subtitle = "Mean per-sample proportion; * = Kruskal-Wallis padj < 0.05 across all groups",
+           x = NULL, y = NULL) +
+      theme_scratch() + theme(panel.grid = element_blank())
+    print(save_fig(p, "tme_differential_abundance", 9, 5.5))
+  }
+
+  scratch_finding(paste0(
+    "Proportions are **compositional** (they sum to 1), so one population expanding ",
+    "mechanically shrinks the others. These rank-based tests do not model that — ",
+    "treat this table as a **screen**. The scCODA section below is the confirmatory ",
+    "test that does model the constraint."),
+    type = "caution", title = "Interpreting these p-values")
+
+} else note("Needs a sample column and two conditions; differential abundance skipped.")
+```
+
+### Compositional test
+
+::: {.callout-note collapse="true"}
+## Why the table above needs a second test
+
+The screen above asks "did this cell type's proportion move?". Because proportions
+are locked to a simplex, a proportion can move purely because something *else*
+moved -- a tumour-rich sample deflates every immune fraction at once without a
+single immune cell being lost.
+
+Two methods are available here. **propeller** (`speckle`) is the default: it
+variance-stabilises the proportions with a logit transform and fits them with
+limma's empirical Bayes, giving one p-value per cell type and an ANOVA F-test
+across more than two groups. **scCODA** is opt-in (`run_scoda: true`) and models
+the per-sample counts as Dirichlet-multinomial with spike-and-slab selection.
+scCODA is the more principled treatment of the constraint, but it reports effects
+only *relative to a reference cell type* and costs a much larger container image,
+so it is a confirmatory tool rather than the default.
+:::
+
+```{r propeller, fig.width = 9, fig.height = 5}
+# Rare cell types are the failure mode here. A logit transform on a population
+# that is a fraction of a percent of the sample turns sampling noise into a very
+# small p-value: on the HGSOC cohort an HSC population of 112 cells (0.05% of
+# cells, absent from 15 of 39 samples) came out at FDR 1e-06. Types that thin are
+# tested separately and reported as unreliable rather than silently ranked
+# alongside real results.
+prop_res <- NULL; prop_msg <- NULL; prop_rare <- NULL
+
+if (is.na(col_smp) || is.na(col_cond) || uniqueN(meta[[col_cond]]) < 2) {
+  prop_msg <- "Needs a sample column and at least two conditions."
+} else if (!requireNamespace("speckle", quietly = TRUE)) {
+  prop_msg <- paste0("The `speckle` package is not installed in this image, so the ",
+                     "compositional test did not run. `BiocManager::install('speckle')`.")
+} else {
+  cells <- meta[, .(smp = as.character(get(col_smp)),
+                    cond = as.character(get(col_cond)), ct = as.character(ct))]
+
+  # Prevalence guard: a type must clear a minimum share AND be present in enough
+  # samples for a per-sample proportion to mean anything.
+  share <- cells[, .N, by = ct][, frac := N / sum(N)]
+  present <- cells[, .(n_smp = uniqueN(smp)), by = ct]
+  guard <- merge(share, present, by = "ct")
+  min_frac <- as.numeric(params$min_celltype_frac)
+  min_smp  <- max(3L, ceiling(uniqueN(cells$smp) * as.numeric(params$min_celltype_prevalence)))
+  guard[, reliable := frac >= min_frac & n_smp >= min_smp]
+  prop_rare <- guard[reliable == FALSE]
+
+  keep_ct <- guard[reliable == TRUE, ct]
+  if (length(keep_ct) < 2) {
+    prop_msg <- sprintf(paste0("Only %d cell type(s) clear the prevalence guard ",
+                               "(>= %.1f%% of cells and present in >= %d samples); ",
+                               "too few to test."),
+                        length(keep_ct), 100 * min_frac, min_smp)
+  } else {
+    cc <- cells[ct %in% keep_ct]
+    pr <- try(speckle::propeller(clusters = cc$ct, sample = cc$smp, group = cc$cond,
+                                 transform = params$propeller_transform), silent = TRUE)
+    if (inherits(pr, "try-error")) {
+      prop_msg <- paste("propeller failed:", sub("\n.*", "", as.character(pr)))
+    } else {
+      prop_res <- as.data.table(pr, keep.rownames = "cell_type")
+      fwrite(prop_res, "data/tme_differential_abundance_propeller.csv")
+      if (nrow(prop_rare)) fwrite(prop_rare, "data/tme_rare_celltypes_excluded.csv")
+    }
+  }
+}
+
+if (is.null(prop_res)) {
+  scratch_finding(paste0(
+    "**The compositional test did not run.** ", prop_msg,
+    " The differential-abundance table above is therefore a non-compositional ",
+    "screen with nothing confirming it -- do not report its p-values as evidence ",
+    "of a real abundance change."),
+    type = "warning", title = "Compositional test not run")
+} else {
+  pcol <- intersect(c("FDR", "P.Value"), names(prop_res))[1]
+  hits <- prop_res[get(pcol) < 0.05, cell_type]
+
+  scratch_table(prop_res, caption = sprintf(
+    "propeller (%s transform, %s). Rare types excluded by the prevalence guard.",
+    params$propeller_transform,
+    if ("Fstatistic" %in% names(prop_res)) "ANOVA across groups" else "two-group test"))
+
+  stat_col <- intersect(c("Fstatistic", "Tstatistic"), names(prop_res))[1]
+  if (!is.na(stat_col) && nrow(prop_res)) {
+    pl <- copy(prop_res)[, `:=`(sig = get(pcol) < 0.05,
+                                nlp = -log10(pmax(get(pcol), .Machine$double.xmin)))]
+    p <- ggplot(pl, aes(reorder(cell_type, nlp), nlp, fill = sig)) +
+      geom_col(width = .68) +
+      geom_hline(yintercept = -log10(0.05), linetype = "22", colour = MUTED, linewidth = .4) +
+      scale_fill_manual(values = c(`TRUE` = CAT[1], `FALSE` = MUTED), guide = "none") +
+      coord_flip() +
+      labs(title = "Compositional differential abundance (propeller)",
+           subtitle = sprintf("%s transform; dashed line = FDR 0.05",
+                              params$propeller_transform),
+           x = NULL, y = expression(-log[10]~FDR)) +
+      theme_scratch()
+    print(save_fig(p, "tme_propeller"))
+  }
+
+  if (nrow(prop_rare)) {
+    scratch_finding(paste0(
+      sprintf("**%d cell type(s) were excluded as too rare to test**: %s. ",
+              nrow(prop_rare), paste(prop_rare$ct, collapse = ", ")),
+      "A logit transform on a population that is a fraction of a percent turns ",
+      "sampling noise into a very small p-value, so these are reported here ",
+      "rather than ranked with the results above. Counts are in ",
+      "`data/tme_rare_celltypes_excluded.csv`."),
+      type = "caution", title = "Rare cell types excluded")
+  }
+
+  screen_hits <- if (exists("res")) res[!is.na(padj) & padj < .05, as.character(ct)] else character()
+  only_screen <- setdiff(intersect(screen_hits, prop_res$cell_type), hits)
+  scratch_finding(paste0(
+    sprintf("propeller finds **%d cell type%s** with a credible compositional change ",
+            length(hits), if (length(hits) == 1) "" else "s"),
+    sprintf("at FDR 0.05%s. ",
+            if (length(hits)) paste0(": ", paste(hits, collapse = ", ")) else ""),
+    if (length(only_screen))
+      sprintf(paste0("**%s** reached padj < 0.05 in the rank-based screen but not ",
+                     "here -- consistent with those proportions moving because ",
+                     "other populations moved. "),
+              paste(only_screen, collapse = ", ")) else ""),
+    type = if (length(only_screen)) "caution" else "info",
+    title = "Compositional verdict")
+}
+```
+
+### Confirmatory: scCODA {#scoda}
+
+```{r scoda, fig.width = 9, fig.height = 5}
+# Opt-in. Needs the scCODA image (containers/tme/Dockerfile.scoda); everything is
+# guarded so a missing environment degrades visibly instead of failing.
+scoda_res <- NULL
+scoda_msg <- NULL
+
+if (!isTRUE(as.logical(params$run_scoda))) {
+  scoda_msg <- "Not enabled (`run_scoda: false`). propeller above is the default test."
+} else if (is.na(col_smp) || is.na(col_cond) || uniqueN(meta[[col_cond]]) < 2) {
+  scoda_msg <- "Needs a sample column and at least two conditions."
+} else {
+  cnt <- dcast(meta[, .N, by = .(smp = get(col_smp), ct)], smp ~ ct,
+               value.var = "N", fill = 0)
+  cov <- unique(meta[, .(smp = get(col_smp), condition = as.character(get(col_cond)))])
+  cov <- cov[smp %in% cnt$smp][match(cnt$smp, smp)]
+
+  d <- file.path(tempdir(), "scoda"); dir.create(d, showWarnings = FALSE)
+  f_cnt <- file.path(d, "counts.csv"); f_cov <- file.path(d, "covariates.csv")
+  f_out <- file.path(d, "effects.csv")
+  fwrite(cnt, f_cnt); fwrite(cov, f_cov)
+
+  # Nextflow puts the pipeline's bin/ on PATH, so the script resolves by name.
+  py  <- if (nzchar(params$scoda_python)) params$scoda_python else
+           Sys.getenv("SCRATCH_SCODA_PYTHON", "python3")
+  scr <- Sys.which("scratch_scoda.py")
+  if (!nzchar(scr)) for (cand in c("bin/scratch_scoda.py", "../bin/scratch_scoda.py",
+                                   file.path(Sys.getenv("SCRATCH_BIN_DIR", "."), "scratch_scoda.py")))
+    if (file.exists(cand)) { scr <- normalizePath(cand); break }
+
+  if (!nzchar(scr)) {
+    scoda_msg <- "`scratch_scoda.py` not found on PATH."
+  } else {
+    err <- file.path(d, "stderr.txt")
+    st <- suppressWarnings(system2(py, c(shQuote(scr),
+            "--counts", shQuote(f_cnt), "--covariates", shQuote(f_cov),
+            "--formula", "condition",
+            "--reference", shQuote(params$scoda_reference),
+            "--fdr", params$scoda_fdr, "--seed", params$seed,
+            "--out", shQuote(f_out)), stdout = TRUE, stderr = err))
+    detail <- if (file.exists(err)) paste(readLines(err, warn = FALSE), collapse = " ") else ""
+    code <- attr(st, "status"); code <- if (is.null(code)) 0L else code
+
+    if (code == 2L) {
+      scoda_msg <- paste0("scCODA is not installed in the notebook's Python (`", py,
+                          "`). Use the scCODA image or set `scoda_python`. Detail: ", detail)
+    } else if (code == 3L) {
+      scoda_msg <- paste0("The design cannot support scCODA: ", detail)
+    } else if (code != 0L || !file.exists(f_out)) {
+      scoda_msg <- paste0("scCODA failed (exit ", code, "): ", detail)
+    } else {
+      scoda_res <- fread(f_out)
+      fwrite(scoda_res, "data/tme_differential_abundance_scoda.csv")
+    }
+  }
+}
+
+if (is.null(scoda_res)) {
+  note(scoda_msg)
+} else {
+  ref <- unique(scoda_res$reference_cell_type)[1]
+  fdr <- unique(scoda_res$est_fdr)[1]
+
+  # The reference cell type is the model's baseline: its effects are fixed at
+  # zero by construction. Reporting it as "not credible" alongside genuinely
+  # tested types would read as "no change found", which is not what it means.
+  scoda_res[, status := fifelse(cell_type == ref, "reference (not estimable)",
+                        fifelse(credible, "credible", "not credible"))]
+  cred <- scoda_res[credible == TRUE & cell_type != ref]
+
+  scratch_table(scoda_res[, .(covariate, cell_type, effect, log2fc,
+                              inclusion_prob, status)],
+                caption = sprintf("scCODA effects (reference: %s; FDR %.2f)", ref, fdr))
+
+  if (nrow(cred)) {
+    p <- ggplot(cred, aes(reorder(cell_type, log2fc), log2fc, fill = log2fc)) +
+      geom_col(width = .68) +
+      geom_hline(yintercept = 0, colour = MUTED, linewidth = .4) +
+      scale_fill_gradient2(low = DIV_LOW, mid = DIV_MID, high = DIV_HIGH,
+                           midpoint = 0, guide = "none") +
+      coord_flip() +
+      labs(title = "Credible compositional changes (scCODA)",
+           subtitle = sprintf("Dirichlet-multinomial, FDR %.2f; effects are relative to %s",
+                              fdr, ref),
+           x = NULL, y = "log2 fold change") +
+      theme_scratch()
+    print(save_fig(p, "tme_scoda_effects"))
+  }
+
+  scratch_finding(paste0(
+    sprintf("scCODA finds **%d credible change%s** at FDR %.2f, ",
+            nrow(cred), if (nrow(cred) == 1) "" else "s", fdr),
+    sprintf("all measured **relative to %s**, which is the model's baseline and ", ref),
+    "therefore cannot itself be tested -- its absence from the credible list is a ",
+    "structural property, not evidence that it is unchanged. ",
+    if (nrow(cred)) paste0("Credible: ", paste(cred$cell_type, collapse = ", "), ".") else ""),
+    type = "info", title = "scCODA verdict")
+}
+```
+
+## Functional programmes
+
+```{r signatures, fig.width = 10, fig.height = 6}
+# Curated marker sets scored per cell. Genes absent from the object are dropped
+# and the set is skipped if too little of it survives.
+SIGNATURES <- list(
+  Cytotoxicity  = c("GZMB","GZMA","GZMK","PRF1","NKG7","GNLY","KLRD1","IFNG"),
+  Exhaustion    = c("PDCD1","CTLA4","LAG3","HAVCR2","TIGIT","TOX","ENTPD1"),
+  Interferon    = c("ISG15","IFI6","IFIT1","IFIT3","MX1","OAS1","STAT1","IRF7"),
+  Hypoxia       = c("VEGFA","SLC2A1","CA9","LDHA","PGK1","ADM","NDRG1"),
+  Angiogenesis  = c("PECAM1","VWF","CDH5","KDR","ANGPT2","ESM1"),
+  ECM_CAF       = c("COL1A1","COL1A2","COL3A1","FN1","POSTN","FAP","ACTA2","TAGLN"),
+  Complement    = c("C1QA","C1QB","C1QC","C3","CFB"),
+  Proliferation = c("MKI67","TOP2A","PCNA","CCNB1","BIRC5")
+)
+
+present <- rownames(obj)
+sets <- lapply(SIGNATURES, function(g) intersect(g, present))
+kept <- sets[vapply(sets, length, integer(1)) >= 3]
+
+if (length(kept)) {
+  # Not Seurat::AddModuleScore — it calls GetAssayData(slot=), defunct in
+  # SeuratObject 5.x, and fails on ANY object under Seurat 5.3.0. Same method,
+  # version-independent.
+  obj <- scratch_module_score(obj, kept, name = "TMEsig", seed = params$seed)
+  score_cols <- grep("^TMEsig\\d+$", colnames(obj@meta.data), value = TRUE)
+  names(score_cols) <- names(kept)[seq_along(score_cols)]
+
+  sc <- as.data.table(obj@meta.data[, score_cols, drop = FALSE], keep.rownames = "cell_id")
+  setnames(sc, score_cols, names(score_cols))
+  sc <- merge(sc, meta[, .(cell_id, ct)], by = "cell_id")
+
+  long <- melt(sc, id.vars = c("cell_id", "ct"),
+               variable.name = "signature", value.name = "score")
+  summ <- long[, .(score = mean(score, na.rm = TRUE)), by = .(ct, signature)]
+  fwrite(summ, "data/tme_signature_scores.csv")
+
+  # Sequential encoding within each signature: scale per row so cell types are
+  # comparable within a programme, not across programmes with different ranges.
+  summ[, z := as.numeric(scale(score)), by = signature]
+
+  p <- ggplot(summ, aes(x = ct, y = signature, fill = z)) +
+    geom_tile(colour = SURFACE, linewidth = 2) +
+    scale_fill_gradient2(low = DIV_LOW, mid = DIV_MID, high = DIV_HIGH,
+                         midpoint = 0, name = "z (within\nsignature)") +
+    labs(title = "Functional programme activity across the microenvironment",
+         subtitle = sprintf("%d signatures scored; genes absent from the object were dropped",
+                            length(kept)),
+         x = NULL, y = NULL) +
+    theme_scratch() +
+    theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 40, hjust = 1))
+  print(save_fig(p, "tme_signature_heatmap", 10, 6))
+
+  cat("\nSignatures scored:\n")
+  knitr::kable(data.table(signature = names(kept),
+                          genes_found = vapply(kept, length, integer(1)),
+                          genes_in_set = vapply(SIGNATURES[names(kept)], length, integer(1))))
+} else note("No signature retained enough genes to score.")
+```
+
+```{r signature-condition, fig.width = 9, fig.height = 5}
+if (exists("sc") && !is.na(col_cond) && uniqueN(meta[[col_cond]]) > 1) {
+  sc2 <- merge(sc, meta[, .(cell_id, cond = get(col_cond))], by = "cell_id")
+  long2 <- melt(sc2, id.vars = c("cell_id", "ct", "cond"),
+                variable.name = "signature", value.name = "score")
+  summ2 <- long2[, .(score = mean(score, na.rm = TRUE)), by = .(cond, signature)]
+  fwrite(summ2, "data/tme_signature_by_condition.csv")
+
+  p <- ggplot(summ2, aes(x = signature, y = score, fill = cond)) +
+    geom_col(position = position_dodge(width = .72), width = .64,
+             colour = SURFACE, linewidth = .8) +
+    scale_fill_manual(values = CAT, name = "condition") +
+    geom_hline(yintercept = 0, colour = MUTED, linewidth = .4) +
+    labs(title = "Programme activity by condition",
+         x = NULL, y = "mean module score") +
+    theme_scratch() + theme(axis.text.x = element_text(angle = 30, hjust = 1))
+  print(save_fig(p, "tme_signature_by_condition"))
+}
+```
+
+## Diversity
+
+```{r diversity, fig.width = 9, fig.height = 4.5}
+# Shannon entropy over cell-type proportions: how evenly mixed each sample's
+# microenvironment is. A low value means one population dominates.
+if (!is.na(col_smp)) {
+  div <- meta[, .N, by = .(smp = get(col_smp), ct)][, p := N / sum(N), by = smp][
+             , .(shannon = -sum(p * log(p)), n_types = .N, cells = sum(N)), by = smp]
+  if (!is.na(col_cond)) {
+    div <- merge(div, unique(meta[, .(smp = get(col_smp), cond = get(col_cond))]), by = "smp")
+  }
+  fwrite(div, "data/tme_diversity.csv")
+
+  p <- ggplot(div, aes(x = reorder(smp, shannon), y = shannon)) +
+    geom_col(fill = CAT[1], width = .68) +
+    geom_text(aes(label = sprintf("%.2f", shannon)), hjust = -.2,
+              colour = INK2, size = 3.2) +
+    coord_flip() +
+    scale_y_continuous(expand = expansion(mult = c(0, .14))) +
+    labs(title = "Microenvironment diversity by sample",
+         subtitle = "Shannon entropy over non-malignant cell-type proportions",
+         x = NULL, y = "Shannon entropy") +
+    theme_scratch()
+  print(save_fig(p, "tme_diversity", 9, 4.5))
+  knitr::kable(div, digits = 3)
+}
+```
+
+## Summary
+
+```{r summary}
+produced <- list.files("data", pattern = "\\.csv$")
+knitr::kable(data.table(output = produced))
+```
+
+## Session info
+
+```{r session, echo = FALSE}
+sessionInfo()
+```

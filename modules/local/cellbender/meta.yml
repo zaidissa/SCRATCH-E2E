@@ -1,0 +1,41 @@
+name: cellbender
+description: Runs Cellbender to remove ambient RNA background noise from single-cell RNA-seq data.
+keywords:
+  - single-cell
+  - noise reduction
+  - Cellbender
+tools:
+  - cellbender:
+      description: Cellbender is a tool developed by the Broad Institute to remove background noise from droplet-based single-cell RNA-seq data.
+      homepage: https://github.com/broadinstitute/CellBender
+      documentation: https://broadinstitute.github.io/CellBender/
+      tool_dev_url: https://github.com/broadinstitute/CellBender
+      licence: "MIT"
+input:
+  - sample_id:
+      type: string
+      description: Unique identifier for the sample being processed.
+  - csv_metrics:
+      type: file
+      description: CSV file containing metrics or parameters relevant to the analysis.
+      pattern: "*.csv"
+  - matrices:
+      type: file
+      description: Input file containing the single-cell RNA-seq data matrix.
+      pattern: "*.h5"
+output:
+  - sample_id:
+      type: string
+      description: Unique identifier for the sample processed.
+  - csv_metrics:
+      type: file
+      description: CSV file containing updated metrics or parameters after processing.
+      pattern: "*.csv"
+  - matrix:
+      type: file
+      description: Output HDF5 file after ambient RNA background noise has been removed by Cellbender.
+      pattern: "cellbender_${sample_id}_matrix.h5"
+authors:
+  - Andre Fonseca (@oandrefonseca)
+maintainers:
+  - Andre Fonseca (@oandrefonseca)

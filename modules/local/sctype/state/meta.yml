@@ -1,0 +1,78 @@
+name: sctype_state_annotation
+description: |
+  This module performs detailed subtype/state annotation for specific cell populations using scType. It utilizes gene set scoring and differential expression analysis, integrating user-defined cell population markers for in-depth analysis. The module processes these inputs through a Quarto notebook that performs normalization, feature selection, clustering, and generates annotations and visualizations specific to the cell population of interest.
+keywords:
+  - single-cell
+  - annotation
+  - cell subtype
+  - cell state
+  - differential expression
+tools:
+  - Seurat:
+      description: An R package designed for QC, analysis, and exploration of single-cell RNA-seq data.
+      homepage: https://satijalab.org/seurat/
+      documentation: https://satijalab.org/seurat/articles/
+      licence: GPL-3
+  - HGNChelper:
+      description: Facilitates the use of HUGO Gene Nomenclature Committee approved gene symbols in R.
+      homepage: https://bioconductor.org/packages/HGNChelper
+      documentation: https://bioconductor.org/packages/release/bioc/html/HGNChelper.html
+      licence: Artistic-2.0
+input:
+  - project_name:
+      type: string
+      description: Name of the project, used to structure output directories and name files.
+  - seurat_object:
+      type: file
+      description: Path to an RDS file containing a Seurat object pre-processed for analysis.
+      pattern: "*.RDS"
+  - input_cell_markers_db:
+      type: file
+      description: CSV file specifying cell markers database for annotation.
+      pattern: "*.csv"
+  - cell_population:
+      type: string
+      description: Specific cell population to focus the annotation on, defined during runtime.
+  - notebook:
+      type: file
+      description: Quarto notebook (.qmd) file that performs the analysis and visualization.
+      pattern: "*.qmd"
+      parameters:
+        project_name: 'Project'
+        seurat_object: 'data/Project_major_annotation_object.RDS'
+        input_cell_markers_db: 'assets/cell_markers_database.csv'
+        input_parent_level: 'B_Plasma_Cells'
+        thr_n_features: 2000
+        input_deg_method: 'wilcox'
+        thr_npc: 25
+        thr_resolution: 0.25
+        thr_min_percentage: 0.1
+        thr_fold_change: 0.25
+  - config:
+      type: file
+      description: Configuration file containing additional parameters and paths needed for the analysis.
+output:
+  - cache:
+      type: directory
+      description: Contains cached outputs for debugging or incremental analysis.
+      pattern: "_freeze/notebook_${cell_population}"
+  - seurat_rds:
+      type: file
+      description: Output Seurat object annotated with cell states, saved in RDS format.
+      pattern: "data/${params.project_name}_${cell_population}_annotation_object.RDS"
+  - annotation:
+      type: file
+      description: Detailed annotations for each cell, saved in CSV format.
+      pattern: "data/${params.project_name}_${cell_population}_annotation.csv"
+  - html:
+      type: file
+      description: HTML report generated from the analysis, documenting the methods, parameters, and results.
+      pattern: "report/notebook_${cell_population}.html"
+  - figures:
+      type: directory
+      description: Figures generated during the analysis, including UMAP plots and diagnostic plots.
+      pattern: "_freeze/**/figure-html/*.png"
+authors:
+  - "@oandrefonseca"
+maintainers:
+  - "@oandrefonseca"

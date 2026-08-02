@@ -1,0 +1,256 @@
+---
+title: "Module - SCEVAN"
+author: "SCRATCH"
+execute:
+  freeze: auto
+  cache: false
+  warning: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    fig-format: png
+    fig-dpi: 300
+    fig-responsive: true
+    fig-align: center
+lightbox:
+    match: auto
+    effect: zoom
+    loop: true
+params:
+  # project_name: "Test"
+  # # project_object: "/Users/affaustino/Projects/dev/btc-scrna-pipeline/Test/Ovarian/data/Ovarian_main_stratification_object.RDS"
+  # # meta_project: "path/to/metadata.RDS"
+  # seurat_object: "data/Ovarian_cluster_object.RDS"
+  # work_directory: !expr here::here()
+  # input_model: "human"
+  # n_threads: 8
+  # n_memory: 16
+  # workdir: "/Users/affaustino/Projects/dev/btc-scrna-pipeline/notebook"
+  # auto_save: true
+  seurat_object: null
+  project_name: null
+  work_directory: null
+  input_model: "human"
+  n_threads: 8
+  n_memory: 16
+  auto_save: true
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r setup, include = FALSE, message = FALSE, warning = FALSE, echo = FALSE}
+
+# Project parameters 
+project_name <- params$project_name
+seurat_object <- params$seurat_object
+
+
+# Inputs and thresholds
+input_model <- params$input_model
+
+# Dataflow/Computational parameters
+n_threads <- params$n_threads
+n_memory <- params$n_memory
+
+
+# Output parameters
+work_directory <- params$work_directory
+auto_save <- params$auto_save
+# work_directory="../../../work/"
+```
+
+## Loading library
+
+```{r library}
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(Seurat)
+library(SCEVAN)
+
+```
+
+## Folder structure
+
+```{r project_directory}
+# work_directory="output/"
+if(!dir.exists(work_directory)) {
+  dir.create(work_directory, recursive = TRUE)
+}
+
+for(sub_directory in c('data', 'figures', 'figures/scevan')) {
+  dir.create(file.path(work_directory, sub_directory), recursive = TRUE)
+}
+
+```
+
+## Loading dataset
+
+```{r loading_rds}
+
+# Reading seurat object
+# seurat_object <- readRDS(file = project_object)
+seurat_object <- readRDS(file = seurat_object)
+# seurat_object <- readRDS(file = "../../../project_cluster_object.RDS")
+# Meta-data with normal cells
+# meta_data <- readRDS(file = meta_project)
+
+# Setting random seed
+random_seed <- 022003
+set.seed(random_seed)
+
+```
+
+## Clustering summary
+
+```{r clustering_summary}
+#| fig-height: 14
+#| fig-width: 8
+
+DimPlot(
+    seurat_object, 
+    reduction = "umap",
+    label = TRUE,
+    raster = FALSE,
+    label.size = 12
+  ) +
+  theme(
+    legend.position = 'top',
+    legend.justification = 'center'
+  )
+
+```
+
+```{r scevan_preparing}
+
+seurat_counts <- GetAssayData(seurat_object, layer = "counts")
+# seurat_list <- list(
+#   "SPECTRUM-OV-009" = seurat_counts[,grep("SPECTRUM-OV-009", colnames(seurat_counts))[1:1000]],
+#   "SPECTRUM-OV-065" = seurat_counts[,grep("SPECTRUM-OV-065", colnames(seurat_counts))[1:1000]],
+#   "SPECTRUM-OV-022" = seurat_counts[,grep("SPECTRUM-OV-022", colnames(seurat_counts))[1:1000]]
+# )
+# 
+# sapply(seurat_list, ncol)
+# --- 5. Automatically extract sample/group names from barcodes ---
+# Here, sample name is the part before the first "_"
+barcodes <- colnames(seurat_counts)
+sample_prefixes <- unique(sub("_.*", "", barcodes))
+cat("Detected sample(s):", paste(sample_prefixes, collapse = ", "), "\n")
+
+# --- 6. Build seurat_list for SCEVAN ---
+# To limit to 1000 cells per sample, use head(..., 1000); remove 'head' to use all cells
+seurat_list <- setNames(
+  lapply(sample_prefixes, function(prefix) {
+    cols <- grep(paste0("^", prefix, "_"), barcodes, value = TRUE)
+    seurat_counts[, head(cols, 1000)]   # Remove 'head(..., 1000)' to use all cells
+  }),
+  sample_prefixes
+)
+
+print(sapply(seurat_list, ncol)) # For sanity check
+
+# # --- 7. Run SCEVAN ---
+# results <- SCEVAN::multiSampleComparisonClonalCN(
+#   seurat_list,
+#   analysisName = project_name,
+#   organism = input_model,
+#   par_cores = n_threads
+# )
+# 
+# # # --- 8. Save results ---
+# # (You can adapt this to your needs/output folder)
+# scevan_metadata <- do.call('rbind', results[[1]])
+# if(auto_save) {
+#   saveRDS(scevan_metadata, file = file.path(work_directory, "data", paste0(project_name, "_scevan_meta_object.RDS")))
+# }
+
+```
+
+```{r scevan_running}
+
+# # norm_cell
+results <- SCEVAN::multiSampleComparisonClonalCN(
+  seurat_list,
+  analysisName = project_name,
+  organism = input_model,
+  par_cores = n_threads
+  )
+```
+```{r bind}
+scevan_metadata <- do.call('rbind', results[[1]])
+if(auto_save) {
+  saveRDS(scevan_metadata, file = file.path(work_directory, "data", paste0(project_name, "_scevan_meta_object.RDS")))
+}
+
+```
+
+```{r scevan_output}
+# 
+if(dir.exists('output')) {
+  file.rename('output', 'data/scevan')
+}
+
+```
+
+```{r scevan_oncoheat}
+
+knitr::include_graphics(path = paste0("./data/scevan/", project_name, "OncoHeat.png"))
+
+```
+
+```{r}
+
+knitr::include_graphics(path = paste0("./data/scevan/", project_name, "_compareClonalCN.png"))
+
+```
+
+```{r object_dump}
+
+# scevan_metadata <- do.call('rbind', results[[1]])
+# 
+# if(auto_save) {
+# 
+#   saveRDS(scevan_metadata, file = paste0('./data/', project_name, '_scevan_meta_object.RDS'))
+# 
+# }
+
+```
+
+
+------------------------------------------------------------------------
+
+## Parameters log
+
+```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
+
+print(params)
+
+```
+
+## Session info
+
+```{r session_info, message = FALSE, warning = FALSE, echo = FALSE}
+
+sessionInfo()
+
+```

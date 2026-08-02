@@ -1,0 +1,37 @@
+name: cellranger_mkfastq
+description: Demultiplex Illumina BCL data into sample-level FASTQ files using cellranger mkfastq.
+keywords:
+  - single-cell
+  - demultiplex
+  - BCL
+  - FASTQ
+  - cellranger
+tools:
+  - cellranger:
+      description: Cell Ranger is a set of analysis pipelines that process Chromium single-cell data.
+      homepage: https://www.10xgenomics.com/support/software/cell-ranger
+input:
+  - sample:
+      type: string
+      description: Sample name used as the mkfastq --id and the Sample field in the simple CSV.
+  - run_dir:
+      type: string
+      description: Path to the Illumina BCL run directory (not staged; passed as a string to avoid copying large directories).
+  - lane:
+      type: string
+      description: Lane number(s) for this sample. Use '*' for all lanes.
+  - index:
+      type: string
+      description: Illumina index sequence or 10x index set (e.g. SI-GA-A1 or ATCG).
+  - modality:
+      type: string
+      description: Library modality passed through to downstream processes (GEX or TCR).
+output:
+  - fastq_dir:
+      type: directory
+      description: The fastq_path directory produced by cellranger mkfastq containing demultiplexed FASTQ files.
+      pattern: "${sample}/outs/fastq_path"
+  - versions:
+      type: file
+      description: File containing software versions.
+      pattern: "versions.yml"

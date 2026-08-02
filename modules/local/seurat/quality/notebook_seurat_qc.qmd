@@ -1,0 +1,353 @@
+---
+title: "Module - Single-cell quality control"
+description: | 
+  Description
+execute:
+  freeze: auto
+  cache: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    df-print: paged
+    fig-align: center
+lightbox:
+    match: auto
+    effect: zoom
+    loop: true
+params:
+  project_name: 'Project'
+  sample_name: 'Sample_001'
+  input_gex_matrices: 'path/to/filtered_feature_bc_matrix'
+  csv_metrics: 'path/to/metrics_summary.csv'
+  thr_estimate_n_cells: 300
+  thr_mean_reads_per_cells: 25000
+  thr_median_genes_per_cell: 900
+  thr_median_umi_per_cell: 1000
+  thr_n_feature_rna_min: 300
+  thr_n_feature_rna_max: 7500
+  thr_percent_mito: 25
+  thr_n_observed_cells: 300
+  n_threads: 8
+  n_memory: 16
+  work_directory: !expr here::here()
+  auto_save: TRUE
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+# Sample ID: `r params$sample_name`
+
+```{r setup, message = FALSE, warning = FALSE, echo = TRUE}
+#| include: false
+
+# Project parameters
+project_name <- params$project_name
+sample_name <- params$sample_name
+
+input_gex_matrices <- params$input_gex_matrices
+csv_metrics <- params$csv_metrics
+
+# Filter and thresholds
+thr_estimate_n_cells <- params$thr_estimate_n_cells
+thr_mean_reads_per_cells <- params$thr_mean_reads_per_cells
+thr_median_genes_per_cell <- params$thr_median_genes_per_cell
+thr_median_umi_per_cell <- params$thr_median_umi_per_cell
+thr_n_feature_rna_min <- params$thr_n_feature_rna_min
+thr_n_feature_rna_max <- params$thr_n_feature_rna_max
+thr_percent_mito <- params$thr_percent_mito
+thr_n_observed_cells <- params$thr_n_observed_cells
+
+# Dataflow/Computational parameters
+n_threads <- params$n_threads
+n_memory <- params$n_memory
+
+# Output parameters
+work_directory <- params$work_directory
+auto_save <- params$auto_save
+
+# Rmarkdown options
+knitr::opts_knit$set(
+  root.dir = work_directory
+  )
+
+```
+
+## Loading library
+
+```{r library}
+#| output: false
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(Seurat)
+
+```
+
+## Folder structure
+
+```{r outdir}
+#| output: false
+
+if(!dir.exists(work_directory)) {
+  dir.create(work_directory, recursive = T)
+}
+
+for(sub_directory in c('figures', 'objects', 'log')) {
+  dir.create(paste0(work_directory, '/', sub_directory))
+}
+
+```
+
+## Sample-level Quality-Control
+
+```{r sample_level}
+#| echo: false
+
+sample_metrics <- read_csv(file = csv_metrics)
+
+string_to_numeric <- function(x) {
+  as.numeric(sub('%', '', x))
+}
+
+sample_metrics <- sample_metrics %>%
+  mutate_if(
+    is.character, string_to_numeric
+  )
+
+#
+
+check_list <- c(FALSE, FALSE, FALSE, FALSE)
+
+#
+
+if(sample_metrics$`Estimated Number of Cells` >= thr_estimate_n_cells) {
+  check_list[1] <- TRUE #300
+
+}
+
+if(sample_metrics$`Mean Reads per Cell` >= thr_mean_reads_per_cells) {
+  check_list[2] <- TRUE #25000
+
+}
+
+if(sample_metrics$`Median Genes per Cell` >= thr_median_genes_per_cell) {
+  check_list[3] <- TRUE #900
+
+}
+
+if(sample_metrics$`Median UMI Counts per Cell` >= thr_median_umi_per_cell) {
+  check_list[4] <- TRUE #1000
+
+}
+
+#
+
+status_flag <- NA
+
+#
+
+if(all(check_list)) {
+
+  status_flag <- "SAMPLE:SUCCESS"
+
+} else {
+
+  if(sample_metrics$`Sequencing Saturation` <= 70) {
+
+    status_flag <- "SAMPLE:FIXABLE"
+
+  } else {
+
+    status_flag <- "SAMPLE:FAILURE"
+
+  }
+
+}
+
+```
+
+:::{.callout-important}
+This sample has been flag as <strong>`r status_flag`</strong>
+:::
+
+## Cell-level Quality-Control
+
+```{r seurat_object}
+
+expression_matrix <- Read10X_h5(filename = input_gex_matrices)
+seurat_object = CreateSeuratObject(
+  counts = expression_matrix,
+  project = sample_name
+)
+
+# Calculating mitochondrial content
+
+seurat_object[["percent_mito"]] <-
+  PercentageFeatureSet(seurat_object, pattern = "^MT-")
+
+gpdat <- tidyr::gather(
+  data.frame(
+      rname = rownames(seurat_object@meta.data),
+      seurat_object@meta.data
+    ),
+  key = type,
+  value = value,
+  -rname,
+  -orig.ident
+  )
+
+ggplot(data = gpdat, aes(x = orig.ident, y = value)) +
+  geom_boxplot(color = '#f8766d', outlier.shape = NA) +
+  facet_wrap(~ type, scales = 'free') +
+  labs(x = NULL, y = NULL) +
+  scale_y_continuous(trans = 'log10') +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 0.9),
+    legend.position = 'none'
+  )
+
+
+```
+
+```{r cell_filtering}
+
+n_total_cells <- dim(seurat_object)[2]
+
+seurat_object <- subset(
+  x = seurat_object,
+  subset = (nFeature_RNA >= thr_n_feature_rna_min & nFeature_RNA < thr_n_feature_rna_max)
+  )
+
+#
+
+n_thr_features_cells <- dim(seurat_object)[2]
+
+#
+
+seurat_object <- subset(
+  x = seurat_object,
+  subset = percent_mito < thr_percent_mito
+  )
+
+#
+
+n_observed_cells <- dim(seurat_object)[2]
+
+#
+
+if(status_flag == 'SAMPLE:SUCCESS') {
+
+  if(n_observed_cells >= thr_n_observed_cells) {
+
+    status_flag <- "CELL:SUCCESS"
+
+  } else {
+
+    status_flag <- "CELL:FAILURE"
+
+  }
+
+}
+
+write_lines(status_flag, file = paste0('log/', sub('\\w+:', '', status_flag), '.txt'))
+
+```
+
+```{r compile_csv}
+
+sample_metrics_upgrade <- sample_metrics %>%
+  select(`Estimated Number of Cells`, `Mean Reads per Cell`, `Median Genes per Cell`, `Median UMI Counts per Cell`, `Sequencing Saturation`) %>%
+  rename(
+    estimate_n_cells = `Estimated Number of Cells`,
+    mean_reads_per_cell = `Mean Reads per Cell`,
+    median_genes_per_cell = `Median Genes per Cell`,
+    median_umi_per_cell = `Median UMI Counts per Cell`,
+    seq_saturation = `Sequencing Saturation`
+
+  ) %>%
+  mutate(
+    sample_id = sample_name,
+    n_total_cells = n_total_cells,
+    n_thr_features_cells = n_total_cells,
+    n_observed_cells = n_observed_cells,
+    status_flag = status_flag
+  )
+
+sample_metrics_upgrade <- sample_metrics_upgrade %>%
+    select(sample_id, status_flag, estimate_n_cells, mean_reads_per_cell, median_genes_per_cell, median_genes_per_cell, median_umi_per_cell, seq_saturation, n_total_cells, n_thr_features_cells, n_observed_cells)
+
+write_csv(sample_metrics_upgrade, file = paste0(sample_name, '_metrics_upgrade.csv'))
+
+```
+
+## Saving Seurat object
+
+```{r object_dump}
+
+if(auto_save) {
+
+  saveRDS(seurat_object, file = paste0('objects/', sample_name, '_seurat_object.RDS'))
+
+}
+
+```
+
+:::{.callout-important}
+The number of observed high-quality cells is equal to `r n_observed_cells`. This sample has been flag as <strong>`r status_flag`</strong>
+:::
+
+## Parameters log
+
+```{r params_log, message = FALSE, warning = FALSE, echo = TRUE}
+#| code-fold: true
+
+print(
+  list(
+      project_name = project_name,
+      sample_name = sample_name,
+      input_gex_matrices = input_gex_matrices,
+      csv_metrics = csv_metrics,
+      thr_estimate_n_cells = thr_estimate_n_cells,
+      thr_mean_reads_per_cells = thr_mean_reads_per_cells,
+      thr_median_genes_per_cell = thr_median_genes_per_cell,
+      thr_median_umi_per_cell = thr_median_umi_per_cell,
+      thr_n_feature_rna_min = thr_n_feature_rna_min,
+      thr_n_feature_rna_max = thr_n_feature_rna_max,
+      thr_percent_mito = thr_percent_mito,
+      thr_n_observed_cells = thr_n_observed_cells,
+      work_directory = work_directory,
+      auto_save = auto_save
+  )
+)
+
+```
+
+## Session info
+
+```{r session_info, message = FALSE, warning = FALSE, echo = TRUE}
+#| code-fold: true
+
+sessionInfo()
+
+```

@@ -1,0 +1,329 @@
+---
+title: "SCRATCH-E2E — Analysis report"
+execute:
+  freeze: false
+  cache: false
+  warning: false
+  echo: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    page-layout: full
+    fig-format: png
+    fig-dpi: 300
+params:
+  project_name: "project"
+  inputs_dir: "inputs"
+  interactive: true
+  work_directory: "."
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r setup, include = FALSE}
+suppressPackageStartupMessages({
+  library(data.table)
+  library(jsonlite)
+  library(knitr)
+})
+
+if (!is.null(params$work_directory) && dir.exists(params$work_directory)) {
+  setwd(params$work_directory)
+}
+
+inputs <- params$inputs_dir
+
+read_json_safe <- function(p) {
+  if (!file.exists(p)) return(NULL)
+  tryCatch(fromJSON(p), error = function(e) NULL)
+}
+find_files <- function(sub, pattern) {
+  d <- file.path(inputs, sub)
+  if (!dir.exists(d)) return(character(0))
+  list.files(d, pattern = pattern, recursive = TRUE, full.names = TRUE)
+}
+
+manifest <- read_json_safe(file.path(inputs, "manifest", "run_manifest.json"))
+if (is.null(manifest)) {
+  mf <- find_files("manifest", "run_manifest\\.json$")
+  if (length(mf)) manifest <- read_json_safe(mf[1])
+}
+
+trace_file <- find_files("manifest", "^trace\\.csv$")
+cross_csv  <- find_files("cross", "\\.csv$")
+reports    <- find_files("reports", "\\.html$")
+figures    <- find_files("figures", "\\.(png|jpe?g|svg)$")
+```
+
+```{=html}
+<style>
+/* Light and dark are both selected, not an automatic flip. Values come from the
+   validated reference palette; the theme toggle must win over the OS setting in
+   both directions. */
+.viz-root {
+  color-scheme: light;
+  --surface-1:      #fcfcfb;
+  --plane:          #f9f9f7;
+  --text-primary:   #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted:     #898781;
+  --grid:           #e1e0d9;
+  --border:         rgba(11,11,11,0.10);
+  --series-1:       #2a78d6;
+  --good:           #0ca30c;
+  --muted-fill:     #898781;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --plane:          #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid:           #2c2c2a;
+    --border:         rgba(255,255,255,0.10);
+    --series-1:       #3987e5;
+  }
+}
+:root[data-theme="dark"] .viz-root {
+  color-scheme: dark;
+  --surface-1:      #1a1a19;
+  --plane:          #0d0d0d;
+  --text-primary:   #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted:     #898781;
+  --grid:           #2c2c2a;
+  --border:         rgba(255,255,255,0.10);
+  --series-1:       #3987e5;
+}
+
+.viz-root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+.tile-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 1rem 0 1.5rem;
+}
+.tile {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.tile .label {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tile .value {
+  font-size: 1.85rem;
+  font-weight: 650;
+  color: var(--text-primary);   /* value wears ink, never a series colour */
+  line-height: 1.25;
+  margin-top: 2px;
+}
+.tile .sub { font-size: 0.8rem; color: var(--text-secondary); }
+
+.stage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+  margin: 1rem 0;
+}
+.stage {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex; align-items: center; gap: 10px;
+}
+/* Status is never colour alone: every chip carries a glyph and a text label. */
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+.dot.ran     { background: var(--good); }
+.dot.skipped { background: var(--muted-fill); }
+.stage .name { color: var(--text-primary); font-weight: 550; font-size: 0.92rem; }
+.stage .state { color: var(--text-secondary); font-size: 0.78rem; }
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+}
+.gallery figure {
+  margin: 0; background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+}
+.gallery img { width: 100%; height: auto; display: block; border-radius: 4px; }
+.gallery figcaption {
+  font-size: 0.78rem; color: var(--text-secondary);
+  margin-top: 6px; word-break: break-word;
+}
+.table-scroll { overflow-x: auto; }
+table { font-variant-numeric: tabular-nums; }  /* columns must align vertically */
+</style>
+<div class="viz-root">
+```
+
+# `r params$project_name`
+
+```{r headline, results = "asis"}
+tile <- function(label, value, sub = "") {
+  sprintf('<div class="tile"><div class="label">%s</div><div class="value">%s</div><div class="sub">%s</div></div>',
+          label, value, sub)
+}
+
+n_reports <- length(reports)
+n_figures <- length(figures)
+
+dur <- "n/a"
+if (!is.null(trace_file) && length(trace_file)) {
+  tr <- tryCatch(fread(trace_file[1]), error = function(e) NULL)
+  if (!is.null(tr) && "realtime" %in% names(tr)) {
+    # trace realtime is milliseconds
+    total_h <- suppressWarnings(sum(as.numeric(tr$realtime), na.rm = TRUE) / 3.6e6)
+    if (is.finite(total_h)) dur <- sprintf("%.1f h", total_h)
+  }
+}
+
+cat('<div class="tile-row">')
+cat(tile("Pipeline",   if (!is.null(manifest)) manifest$version else "SCRATCH-E2E", "version"))
+cat(tile("NMF engine", if (!is.null(manifest)) manifest$nmf_engine else "n/a", "metaprogram factorisation"))
+cat(tile("Stage reports", n_reports, "rendered notebooks"))
+cat(tile("Figures",    n_figures, "published"))
+cat(tile("Compute",    dur, "summed task runtime"))
+cat('</div>')
+```
+
+## Stages
+
+```{r stages, results = "asis"}
+# A stage counts as having run if it published at least one report or figure.
+stage_names <- c("align", "qc", "cluster", "annotation", "batchcorrection",
+                 "cnv", "metaprog", "trajectory", "cellcomm", "tcr", "integration")
+
+all_paths <- c(reports, figures)
+ran <- vapply(stage_names, function(s) any(grepl(s, all_paths, fixed = TRUE)), logical(1))
+
+cat('<div class="stage-grid">')
+for (i in seq_along(stage_names)) {
+  cls   <- if (ran[i]) "ran" else "skipped"
+  glyph <- if (ran[i]) "&#10003;" else "&#8211;"      # check / en-dash, not colour alone
+  state <- if (ran[i]) "ran" else "not run"
+  cat(sprintf('<div class="stage"><span class="dot %s"></span><span><span class="name">%s %s</span><br><span class="state">%s</span></span></div>',
+              cls, glyph, stage_names[i], state))
+}
+cat('</div>')
+```
+
+## Cross-stage findings
+
+```{r cross, results = "asis"}
+if (length(cross_csv)) {
+  for (f in sort(cross_csv)) {
+    dt <- tryCatch(fread(f), error = function(e) NULL)
+    if (is.null(dt) || !nrow(dt)) next
+    cat("\n\n### ", tools::file_path_sans_ext(basename(f)), "\n\n", sep = "")
+    cat('<div class="table-scroll">')
+    print(kable(head(dt, 25), format = "html"))
+    cat('</div>')
+    if (nrow(dt) > 25) cat(sprintf("\n\n_Showing 25 of %d rows._\n", nrow(dt)))
+  }
+} else {
+  cat("\n_No cross-stage tables were produced. The integration stage needs at least two analysis stages to have run._\n")
+}
+```
+
+## Figures
+
+```{r gallery, results = "asis"}
+if (length(figures)) {
+  cat('<div class="gallery">')
+  for (f in sort(figures)) {
+    # Embed as data URI so the report stays self-contained when copied.
+    mime <- switch(tolower(tools::file_ext(f)),
+                   png = "image/png", svg = "image/svg+xml",
+                   jpg = "image/jpeg", jpeg = "image/jpeg", "image/png")
+    uri <- tryCatch(
+      paste0("data:", mime, ";base64,", base64enc::base64encode(f)),
+      error = function(e) f
+    )
+    cat(sprintf('<figure><img src="%s" alt="%s"><figcaption>%s</figcaption></figure>',
+                uri, basename(f), basename(f)))
+  }
+  cat('</div>')
+} else {
+  cat("\n_No figures were published._\n")
+}
+```
+
+## Per-stage reports
+
+```{r report-index, results = "asis"}
+if (length(reports)) {
+  idx <- data.table(report = basename(reports),
+                    stage  = basename(dirname(reports)),
+                    link   = sprintf('<a href="stages/%s">open</a>', basename(reports)))
+  setorder(idx, stage, report)
+  cat('<div class="table-scroll">')
+  print(kable(idx, format = "html", escape = FALSE))
+  cat('</div>')
+  cat("\n\n_Each stage's full notebook is copied alongside this file under `stages/`._\n")
+} else {
+  cat("\n_No stage reports were found._\n")
+}
+```
+
+## Run provenance
+
+```{r provenance, results = "asis"}
+if (!is.null(manifest)) {
+  flat <- data.table(field = names(manifest),
+                     value = vapply(manifest, function(v) paste(as.character(v), collapse = ", "), character(1)))
+  cat('<div class="table-scroll">')
+  print(kable(flat, format = "html"))
+  cat('</div>')
+} else {
+  cat("\n_No run manifest available._\n")
+}
+```
+
+### Resource usage
+
+```{r resources, results = "asis"}
+if (length(trace_file)) {
+  tr <- tryCatch(fread(trace_file[1]), error = function(e) NULL)
+  if (!is.null(tr) && nrow(tr) && "process" %in% names(tr)) {
+    keep <- intersect(c("process", "status", "duration", "realtime", "peak_rss", "cpus", "attempt"), names(tr))
+    summ <- tr[, .(tasks = .N), by = process][order(-tasks)]
+    cat('<div class="table-scroll">')
+    print(kable(summ, format = "html"))
+    cat('</div>')
+  }
+} else {
+  cat("\n_No trace file was captured._\n")
+}
+```
+
+```{=html}
+</div>
+```

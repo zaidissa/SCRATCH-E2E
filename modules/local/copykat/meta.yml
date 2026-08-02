@@ -1,0 +1,61 @@
+name: copykat
+description: |
+  Run CopyKAT for unsupervised CNV inference and tumor vs normal classification from normalized single-cell RNA-seq data using a Seurat object.
+keywords:
+  - copykat
+  - cnv
+  - tumor
+  - scRNA-seq
+  - single-cell
+tools:
+  - package: copykat
+    description: Tumor/normal CNV inference tool for single-cell RNA-seq based on karyotyping and expression profiles.
+    homepage: https://github.com/navinlabcode/CopyKAT
+    documentation: https://github.com/navinlabcode/CopyKAT
+    doi: 10.1038/s41592-020-01018-x
+    licence: MIT
+input:
+  - seurat_rds:
+      type: file
+      description: |
+        A normalized Seurat RDS object containing gene expression data.
+      pattern: "*.rds"
+  - notebook:
+      type: file
+      description: |
+        Quarto notebook used to execute the CopyKAT analysis.
+      pattern: "notebook_copykat.qmd"
+  - config:
+      type: file
+      description: |
+        Optional configuration file for setting parameters or pipeline context.
+output:
+  - copykat_prediction:
+      type: file
+      description: |
+        Table of predicted CNV classifications for each cell (aneuploid vs diploid).
+      pattern: "copykat_prediction.csv"
+  - annotated_seurat:
+      type: file
+      description: |
+        Seurat object with CopyKAT-predicted CNV annotations included in metadata.
+      pattern: "seurat_copykat_annotated.rds"
+  - umap_plot:
+      type: file
+      description: |
+        UMAP visualization showing CopyKAT classification for each cell.
+      pattern: "umap_copykat.png"
+  - cnv_object:
+      type: file
+      description: |
+        RDS object storing the full CopyKAT output.
+      pattern: "copykat_result.rds"
+  - versions:
+      type: file
+      description: |
+        File containing software version information.
+      pattern: "versions.yml"
+authors:
+  - "@syedsazaidi"
+maintainers:
+  - "@syedsazaidi"

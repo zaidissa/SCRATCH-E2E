@@ -1,0 +1,1493 @@
+organism	ID_link	CSPA category	UP_Protein_name	UP_entry_name	CD	ENTREZ_gene_ID	ENTREZ gene symbol	protein probability	count detection in different cell types	Phobius TM predicted yes/no	# predicted TM domains	GPI	UniProt Cell surface
+Human	P08473	1 - high confidence	Neprilysin	NEP_HUMAN	CD10	4311	MME	1	29	1	1	0	yes
+Human	Q92854	1 - high confidence	Semaphorin-4D	SEM4D_HUMAN	CD100	10507	SEMA4D	1	26	1	1	0	yes
+Human	Q93033	1 - high confidence	Immunoglobulin superfamily member 2	IGSF2_HUMAN	CD101	9398	CD101	1	6	1	1	0	yes
+Human	P13598	1 - high confidence	Intercellular adhesion molecule 2	ICAM2_HUMAN	CD102	3384	ICAM2	1	23	1	1	0	yes
+Human	P38570	1 - high confidence	Integrin alpha-E	ITAE_HUMAN	CD103	3682	ITGAE	0.9934	1	1	1	0	yes
+Human	P16144	1 - high confidence	Integrin beta-4	ITB4_HUMAN	CD104	3691	ITGB4	1	5	1	1	0	yes
+Human	P17813	1 - high confidence	Endoglin	EGLN_HUMAN	CD105	2022	ENG	1	8	1	1	0	yes
+Human	P19320	1 - high confidence	Vascular cell adhesion protein 1	VCAM1_HUMAN	CD106	7412	VCAM1	1	10	1	1	0	yes
+Human	P11279	1 - high confidence	Lysosome-associated membrane glycoprotein 1	LAMP1_HUMAN	CD107a	3916	LAMP1	1	38	1	1	0	yes
+Human	P13473	1 - high confidence	Lysosome-associated membrane glycoprotein 2	LAMP2_HUMAN	CD107b	3920	LAMP2	1	35	1	1	0	yes
+Human	O75326	1 - high confidence	Semaphorin-7A	SEM7A_HUMAN	CD108	8482	SEMA7A	1	21	1	1	1	yes
+Human	Q6YHK3	1 - high confidence	CD109 antigen	CD109_HUMAN	CD109	135228	CD109	1	37	0	0	1	yes
+Human	Q15223	1 - high confidence	Poliovirus receptor-related protein 1	PVRL1_HUMAN	CD111	5818	PVRL1	1	38	1	1	0	yes
+Human	Q92692	1 - high confidence	Poliovirus receptor-related protein 2	PVRL2_HUMAN	CD112	5819	PVRL2	0.989	8	1	1	0	yes
+Human	Q9NQS3	1 - high confidence	Poliovirus receptor-related protein 3	PVRL3_HUMAN	CD113	25945	PVRL3	1	19	1	2	0	yes
+Human	P15509	1 - high confidence	Granulocyte-macrophage colony-stimulating factor receptor subunit alpha	CSF2R_HUMAN	CD116	1438	CSF2RA	1	4	1	1	0	yes
+Human	P10721	1 - high confidence	Mast/stem cell growth factor receptor	KIT_HUMAN	CD117	3815	KIT	0.9952	1	1	1	0	yes
+Human	P42702	1 - high confidence	Leukemia inhibitory factor receptor	LIFR_HUMAN	CD118	3977	LIFR	1	10	1	1	0	yes
+Human	P15260	1 - high confidence	Interferon gamma receptor 1	INGR1_HUMAN	CD119	3459	IFNGR1	1	30	1	1	0	yes
+Human	P20701	1 - high confidence	Integrin alpha-L	ITAL_HUMAN	CD11a	3683	ITGAL	1	8	1	1	0	yes
+Human	P11215	1 - high confidence	Integrin alpha-M	ITAM_HUMAN	CD11b	3684	ITGAM	1	6	1	1	0	yes
+Human	P20702	1 - high confidence	Integrin alpha-X	ITAX_HUMAN	CD11c	3687	ITGAX	1	6	1	1	0	yes
+Human	P19438	1 - high confidence	Tumor necrosis factor receptor superfamily member 1A	TNR1A_HUMAN	CD120a	7132	TNFRSF1A	1	2	1	1	0	yes
+Human	P14778	1 - high confidence	Interleukin-1 receptor type 1	IL1R1_HUMAN	CD121a	3554	IL1R1	0.9933	4	1	1	0	yes
+Human	P27930	1 - high confidence	Interleukin-1 receptor type 2	IL1R2_HUMAN	CD121b	7850	IL1R2	1	8	1	1	0	yes
+Human	P14784	1 - high confidence	Interleukin-2 receptor subunit beta	IL2RB_HUMAN	CD122	3560	IL2RB	0.9885	2	1	1	0	yes
+Human	P26951	1 - high confidence	Interleukin-3 receptor subunit alpha	IL3RA_HUMAN	CD123	3563	IL3RA	1	5	1	1	0	yes
+Human	P24394	1 - high confidence	Interleukin-4 receptor subunit alpha	IL4RA_HUMAN	CD124	3566	IL4R	1	7	1	1	0	yes
+Human	Q01344	1 - high confidence	Interleukin-5 receptor subunit alpha	IL5RA_HUMAN	CD125	3568	IL5RA	0.9913	1	1	1	0	yes
+Human	P16871	1 - high confidence	Interleukin-7 receptor subunit alpha	IL7RA_HUMAN	CD127	3575	IL7R	1	8	1	1	0	yes
+Human	P15144	1 - high confidence	Aminopeptidase N	AMPN_HUMAN	CD13	290	ANPEP	1	20	1	1	0	yes
+Human	P40189	1 - high confidence	Interleukin-6 receptor subunit beta	IL6RB_HUMAN	CD130	3572	IL6ST	1	28	1	1	0	yes
+Human	P32927	1 - high confidence	Cytokine receptor common subunit beta	IL3RB_HUMAN	CD131	1439	CSF2RB	1	3	1	1	0	yes
+Human	P31785	1 - high confidence	Cytokine receptor common subunit gamma	IL2RG_HUMAN	CD132	3561	IL2RG	1	14	1	1	0	yes
+Human	O43490	1 - high confidence	Prominin-1	PROM1_HUMAN	CD133	8842	PROM1	1	6	1	5	0	yes
+Human	P36888	1 - high confidence	FL cytokine receptor	FLT3_HUMAN	CD135	2322	FLT3	1	1	1	2	0	yes
+Human	Q04912	1 - high confidence	Macrophage-stimulating protein receptor	RON_HUMAN	CD136	4486	MST1R	1	14	1	1	0	yes
+Human	Q07011	1 - high confidence	Tumor necrosis factor receptor superfamily member 9	TNR9_HUMAN	CD137	3604	TNFRSF9	1	2	1	1	0	yes
+Human	P08571	1 - high confidence	Monocyte differentiation antigen CD14	CD14_HUMAN	CD14	929	CD14	1	2	0	0	1	yes
+Human	P16234	1 - high confidence	Alpha-type platelet-derived growth factor receptor	PGFRA_HUMAN	CD140a	5156	PDGFRA	1	8	1	1	0	yes
+Human	P09619	1 - high confidence	Beta-type platelet-derived growth factor receptor	PGFRB_HUMAN	CD140b	5159	PDGFRB	1	8	1	1	0	yes
+Human	P07204	1 - high confidence	Thrombomodulin	TRBM_HUMAN	CD141	7056	THBD	0.9859	6	1	1	0	yes
+Human	P13726	1 - high confidence	Tissue factor	TF_HUMAN	CD142	2152	F3	1	29	1	1	0	yes
+Human	P12821	1 - high confidence	Angiotensin-converting enzyme	ACE_HUMAN	CD143	1636	ACE	1	10	1	1	0	yes
+Human	P33151	1 - high confidence	Cadherin-5	CADH5_HUMAN	CD144	1003	CDH5	1	4	1	1	0	yes
+Human	P43121	1 - high confidence	Cell surface glycoprotein MUC18	MUC18_HUMAN	CD146	4162	MCAM	1	26	1	1	0	yes
+Human	P35613	1 - high confidence	Basigin	BASI_HUMAN	CD147	682	BSG	1	47	1	1	0	yes
+Human	Q12913	1 - high confidence	Receptor-type tyrosine-protein phosphatase eta	PTPRJ_HUMAN	CD148	5795	PTPRJ	1	40	1	1	0	yes
+Human	Q13291	1 - high confidence	Signaling lymphocytic activation molecule	SLAF1_HUMAN	CD150	6504	SLAMF1	1	12	1	1	0	yes
+Human	P48509	2 - putative	CD151 antigen	CD151_HUMAN	CD151	977	CD151	1	24	1	4	0	#N/A
+Human	P29965	1 - high confidence	CD40 ligand	CD40L_HUMAN	CD154	959	CD40LG	1	2	1	1	0	yes
+Human	P15151	1 - high confidence	Poliovirus receptor	PVR_HUMAN	CD155	5817	PVR	1	27	1	1	0	yes
+Human	P78325	1 - high confidence	Disintegrin and metalloproteinase domain-containing protein 8	ADAM8_HUMAN	CD156a	101	ADAM8	1	3	1	1	0	yes
+Human	P78536	1 - high confidence	Disintegrin and metalloproteinase domain-containing protein 17	ADA17_HUMAN	CD156b	6868	ADAM17	1	27	1	1	0	yes
+Human	O14672	1 - high confidence	Disintegrin and metalloproteinase domain-containing protein 10	ADA10_HUMAN	CD156c	102	ADAM10	1	42	1	1	0	yes
+Human	Q10588	1 - high confidence	ADP-ribosyl cyclase 2	BST1_HUMAN	CD157	683	BST1	1	4	0	0	1	yes
+Human	P43628	1 - high confidence	Killer cell immunoglobulin-like receptor 2DL3	KI2L3_HUMAN	CD158b2	3804	KIR2DL3	1	1	1	1	0	yes
+Human	P43629	1 - high confidence	Killer cell immunoglobulin-like receptor 3DL1	KI3L1_HUMAN	CD158e	3811	KIR3DL1	0.9999	1	1	1	0	yes
+Human	Q8N109	1 - high confidence	Killer cell immunoglobulin-like receptor 2DL5A	KI2LA_HUMAN	CD158f1	57292	KIR2DL5A	0.9988	1	1	1	0	yes
+Human	Q14954	1 - high confidence	Killer cell immunoglobulin-like receptor 2DS1	KI2S1_HUMAN	CD158h	3806	KIR2DS1	1	1	1	1	0	yes
+Human	P43632	1 - high confidence	Killer cell immunoglobulin-like receptor 2DS4	KI2S4_HUMAN	CD158i	3809	KIR2DS4	1	1	1	1	0	yes
+Human	P26715	2 - putative	NKG2-A/NKG2-B type II integral membrane protein	NKG2A_HUMAN	CD159a	3821	KLRC1	1	1	1	1	0	#N/A
+Human	O95971	1 - high confidence	CD160 antigen	BY55_HUMAN	CD160	11126	CD160	1	2	0	0	1	yes
+Human	Q12918	2 - putative	Killer cell lectin-like receptor subfamily B member 1	KLRB1_HUMAN	CD161	3820	KLRB1	1	1	1	1	0	#N/A
+Human	Q14242	1 - high confidence	P-selectin glycoprotein ligand 1	SELPL_HUMAN	CD162	6404	SELPLG	1	4	1	1	0	yes
+Human	Q86VB7	1 - high confidence	Scavenger receptor cysteine-rich type 1 protein M130	C163A_HUMAN	CD163	9332	CD163	1	1	1	2	0	yes
+Human	Q04900	1 - high confidence	Sialomucin core protein 24	MUC24_HUMAN	CD164	8763	CD164	0.9957	4	1	1	0	yes
+Human	Q13740	1 - high confidence	CD166 antigen	CD166_HUMAN	CD166	214	ALCAM	1	41	1	1	0	yes
+Human	Q16832	1 - high confidence	Discoidin domain-containing receptor 2	DDR2_HUMAN	CD167b	4921	DDR2	0.9992	8	1	1	0	yes
+Human	Q9BZZ2	1 - high confidence	Sialoadhesin	SN_HUMAN	CD169	6614	SIGLEC1	0.9975	2	1	1	0	yes
+Human	P08637	1 - high confidence	Low affinity immunoglobulin gamma Fc region receptor III-A	FCG3A_HUMAN	CD16a	2214	FCGR3A	1	3	1	1	0	yes
+Human	O75015	1 - high confidence	Low affinity immunoglobulin gamma Fc region receptor III-B	FCG3B_HUMAN	CD16b	2215	FCGR3B	1	2	1	1	1	yes
+Human	O15389	1 - high confidence	Sialic acid-binding Ig-like lectin 5	SIGL5_HUMAN	CD170	8778	SIGLEC5	1	7	1	1	0	yes
+Human	P32004	1 - high confidence	Neural cell adhesion molecule L1	L1CAM_HUMAN	CD171	3897	L1CAM	1	26	1	1	0	yes
+Human	P78324	1 - high confidence	Tyrosine-protein phosphatase non-receptor type substrate 1	SHPS1_HUMAN	CD172a	140885	SIRPA	1	33	1	1	0	yes
+Human	O00241	1 - high confidence	Signal-regulatory protein beta-1	SIRB1_HUMAN	CD172b	10326	SIRPB1	0.9986	10	1	1	0	yes
+Human	Q9P1W8	1 - high confidence	Signal-regulatory protein gamma	SIRPG_HUMAN	CD172g	55423	SIRPG	1	2	1	1	0	yes
+Human	P05107	1 - high confidence	Integrin beta-2	ITB2_HUMAN	CD18	3689	ITGB2	1	20	1	1	0	yes
+Human	Q99467	1 - high confidence	CD180 antigen	CD180_HUMAN	CD180	4064	CD180	1	4	1	1	0	yes
+Human	P25024	1 - high confidence	C-X-C chemokine receptor type 1	CXCR1_HUMAN	CD181	3577	CXCR1	0.99	1	1	6	0	yes
+Human	P49682	1 - high confidence	C-X-C chemokine receptor type 3	CXCR3_HUMAN	CD183	2833	CXCR3	1	3	1	7	0	yes
+Human	P32302	1 - high confidence	C-X-C chemokine receptor type 5	CXCR5_HUMAN	CD185	643	CXCR5	1	5	1	7	0	yes
+Human	P15391	1 - high confidence	B-lymphocyte antigen CD19	CD19_HUMAN	CD19	930	CD19	0.9945	8	1	1	0	yes
+Human	P51679	1 - high confidence	C-C chemokine receptor type 4	CCR4_HUMAN	CD194	1233	CCR4	0.9952	5	1	7	0	yes
+Human	P32248	1 - high confidence	C-C chemokine receptor type 7	CCR7_HUMAN	CD197	1236	CCR7	1	9	1	7	0	yes
+Human	P29016	1 - high confidence	T-cell surface glycoprotein CD1b	CD1B_HUMAN	CD1b	910	CD1B	1	1	1	1	0	yes
+Human	P29017	1 - high confidence	T-cell surface glycoprotein CD1c	CD1C_HUMAN	CD1c	911	CD1C	1	3	1	1	0	yes
+Human	P15813	1 - high confidence	T-cell surface glycoprotein CD1d	CD1D_HUMAN	CD1d	912	CD1D	1	1	1	1	0	yes
+Human	P06729	1 - high confidence	T-cell surface antigen CD2	CD2_HUMAN	CD2	914	CD2	1	5	1	1	0	yes
+Human	P11836	1 - high confidence	B-lymphocyte antigen CD20	CD20_HUMAN	CD20	931	MS4A1	1	5	1	4	0	yes
+Human	P41217	1 - high confidence	OX-2 membrane glycoprotein	OX2G_HUMAN	CD200	4345	CD200	1	17	1	1	0	yes
+Human	Q9UNN8	1 - high confidence	Endothelial protein C receptor	EPCR_HUMAN	CD201	10544	PROCR	1	26	1	1	0	yes
+Human	Q02763	1 - high confidence	Angiopoietin-1 receptor	TIE2_HUMAN	CD202b	7010	TEK	0.9312	4	1	1	0	yes
+Human	O14638	1 - high confidence	Ectonucleotide pyrophosphatase/phosphodiesterase family member 3	ENPP3_HUMAN	CD203c	5169	ENPP3	0.9692	3	1	1	0	yes
+Human	P21757	2 - putative	Macrophage scavenger receptor types I and II	MSRE_HUMAN	CD204	4481	MSR1	0.9975	3	1	1	0	#N/A
+Human	O60449	1 - high confidence	Lymphocyte antigen 75	LY75_HUMAN	CD205	4065	LY75	1	26	1	1	0	yes
+Human	P22897	1 - high confidence	Macrophage mannose receptor 1	MRC1_HUMAN	CD206	4360	MRC1	0.99	1	1	1	0	yes
+Human	Q9UQV4	1 - high confidence	Lysosome-associated membrane glycoprotein 3	LAMP3_HUMAN	CD208	27074	LAMP3	0.994	4	1	1	0	yes
+Human	P20023	1 - high confidence	Complement receptor type 2	CR2_HUMAN	CD21	1380	CR2	1	7	1	1	0	yes
+Human	P78552	1 - high confidence	Interleukin-13 receptor subunit alpha-1	I13R1_HUMAN	CD213a1	3597	IL13RA1	1	5	1	1	0	yes
+Human	Q14627	1 - high confidence	Interleukin-13 receptor subunit alpha-2	I13R2_HUMAN	CD213a2	3598	IL13RA2	1	5	1	1	0	yes
+Human	Q96F46	1 - high confidence	Interleukin-17 receptor A	I17RA_HUMAN	CD217	23765	IL17RA	1	23	1	1	0	yes
+Human	Q13478	1 - high confidence	Interleukin-18 receptor 1	IL18R_HUMAN	CD218a	8809	IL18R1	1	11	1	1	0	yes
+Human	P20273	1 - high confidence	B-cell receptor CD22	CD22_HUMAN	CD22	933	CD22	1	9	1	1	0	yes
+Human	P06213	1 - high confidence	Insulin receptor	INSR_HUMAN	CD220	3643	INSR	1	28	1	1	0	yes
+Human	P08069	1 - high confidence	Insulin-like growth factor 1 receptor	IGF1R_HUMAN	CD221	3480	IGF1R	1	38	1	1	0	yes
+Human	P11717	1 - high confidence	Cation-independent mannose-6-phosphate receptor	MPRI_HUMAN	CD222	3482	IGF2R	1	30	1	1	0	yes
+Human	P19440	3 - unspecific	Gamma-glutamyltranspeptidase 1	GGT1_HUMAN	CD224	2678	GGT1	1	24	0	0	0	#N/A
+Human	Q15762	1 - high confidence	CD226 antigen	CD226_HUMAN	CD226	10666	CD226	1	5	1	1	0	yes
+Human	P08582	1 - high confidence	Melanotransferrin	TRFM_HUMAN	CD228	4241	MFI2	1	15	0	0	1	yes
+Human	Q9HBG7	1 - high confidence	T-lymphocyte surface antigen Ly-9	LY9_HUMAN	CD229	4063	LY9	1	9	1	1	0	yes
+Human	P06734	1 - high confidence	Low affinity immunoglobulin epsilon Fc receptor	FCER2_HUMAN	CD23	2208	FCER2	1	10	1	1	0	yes
+Human	P04156	1 - high confidence	Major prion protein	PRIO_HUMAN	CD230	5621	PRNP	1	46	1	2	1	yes
+Human	O60486	1 - high confidence	Plexin-C1	PLXC1_HUMAN	CD232	10154	PLXNC1	1	14	1	2	0	yes
+Human	P50895	1 - high confidence	Basal cell adhesion molecule	BCAM_HUMAN	CD239	4059	BCAM	0.9942	25	1	1	0	yes
+Human	P08183	1 - high confidence	Multidrug resistance protein 1	MDR1_HUMAN	CD243	5243	ABCB1	1	8	1	12	0	yes
+Human	Q9BZW8	1 - high confidence	Natural killer cell receptor 2B4	CD244_HUMAN	CD244	51744	CD244	1	6	1	1	0	yes
+Human	Q07075	2 - putative	Glutamyl aminopeptidase	AMPE_HUMAN	CD249	2028	ENPEP	1	8	1	1	0	#N/A
+Human	P01589	1 - high confidence	Interleukin-2 receptor subunit alpha	IL2RA_HUMAN	CD25	3559	IL2RA	1	2	1	1	0	yes
+Human	P27487	1 - high confidence	Dipeptidyl peptidase 4	DPP4_HUMAN	CD26	1803	DPP4	1	22	0	0	0	yes
+Human	Q9Y6Q6	1 - high confidence	Tumor necrosis factor receptor superfamily member 11A	TNR11_HUMAN	CD265	8792	TNFRSF11A	1	5	1	1	0	yes
+Human	O14836	2 - putative	Tumor necrosis factor receptor superfamily member 13B	TR13B_HUMAN	CD267	23495	TNFRSF13B	0.9898	1	1	1	0	#N/A
+Human	Q02223	1 - high confidence	Tumor necrosis factor receptor superfamily member 17	TNR17_HUMAN	CD269	608	TNFRSF17	1	6	1	1	0	yes
+Human	P26842	1 - high confidence	CD27 antigen	CD27_HUMAN	CD27	939	CD27	1	7	1	1	0	yes
+Human	Q7Z6A9	1 - high confidence	B- and T-lymphocyte attenuator	BTLA_HUMAN	CD272	151888	BTLA	1	4	1	1	0	yes
+Human	Q9BQ51	1 - high confidence	Programmed cell death 1 ligand 2	PD1L2_HUMAN	CD273	80380	PDCD1LG2	1	9	1	1	0	yes
+Human	Q9NZQ7	1 - high confidence	Programmed cell death 1 ligand 1	PD1L1_HUMAN	CD274	29126	CD274	0.9643	21	1	1	0	yes
+Human	O75144	1 - high confidence	ICOS ligand	ICOSL_HUMAN	CD275	23308	ICOSLG	1	21	1	1	0	yes
+Human	Q5ZPR3	1 - high confidence	CD276 antigen	CD276_HUMAN	CD276	80381	CD276	1	36	1	1	0	yes
+Human	Q15116	1 - high confidence	Programmed cell death protein 1	PDCD1_HUMAN	CD279	5133	PDCD1	1	5	1	1	0	yes
+Human	P10747	1 - high confidence	T-cell-specific surface glycoprotein CD28	CD28_HUMAN	CD28	940	CD28	1	4	1	1	0	yes
+Human	Q9UBG0	1 - high confidence	C-type mannose receptor 2	MRC2_HUMAN	CD280	9902	MRC2	1	28	1	1	0	yes
+Human	Q15399	1 - high confidence	Toll-like receptor 1	TLR1_HUMAN	CD281	7096	TLR1	0.9999	1	1	1	0	yes
+Human	O60603	1 - high confidence	Toll-like receptor 2	TLR2_HUMAN	CD282	7097	TLR2	1	7	1	1	0	yes
+Human	O15455	1 - high confidence	Toll-like receptor 3	TLR3_HUMAN	CD283	7098	TLR3	1	7	1	1	0	yes
+Human	O00206	1 - high confidence	Toll-like receptor 4	TLR4_HUMAN	CD284	7099	TLR4	0.9933	5	1	1	0	yes
+Human	Q9NR96	1 - high confidence	Toll-like receptor 9	TLR9_HUMAN	CD289	54106	TLR9	1	2	0	0	0	yes
+Human	P05556	1 - high confidence	Integrin beta-1	ITB1_HUMAN	CD29	3688	ITGB1	1	45	1	1	0	yes
+Human	Q9Y5Y4	1 - high confidence	Putative G-protein coupled receptor 44	GPR44_HUMAN	CD294	11251	GPR44	0.9902	4	1	7	0	yes
+Human	P48357	1 - high confidence	Leptin receptor	LEPR_HUMAN	CD295	3953	LEPR	1	3	1	1	0	yes
+Human	P54709	1 - high confidence	Sodium/potassium-transporting ATPase subunit beta-3	AT1B3_HUMAN	CD298	483	ATP1B3	1	45	1	1	0	yes
+Human	P28908	1 - high confidence	Tumor necrosis factor receptor superfamily member 8	TNR8_HUMAN	CD30	943	TNFRSF8	0.9945	11	1	1	0	yes
+Human	Q8IX05	1 - high confidence	CD302 antigen	CD302_HUMAN	CD302	9936	CD302	1	6	1	1	0	yes
+Human	O14786	1 - high confidence	Neuropilin-1	NRP1_HUMAN	CD304	8829	NRP1	1	27	1	1	0	yes
+Human	Q6GTX8	1 - high confidence	Leukocyte-associated immunoglobulin-like receptor 1	LAIR1_HUMAN	CD305	3903	LAIR1	1	11	1	1	0	yes
+Human	Q96RD9	1 - high confidence	Fc receptor-like protein 5	FCRL5_HUMAN	CD307	83416	FCRL5	1	2	1	1	0	yes
+Human	P16284	1 - high confidence	Platelet endothelial cell adhesion molecule	PECA1_HUMAN	CD31	5175	PECAM1	1	14	1	1	0	yes
+Human	Q9UHX3	1 - high confidence	EGF-like module-containing mucin-like hormone receptor-like 2	EMR2_HUMAN	CD312	30817	EMR2	0.9992	29	1	7	0	yes
+Human	Q9P2B2	1 - high confidence	Prostaglandin F2 receptor negative regulator	FPRP_HUMAN	CD315	5738	PTGFRN	1	30	1	1	0	yes
+Human	Q969P0	1 - high confidence	Immunoglobulin superfamily member 8	IGSF8_HUMAN	CD316	93185	IGSF8	0.9956	36	1	1	0	yes
+Human	Q10589	1 - high confidence	Bone marrow stromal antigen 2	BST2_HUMAN	CD317	684	BST2	1	34	1	1	1	yes
+Human	Q9H5V8	1 - high confidence	CUB domain-containing protein 1	CDCP1_HUMAN	CD318	64866	CDCP1	1	12	1	1	0	yes
+Human	Q9NQ25	1 - high confidence	SLAM family member 7	SLAF7_HUMAN	CD319	57823	SLAMF7	0.9918	5	1	1	0	yes
+Human	P12318	1 - high confidence	Low affinity immunoglobulin gamma Fc region receptor II-a	FCG2A_HUMAN	CD32	2212	FCGR2A	0.9886	2	1	1	0	yes
+Human	Q9Y624	1 - high confidence	Junctional adhesion molecule A	JAM1_HUMAN	CD321	50848	F11R	1	12	1	1	0	yes
+Human	P57087	1 - high confidence	Junctional adhesion molecule B	JAM2_HUMAN	CD322	58494	JAM2	1	23	1	1	0	yes
+Human	P12830	1 - high confidence	Cadherin-1	CADH1_HUMAN	CD324	999	CDH1	1	3	1	1	0	yes
+Human	P19022	1 - high confidence	Cadherin-2	CADH2_HUMAN	CD325	1000	CDH2	1	27	1	1	0	yes
+Human	P16422	1 - high confidence	Epithelial cell adhesion molecule	EPCAM_HUMAN	CD326	4072	EPCAM	1	4	1	1	0	yes
+Human	O43699	1 - high confidence	Sialic acid-binding Ig-like lectin 6	SIGL6_HUMAN	CD327	946	SIGLEC6	0.9937	3	1	1	0	yes
+Human	Q9Y286	1 - high confidence	Sialic acid-binding Ig-like lectin 7	SIGL7_HUMAN	CD328	27036	SIGLEC7	1	2	1	1	0	yes
+Human	P20138	1 - high confidence	Myeloid cell surface antigen CD33	CD33_HUMAN	CD33	945	CD33	1	5	1	1	0	yes
+Human	P11362	1 - high confidence	Basic fibroblast growth factor receptor 1	FGFR1_HUMAN	CD331	2260	FGFR1	1	17	1	1	0	yes
+Human	P21802	1 - high confidence	Fibroblast growth factor receptor 2	FGFR2_HUMAN	CD332	2263	FGFR2	1	3	1	1	0	yes
+Human	P22607	1 - high confidence	Fibroblast growth factor receptor 3	FGFR3_HUMAN	CD333	2261	FGFR3	1	2	1	1	0	yes
+Human	P22455	1 - high confidence	Fibroblast growth factor receptor 4	FGFR4_HUMAN	CD334	2264	FGFR4	0.9963	3	1	1	0	yes
+Human	O14931	1 - high confidence	Natural cytotoxicity triggering receptor 3	NCTR3_HUMAN	CD337	259197	NCR3	1	1	0	0	0	yes
+Human	P78504	1 - high confidence	Protein jagged-1	JAG1_HUMAN	CD339	182	JAG1	0.9933	19	1	1	0	yes
+Human	P28906	1 - high confidence	Hematopoietic progenitor cell antigen CD34	CD34_HUMAN	CD34	947	CD34	1	3	1	1	0	yes
+Human	P04626	1 - high confidence	Receptor tyrosine-protein kinase erbB-2	ERBB2_HUMAN	CD340	2064	ERBB2	1	14	1	1	0	yes
+Human	Q9ULV1	1 - high confidence	Frizzled-4	FZD4_HUMAN	CD344	8322	FZD4	0.9942	1	1	9	0	yes
+Human	P17927	1 - high confidence	Complement receptor type 1	CR1_HUMAN	CD35	1378	CR1	1	5	1	1	0	yes
+Human	P16671	2 - putative	Platelet glycoprotein 4	CD36_HUMAN	CD36	948	CD36	1	4	1	2	0	#N/A
+Human	P11049	2 - putative	Leukocyte antigen CD37	CD37_HUMAN	CD37	951	CD37	0.9945	13	1	4	0	#N/A
+Human	P28907	2 - putative	ADP-ribosyl cyclase 1	CD38_HUMAN	CD38	952	CD38	1	13	1	1	0	#N/A
+Human	P49961	2 - putative	Ectonucleoside triphosphate diphosphohydrolase 1	ENTP1_HUMAN	CD39	953	ENTPD1	1	17	1	2	0	#N/A
+Human	P04234	1 - high confidence	T-cell surface glycoprotein CD3 delta chain	CD3D_HUMAN	CD3d	915	CD3D	1	2	0	0	0	yes
+Human	P09693	1 - high confidence	T-cell surface glycoprotein CD3 gamma chain	CD3G_HUMAN	CD3g	917	CD3G	1	1	1	1	0	yes
+Human	P01730	1 - high confidence	T-cell surface glycoprotein CD4	CD4_HUMAN	CD4	920	CD4	1	3	1	1	0	yes
+Human	P25942	1 - high confidence	Tumor necrosis factor receptor superfamily member 5	TNR5_HUMAN	CD40	958	CD40	1	25	1	1	0	yes
+Human	P08514	1 - high confidence	Integrin alpha-IIb	ITA2B_HUMAN	CD41	3674	ITGA2B	0.99	3	1	1	0	yes
+Human	P40197	1 - high confidence	Platelet glycoprotein V	GPV_HUMAN	CD42d	2814	GP5	1	3	1	1	0	yes
+Human	P16070	1 - high confidence	CD44 antigen	CD44_HUMAN	CD44	960	CD44	1	42	1	1	0	yes
+Human	P08575	1 - high confidence	Receptor-type tyrosine-protein phosphatase C	PTPRC_HUMAN	CD45	5788	PTPRC	1	19	1	1	0	yes
+Human	P15529	1 - high confidence	Membrane cofactor protein	MCP_HUMAN	CD46	4179	CD46	1	37	1	1	0	yes
+Human	Q08722	1 - high confidence	Leukocyte surface antigen CD47	CD47_HUMAN	CD47	961	CD47	1	44	1	5	0	yes
+Human	P09326	1 - high confidence	CD48 antigen	CD48_HUMAN	CD48	962	CD48	1	15	1	1	1	yes
+Human	P56199	1 - high confidence	Integrin alpha-1	ITA1_HUMAN	CD49a	3672	ITGA1	1	32	1	1	0	yes
+Human	P17301	1 - high confidence	Integrin alpha-2	ITA2_HUMAN	CD49b	3673	ITGA2	1	31	1	1	0	yes
+Human	P26006	1 - high confidence	Integrin alpha-3	ITA3_HUMAN	CD49c	3675	ITGA3	1	38	1	1	0	yes
+Human	P13612	1 - high confidence	Integrin alpha-4	ITA4_HUMAN	CD49d	3676	ITGA4	1	30	1	1	0	yes
+Human	P08648	1 - high confidence	Integrin alpha-5	ITA5_HUMAN	CD49e	3678	ITGA5	1	38	1	1	0	yes
+Human	P23229	1 - high confidence	Integrin alpha-6	ITA6_HUMAN	CD49f	3655	ITGA6	1	30	1	1	0	yes
+Human	P06127	1 - high confidence	T-cell surface glycoprotein CD5	CD5_HUMAN	CD5	921	CD5	1	5	1	1	0	yes
+Human	P32942	1 - high confidence	Intercellular adhesion molecule 3	ICAM3_HUMAN	CD50	3385	ICAM3	1	17	1	1	0	yes
+Human	P06756	1 - high confidence	Integrin alpha-V	ITAV_HUMAN	CD51	3685	ITGAV	1	42	1	1	0	yes
+Human	P19397	2 - putative	Leukocyte surface antigen CD53	CD53_HUMAN	CD53	963	CD53	1	13	1	4	0	#N/A
+Human	P05362	1 - high confidence	Intercellular adhesion molecule 1	ICAM1_HUMAN	CD54	3383	ICAM1	1	41	1	1	0	yes
+Human	P08174	1 - high confidence	Complement decay-accelerating factor	DAF_HUMAN	CD55	1604	CD55	1	40	0	0	1	yes
+Human	P13591	1 - high confidence	Neural cell adhesion molecule 1	NCAM1_HUMAN	CD56	4684	NCAM1	1	27	1	1	1	yes
+Human	P19256	1 - high confidence	Lymphocyte function-associated antigen 3	LFA3_HUMAN	CD58	965	CD58	1	40	1	1	1	yes
+Human	P13987	1 - high confidence	CD59 glycoprotein	CD59_HUMAN	CD59	966	CD59	1	45	0	0	1	yes
+Human	P30203	1 - high confidence	T-cell differentiation antigen CD6	CD6_HUMAN	CD6	923	CD6	1	5	1	1	0	yes
+Human	P05106	1 - high confidence	Integrin beta-3	ITB3_HUMAN	CD61	3690	ITGB3	1	10	1	1	0	yes
+Human	P14151	1 - high confidence	L-selectin	LYAM1_HUMAN	CD62L	6402	SELL	1	9	1	1	0	yes
+Human	P16109	1 - high confidence	P-selectin	LYAM3_HUMAN	CD62P	6403	SELP	0.99	2	1	1	0	yes
+Human	P08962	1 - high confidence	CD63 antigen	CD63_HUMAN	CD63	967	CD63	1	42	1	4	0	yes
+Human	P12314	1 - high confidence	High affinity immunoglobulin gamma Fc receptor I	FCGR1_HUMAN	CD64	2209	FCGR1A	1	2	1	1	0	yes
+Human	P13688	1 - high confidence	Carcinoembryonic antigen-related cell adhesion molecule 1	CEAM1_HUMAN	CD66a	634	CEACAM1	1	10	1	1	0	yes
+Human	P31997	1 - high confidence	Carcinoembryonic antigen-related cell adhesion molecule 8	CEAM8_HUMAN	CD66b	1088	CEACAM8	1	1	0	0	1	yes
+Human	P40199	1 - high confidence	Carcinoembryonic antigen-related cell adhesion molecule 6	CEAM6_HUMAN	CD66c	4680	CEACAM6	1	1	1	1	1	yes
+Human	P34810	1 - high confidence	Macrosialin	CD68_HUMAN	CD68	968	CD68	1	3	1	1	0	yes
+Human	Q07108	2 - putative	Early activation antigen CD69	CD69_HUMAN	CD69	969	CD69	1	9	1	1	0	#N/A
+Human	P09564	1 - high confidence	T-cell antigen CD7	CD7_HUMAN	CD7	924	CD7	1	7	1	1	0	yes
+Human	P32970	2 - putative	CD70 antigen	CD70_HUMAN	CD70	970	CD70	1	22	1	1	0	#N/A
+Human	P02786	1 - high confidence	Transferrin receptor protein 1	TFR1_HUMAN	CD71	7037	TFRC	1	38	1	1	0	yes
+Human	P21854	2 - putative	B-cell differentiation antigen CD72	CD72_HUMAN	CD72	971	CD72	0.9945	5	1	1	0	#N/A
+Human	P21589	1 - high confidence	5'-nucleotidase	5NTD_HUMAN	CD73	4907	NT5E	1	30	1	1	1	yes
+Human	P04233	1 - high confidence	HLA class II histocompatibility antigen gamma chain	HG2A_HUMAN	CD74	972	CD74	0.9685	18	1	1	0	yes
+Human	P11912	1 - high confidence	B-cell antigen receptor complex-associated protein alpha chain	CD79A_HUMAN	CD79a	973	CD79A	1	8	1	1	0	yes
+Human	P40259	1 - high confidence	B-cell antigen receptor complex-associated protein beta chain	CD79B_HUMAN	CD79b	974	CD79B	1	7	1	1	0	yes
+Human	P33681	1 - high confidence	T-lymphocyte activation antigen CD80	CD80_HUMAN	CD80	941	CD80	1	11	1	1	0	yes
+Human	P27701	2 - putative	CD82 antigen	CD82_HUMAN	CD82	3732	CD82	1	29	1	4	0	#N/A
+Human	Q01151	1 - high confidence	CD83 antigen	CD83_HUMAN	CD83	9308	CD83	1	15	1	1	0	yes
+Human	Q9UIB8	1 - high confidence	SLAM family member 5	SLAF5_HUMAN	CD84	8832	CD84	1	10	1	1	0	yes
+Human	A6NI73	1 - high confidence	Leukocyte immunoglobulin-like receptor subfamily A member 5	LIRA5_HUMAN	CD85f	353514	LILRA5	0.9875	1	1	1	0	yes
+Human	O75019	1 - high confidence	Leukocyte immunoglobulin-like receptor subfamily A member 1	LIRA1_HUMAN	CD85i	11024	LILRA1	1	1	1	1	0	yes
+Human	Q8NHL6	1 - high confidence	Leukocyte immunoglobulin-like receptor subfamily B member 1	LIRB1_HUMAN	CD85j	10859	LILRB1	1	8	1	1	0	yes
+Human	P42081	1 - high confidence	T-lymphocyte activation antigen CD86	CD86_HUMAN	CD86	942	CD86	1	12	1	1	0	yes
+Human	Q03405	1 - high confidence	Urokinase plasminogen activator surface receptor	UPAR_HUMAN	CD87	5329	PLAUR	1	27	0	0	1	yes
+Human	P24071	1 - high confidence	Immunoglobulin alpha Fc receptor	FCAR_HUMAN	CD89	2204	FCAR	1	2	1	1	0	yes
+Human	P04216	1 - high confidence	Thy-1 membrane glycoprotein	THY1_HUMAN	CD90	7070	THY1	1	25	0	0	1	yes
+Human	Q07954	1 - high confidence	Prolow-density lipoprotein receptor-related protein 1	LRP1_HUMAN	CD91	4035	LRP1	1	28	1	1	0	yes
+Human	Q8WWI5	1 - high confidence	Choline transporter-like protein 1	CTL1_HUMAN	CD92	23446	SLC44A1	0.9946	13	1	9	0	yes
+Human	P25445	1 - high confidence	Tumor necrosis factor receptor superfamily member 6	TNR6_HUMAN	CD95	355	FAS	1	24	1	1	0	yes
+Human	P40200	1 - high confidence	T-cell surface protein tactile	TACT_HUMAN	CD96	10225	CD96	1	9	1	1	0	yes
+Human	P48960	1 - high confidence	CD97 antigen	CD97_HUMAN	CD97	976	CD97	1	42	1	7	0	yes
+Human	P08195	1 - high confidence	4F2 cell-surface antigen heavy chain	4F2_HUMAN	CD98	6520	SLC3A2	1	46	1	1	0	yes
+Human	Q13651	1 - high confidence	Interleukin-10 receptor subunit alpha	I10R1_HUMAN	CDw210a	3587	IL10RA	1	5	1	1	0	yes
+Human	Q08334	1 - high confidence	Interleukin-10 receptor subunit beta	I10R2_HUMAN	CDw210b	3588	IL10RB	0.9933	16	1	1	0	yes
+Human	O00451	1 - high confidence	GDNF family receptor alpha-2	GFRA2_HUMAN	no	2675	GFRA2	1	2	0	0	1	yes
+Human	O95497	1 - high confidence	Pantetheinase	VNN1_HUMAN	no	8876	VNN1	1	8	0	0	1	yes
+Human	P01871	1 - high confidence	Ig mu chain C region	IGHM_HUMAN	no	3507	IGHM	1	11	0	0	0	yes
+Human	P04264	1 - high confidence	"Keratin, type II cytoskeletal 1"	K2C1_HUMAN	no	3848	KRT1	1	30	0	0	0	yes
+Human	P05186	1 - high confidence	"Alkaline phosphatase, tissue-nonspecific isozyme"	PPBT_HUMAN	no	249	ALPL	1	8	0	0	1	yes
+Human	P05187	1 - high confidence	"Alkaline phosphatase, placental type"	PPB1_HUMAN	no	250	ALPP	1	3	0	0	1	yes
+Human	P06733	1 - high confidence	Alpha-enolase	ENOA_HUMAN	no	2023	ENO1	1	14	0	0	0	yes
+Human	P14222	1 - high confidence	Perforin-1	PERF_HUMAN	no	5551	PRF1	1	3	0	0	0	yes
+Human	P21796	1 - high confidence	Voltage-dependent anion-selective channel protein 1	VDAC1_HUMAN	no	7416	VDAC1	1	19	0	0	0	yes
+Human	P22303	1 - high confidence	Acetylcholinesterase	ACES_HUMAN	no	43	ACHE	1	3	0	0	1	yes
+Human	P55290	1 - high confidence	Cadherin-13	CAD13_HUMAN	no	1012	CDH13	1	19	0	0	1	yes
+Human	Q12884	1 - high confidence	Seprase	SEPR_HUMAN	no	2191	FAP	1	18	0	0	0	yes
+Human	Q12891	1 - high confidence	Hyaluronidase-2	HYAL2_HUMAN	no	8692	HYAL2	1	10	0	0	1	yes
+Human	Q13421	1 - high confidence	Mesothelin	MSLN_HUMAN	no	10232	MSLN	1	10	0	0	1	yes
+Human	Q14982	1 - high confidence	Opioid-binding protein/cell adhesion molecule	OPCM_HUMAN	no	4978	OPCML	1	4	0	0	1	yes
+Human	Q8NFP4	1 - high confidence	MAM domain-containing glycosylphosphatidylinositol anchor protein 1	MDGA1_HUMAN	no	266727	MDGA1	1	4	0	0	1	yes
+Human	Q9BZR6	1 - high confidence	Reticulon-4 receptor	RTN4R_HUMAN	no	65078	RTN4R	1	15	0	0	1	yes
+Human	Q9P121	1 - high confidence	Neurotrimin	NTRI_HUMAN	no	50863	NTM	1	1	0	0	1	yes
+Human	Q9Y2I2	1 - high confidence	Netrin-G1	NTNG1_HUMAN	no	22854	NTNG1	1	6	0	0	1	yes
+Human	Q96QV1	1 - high confidence	Hedgehog-interacting protein	HHIP_HUMAN	no	64399	HHIP	0.9998	2	0	0	0	yes
+Human	P51148	1 - high confidence	Ras-related protein Rab-5C	RAB5C_HUMAN	no	5878	RAB5C	0.9994	7	0	0	0	yes
+Human	Q9NZ20	1 - high confidence	Group 3 secretory phospholipase A2	PA2G3_HUMAN	no	50487	PLA2G3	0.9972	1	0	0	0	yes
+Human	Q9BZM4	1 - high confidence	NKG2D ligand 3	N2DL3_HUMAN	no	79465	ULBP3	0.9952	2	0	0	1	yes
+Human	P78333	1 - high confidence	Glypican-5 [Cleaved into: Secreted glypican-5]	GPC5_HUMAN	no	2262	GPC5	0.9945	1	0	0	1	yes
+Human	P04632	1 - high confidence	Calpain small subunit 1	CPNS1_HUMAN	no	826	CAPNS1	0.9938	3	0	0	0	yes
+Human	Q8IYS5	1 - high confidence	Osteoclast-associated immunoglobulin-like receptor	OSCAR_HUMAN	no	126014	OSCAR	0.9933	1	0	0	0	yes
+Human	P20827	1 - high confidence	Ephrin-A1	EFNA1_HUMAN	no	1942	EFNA1	0.992	1	0	0	1	yes
+Human	Q8IWB1	1 - high confidence	"Inositol 1,4,5-triphosphate receptor-interacting protein"	IPRI_HUMAN	no	85450	ITPRIP	0.9908	6	0	0	0	yes
+Human	Q9H9S5	1 - high confidence	Fukutin-related protein	FKRP_HUMAN	no	79147	FKRP	0.9904	10	0	0	0	yes
+Human	Q8NCM8	1 - high confidence	Cytoplasmic dynein 2 heavy chain 1	DYHC2_HUMAN	no	79659	DYNC2H1	0.8875	1	0	0	0	yes
+Human	P06276	1 - high confidence	Cholinesterase	CHLE_HUMAN	no	590	BCHE	1	2	0	0	0	yes
+Human	P13727	1 - high confidence	Bone marrow proteoglycan	PRG2_HUMAN	no	5553	PRG2	1	1	0	0	0	yes
+Human	A6NGN9	1 - high confidence	IgLON family member 5	IGLO5_HUMAN	no	402665	IGLON5	1	2	0	0	0	yes
+Human	A6NMZ7	1 - high confidence	Collagen alpha-6(VI) chain	CO6A6_HUMAN	no	131873	COL6A6	1	2	0	0	0	yes
+Human	O00468	1 - high confidence	Agrin	AGRIN_HUMAN	no	375790	AGRN	1	14	0	0	0	yes
+Human	O15230	1 - high confidence	Laminin subunit alpha-5	LAMA5_HUMAN	no	3911	LAMA5	1	17	0	0	0	yes
+Human	O43852	1 - high confidence	Calumenin	CALU_HUMAN	no	813	CALU	1	22	0	0	0	yes
+Human	O75718	1 - high confidence	Cartilage-associated protein	CRTAP_HUMAN	no	10491	CRTAP	1	9	0	0	0	yes
+Human	O94813	1 - high confidence	Slit homolog 2 protein	SLIT2_HUMAN	no	9353	SLIT2	1	8	0	0	0	yes
+Human	O95084	1 - high confidence	Serine protease 23	PRS23_HUMAN	no	11098	PRSS23	1	9	0	0	0	yes
+Human	P00450	1 - high confidence	Ceruloplasmin	CERU_HUMAN	no	1356	CP	1	6	0	0	0	yes
+Human	P00738	1 - high confidence	Haptoglobin [Cleaved into: Haptoglobin alpha chain; Haptoglobin beta chain]	HPT_HUMAN	no	3240	HP	1	13	0	0	0	yes
+Human	P01024	1 - high confidence	Complement C3	CO3_HUMAN	no	718	C3	1	4	0	0	0	yes
+Human	P01042	1 - high confidence	Kininogen-1	KNG1_HUMAN	no	3827	KNG1	1	3	0	0	0	yes
+Human	P01137	1 - high confidence	Transforming growth factor beta-1	TGFB1_HUMAN	no	7040	TGFB1	1	13	0	0	0	yes
+Human	P01857	1 - high confidence	Ig gamma-1 chain C region	IGHG1_HUMAN	no	3500	IGHG1	1	5	0	0	0	yes
+Human	P01859	1 - high confidence	Ig gamma-2 chain C region	IGHG2_HUMAN	no	3501	IGHG2	1	5	0	0	0	yes
+Human	P02452	1 - high confidence	Collagen alpha-1(I) chain	CO1A1_HUMAN	no	1277	COL1A1	1	14	0	0	0	yes
+Human	P02461	1 - high confidence	Collagen alpha-1(III) chain	CO3A1_HUMAN	no	1281	COL3A1	1	6	0	0	0	yes
+Human	P02749	1 - high confidence	Beta-2-glycoprotein 1	APOH_HUMAN	no	350	APOH	1	6	0	0	0	yes
+Human	P02751	1 - high confidence	Fibronectin	FINC_HUMAN	no	2335	FN1	1	25	0	0	0	yes
+Human	P02765	1 - high confidence	Alpha-2-HS-glycoprotein	FETUA_HUMAN	no	197	AHSG	1	3	0	0	0	yes
+Human	P02790	1 - high confidence	Hemopexin	HEMO_HUMAN	no	3263	HPX	1	13	0	0	0	yes
+Human	P04004	1 - high confidence	Vitronectin	VTNC_HUMAN	no	7448	VTN	1	19	0	0	0	yes
+Human	P04114	1 - high confidence	Apolipoprotein B-100	APOB_HUMAN	no	338	APOB	1	1	0	0	0	yes
+Human	P04275	1 - high confidence	von Willebrand factor	VWF_HUMAN	no	7450	VWF	1	2	0	0	0	yes
+Human	P05090	1 - high confidence	Apolipoprotein D	APOD_HUMAN	no	347	APOD	1	3	0	0	0	yes
+Human	P05155	1 - high confidence	Plasma protease C1 inhibitor	IC1_HUMAN	no	710	SERPING1	1	1	0	0	0	yes
+Human	P06744	1 - high confidence	Glucose-6-phosphate isomerase	G6PI_HUMAN	no	2821	GPI	1	13	0	0	0	yes
+Human	P07093	1 - high confidence	Glia-derived nexin	GDN_HUMAN	no	5270	SERPINE2	1	10	0	0	0	yes
+Human	P07585	1 - high confidence	Decorin	PGS2_HUMAN	no	1634	DCN	1	4	0	0	0	yes
+Human	P07942	1 - high confidence	Laminin subunit beta-1	LAMB1_HUMAN	no	3912	LAMB1	1	28	0	0	0	yes
+Human	P08123	1 - high confidence	Collagen alpha-2(I) chain	CO1A2_HUMAN	no	1278	COL1A2	1	13	0	0	0	yes
+Human	P08603	1 - high confidence	Complement factor H	CFAH_HUMAN	no	3075	CFH	1	4	0	0	0	yes
+Human	P10645	1 - high confidence	Chromogranin-A	CMGA_HUMAN	no	1113	CHGA	1	1	0	0	0	yes
+Human	P10909	1 - high confidence	Clusterin	CLUS_HUMAN	no	1191	CLU	1	32	0	0	0	yes
+Human	P11047	1 - high confidence	Laminin subunit gamma-1	LAMC1_HUMAN	no	3915	LAMC1	1	29	0	0	0	yes
+Human	P12109	1 - high confidence	Collagen alpha-1(VI) chain	CO6A1_HUMAN	no	1291	COL6A1	1	7	0	0	0	yes
+Human	P12110	1 - high confidence	Collagen alpha-2(VI) chain	CO6A2_HUMAN	no	1292	COL6A2	1	11	0	0	0	yes
+Human	P12111	1 - high confidence	Collagen alpha-3(VI) chain	CO6A3_HUMAN	no	1293	COL6A3	1	15	0	0	0	yes
+Human	P12814	1 - high confidence	Alpha-actinin-1	ACTN1_HUMAN	no	87	ACTN1	1	3	0	0	0	yes
+Human	P13284	1 - high confidence	Gamma-interferon-inducible lysosomal thiol reductase	GILT_HUMAN	no	10437	IFI30	1	3	0	0	0	yes
+Human	P17936	1 - high confidence	Insulin-like growth factor-binding protein 3	IBP3_HUMAN	no	3486	IGFBP3	1	7	0	0	0	yes
+Human	P20851	1 - high confidence	C4b-binding protein beta chain	C4BPB_HUMAN	no	725	C4BPB	1	2	0	0	0	yes
+Human	P20908	1 - high confidence	Collagen alpha-1(V) chain	CO5A1_HUMAN	no	1289	COL5A1	1	9	0	0	0	yes
+Human	P21810	1 - high confidence	Biglycan	PGS1_HUMAN	no	633	BGN	1	9	0	0	0	yes
+Human	P24043	1 - high confidence	Laminin subunit alpha-2	LAMA2_HUMAN	no	3908	LAMA2	1	4	0	0	0	yes
+Human	P24821	1 - high confidence	Tenascin	TENA_HUMAN	no	3371	TNC	1	21	0	0	0	yes
+Human	P25391	1 - high confidence	Laminin subunit alpha-1	LAMA1_HUMAN	no	284217	LAMA1	1	8	0	0	0	yes
+Human	P25940	1 - high confidence	Collagen alpha-3(V) chain	CO5A3_HUMAN	no	50509	COL5A3	1	1	0	0	0	yes
+Human	P27169	1 - high confidence	Serum paraoxonase/arylesterase 1	PON1_HUMAN	no	5444	PON1	1	7	0	0	0	yes
+Human	P27797	1 - high confidence	Calreticulin	CALR_HUMAN	no	811	CALR	1	18	0	0	0	yes
+Human	P28300	1 - high confidence	Protein-lysine 6-oxidase	LYOX_HUMAN	no	4015	LOX	1	8	0	0	0	yes
+Human	P28799	1 - high confidence	Granulins	GRN_HUMAN	no	2896	GRN	1	8	0	0	0	yes
+Human	P35555	1 - high confidence	Fibrillin-1	FBN1_HUMAN	no	2200	FBN1	1	13	0	0	0	yes
+Human	P35556	1 - high confidence	Fibrillin-2	FBN2_HUMAN	no	2201	FBN2	1	1	0	0	0	yes
+Human	P41221	1 - high confidence	Protein Wnt-5a	WNT5A_HUMAN	no	7474	WNT5A	1	16	0	0	0	yes
+Human	P43251	1 - high confidence	Biotinidase	BTD_HUMAN	no	686	BTD	1	5	0	0	0	yes
+Human	P47972	1 - high confidence	Neuronal pentraxin-2	NPTX2_HUMAN	no	4885	NPTX2	1	2	0	0	0	yes
+Human	P51884	1 - high confidence	Lumican	LUM_HUMAN	no	4060	LUM	1	4	0	0	0	yes
+Human	P51888	1 - high confidence	Prolargin	PRELP_HUMAN	no	5549	PRELP	1	1	0	0	0	yes
+Human	P55083	1 - high confidence	Microfibril-associated glycoprotein 4	MFAP4_HUMAN	no	4239	MFAP4	1	9	0	0	0	yes
+Human	P55268	1 - high confidence	Laminin subunit beta-2	LAMB2_HUMAN	no	3913	LAMB2	1	3	0	0	0	yes
+Human	P58166	1 - high confidence	Inhibin beta E chain	INHBE_HUMAN	no	83729	INHBE	1	2	0	0	0	yes
+Human	P67809	1 - high confidence	Nuclease-sensitive element-binding protein 1	YBOX1_HUMAN	no	4904	YBX1	1	15	0	0	0	yes
+Human	P98160	1 - high confidence	Basement membrane-specific heparan sulfate proteoglycan core protein	PGBM_HUMAN	no	3339	HSPG2	1	18	0	0	0	yes
+Human	Q08380	1 - high confidence	Galectin-3-binding protein	LG3BP_HUMAN	no	3959	LGALS3BP	1	31	0	0	0	yes
+Human	Q08431	1 - high confidence	Lactadherin	MFGM_HUMAN	no	4240	MFGE8	1	18	0	0	0	yes
+Human	Q11201	1 - high confidence	"CMP-N-acetylneuraminate-beta-galactosamide-alpha-2,3-sialyltransferase 1"	SIA4A_HUMAN	no	6482	ST3GAL1	1	14	0	0	0	yes
+Human	Q11206	1 - high confidence	"CMP-N-acetylneuraminate-beta-galactosamide-alpha-2,3-sialyltransferase 4"	SIA4C_HUMAN	no	6484	ST3GAL4	1	8	0	0	0	yes
+Human	Q12841	1 - high confidence	Follistatin-related protein 1	FSTL1_HUMAN	no	11167	FSTL1	1	9	0	0	0	yes
+Human	Q13201	1 - high confidence	Multimerin-1	MMRN1_HUMAN	no	22915	MMRN1	1	3	0	0	0	yes
+Human	Q13361	1 - high confidence	Microfibrillar-associated protein 5	MFAP5_HUMAN	no	8076	MFAP5	1	1	0	0	0	yes
+Human	Q13751	1 - high confidence	Laminin subunit beta-3	LAMB3_HUMAN	no	3914	LAMB3	1	2	0	0	0	yes
+Human	Q13753	1 - high confidence	Laminin subunit gamma-2	LAMC2_HUMAN	no	3918	LAMC2	1	3	0	0	0	yes
+Human	Q14112	1 - high confidence	Nidogen-2	NID2_HUMAN	no	22795	NID2	1	2	0	0	0	yes
+Human	Q14766	1 - high confidence	Latent-transforming growth factor beta-binding protein 1	LTBP1_HUMAN	no	4052	LTBP1	1	6	0	0	0	yes
+Human	Q15389	1 - high confidence	Angiopoietin-1	ANGP1_HUMAN	no	284	ANGPT1	1	5	0	0	0	yes
+Human	Q16363	1 - high confidence	Laminin subunit alpha-4	LAMA4_HUMAN	no	3910	LAMA4	1	17	0	0	0	yes
+Human	Q16787	1 - high confidence	Laminin subunit alpha-3	LAMA3_HUMAN	no	3909	LAMA3	1	5	0	0	0	yes
+Human	Q32P28	1 - high confidence	Prolyl 3-hydroxylase 1	P3H1_HUMAN	no	64175	LEPRE1	1	13	0	0	0	yes
+Human	Q68BL8	1 - high confidence	Olfactomedin-like protein 2B	OLM2B_HUMAN	no	25903	OLFML2B	1	1	0	0	0	yes
+Human	Q6P4A8	1 - high confidence	Putative phospholipase B-like 1	PLBL1_HUMAN	no	79887	PLBD1	1	2	0	0	0	yes
+Human	Q7Z4R8	1 - high confidence	UPF0669 protein C6orf120	CF120_HUMAN	no	387263	C6orf120	1	1	0	0	0	yes
+Human	Q7Z7G0	1 - high confidence	Target of Nesh-SH3	TARSH_HUMAN	no	25890	ABI3BP	1	2	0	0	0	yes
+Human	Q92485	1 - high confidence	Acid sphingomyelinase-like phosphodiesterase 3b	ASM3B_HUMAN	no	27293	SMPDL3B	1	5	0	0	0	yes
+Human	Q92626	1 - high confidence	Peroxidasin homolog	PXDN_HUMAN	no	7837	PXDN	1	7	0	0	0	yes
+Human	Q92832	1 - high confidence	Protein kinase C-binding protein NELL1	NELL1_HUMAN	no	4745	NELL1	1	1	0	0	0	yes
+Human	Q96RW7	1 - high confidence	Hemicentin-1	HMCN1_HUMAN	no	83872	HMCN1	1	2	0	0	0	yes
+Human	Q99574	1 - high confidence	Neuroserpin	NEUS_HUMAN	no	5274	SERPINI1	1	1	0	0	0	yes
+Human	Q99715	1 - high confidence	Collagen alpha-1(XII) chain	COCA1_HUMAN	no	1303	COL12A1	1	11	0	0	0	yes
+Human	Q99985	1 - high confidence	Semaphorin-3C	SEM3C_HUMAN	no	10512	SEMA3C	1	7	0	0	0	yes
+Human	Q9BXX0	1 - high confidence	EMILIN-2	EMIL2_HUMAN	no	84034	EMILIN2	1	1	0	0	0	yes
+Human	Q9H1J7	1 - high confidence	Protein Wnt-5b	WNT5B_HUMAN	no	81029	WNT5B	1	1	0	0	0	yes
+Human	Q9NR99	1 - high confidence	Matrix-remodeling-associated protein 5	MXRA5_HUMAN	no	25878	MXRA5	1	2	0	0	0	yes
+Human	Q9NRN5	1 - high confidence	Olfactomedin-like protein 3	OLFL3_HUMAN	no	56944	OLFML3	1	3	0	0	0	yes
+Human	Q9Y2E5	1 - high confidence	Epididymis-specific alpha-mannosidase	MA2B2_HUMAN	no	23324	MAN2B2	1	1	0	0	0	yes
+Human	Q9Y5X9	1 - high confidence	Endothelial lipase	LIPE_HUMAN	no	9388	LIPG	1	2	0	0	0	yes
+Human	Q9Y6C2	1 - high confidence	EMILIN-1	EMIL1_HUMAN	no	11117	EMILIN1	1	13	0	0	0	yes
+Human	Q9Y6L7	1 - high confidence	Tolloid-like protein 2	TLL2_HUMAN	no	7093	TLL2	1	2	0	0	0	yes
+Human	P02787	1 - high confidence	Serotransferrin	TRFE_HUMAN	no	7018	TF	0.9999	6	0	0	0	yes
+Human	Q99988	1 - high confidence	Growth/differentiation factor 15	GDF15_HUMAN	no	9518	GDF15	0.9999	4	0	0	0	yes
+Human	P04003	1 - high confidence	C4b-binding protein alpha chain	C4BPA_HUMAN	no	722	C4BPA	0.9981	1	0	0	0	yes
+Human	P45452	1 - high confidence	Collagenase 3	MMP13_HUMAN	no	4322	MMP13	0.9976	3	0	0	0	yes
+Human	P01011	1 - high confidence	Alpha-1-antichymotrypsin	AACT_HUMAN	no	12	SERPINA3	0.9975	2	0	0	0	yes
+Human	P19823	1 - high confidence	Inter-alpha-trypsin inhibitor heavy chain H2	ITIH2_HUMAN	no	3698	ITIH2	0.9975	1	0	0	0	yes
+Human	Q05707	1 - high confidence	Collagen alpha-1(XIV) chain	COEA1_HUMAN	no	7373	COL14A1	0.9975	8	0	0	0	yes
+Human	P13611	1 - high confidence	Versican core protein	CSPG2_HUMAN	no	1462	VCAN	0.9973	6	0	0	0	yes
+Human	P10646	1 - high confidence	Tissue factor pathway inhibitor	TFPI1_HUMAN	no	7035	TFPI	0.9972	20	0	0	0	yes
+Human	P23560	1 - high confidence	Brain-derived neurotrophic factor	BDNF_HUMAN	no	627	BDNF	0.9972	1	0	0	0	yes
+Human	Q14563	1 - high confidence	Semaphorin-3A	SEM3A_HUMAN	no	10371	SEMA3A	0.9972	5	0	0	0	yes
+Human	Q96A83	1 - high confidence	Collagen alpha-1(XXVI) chain	EMID2_HUMAN	no	136227	EMID2	0.9972	1	0	0	0	yes
+Human	Q9Y646	1 - high confidence	Plasma glutamate carboxypeptidase	PGCP_HUMAN	no	10404	PGCP	0.9972	3	0	0	0	yes
+Human	P05120	1 - high confidence	Plasminogen activator inhibitor 2	PAI2_HUMAN	no	5055	SERPINB2	0.997	1	0	0	0	yes
+Human	P48307	1 - high confidence	Tissue factor pathway inhibitor 2	TFPI2_HUMAN	no	7980	TFPI2	0.997	7	0	0	0	yes
+Human	Q8N3Z0	1 - high confidence	Inactive serine protease 35	PRS35_HUMAN	no	167681	PRSS35	0.997	2	0	0	0	yes
+Human	O14498	1 - high confidence	Immunoglobulin superfamily containing leucine-rich repeat protein	ISLR_HUMAN	no	3671	ISLR	0.9967	2	0	0	0	yes
+Human	O75462	1 - high confidence	Cytokine receptor-like factor 1	CRLF1_HUMAN	no	9244	CRLF1	0.9967	2	0	0	0	yes
+Human	P00734	1 - high confidence	Prothrombin	THRB_HUMAN	no	2147	F2	0.9967	10	0	0	0	yes
+Human	P22105	1 - high confidence	Tenascin-X	TENX_HUMAN	no	7148	TNXB	0.9967	1	0	0	0	yes
+Human	Q6ZMP0	1 - high confidence	Thrombospondin type-1 domain-containing protein 4	THSD4_HUMAN	no	79875	THSD4	0.9967	1	0	0	0	yes
+Human	Q9NS15	1 - high confidence	Latent-transforming growth factor beta-binding protein 3	LTBP3_HUMAN	no	4054	LTBP3	0.9967	4	0	0	0	yes
+Human	O00300	1 - high confidence	Tumor necrosis factor receptor superfamily member 11B	TR11B_HUMAN	no	4982	TNFRSF11B	0.9966	1	0	0	0	yes
+Human	Q02388	1 - high confidence	Collagen alpha-1(VII) chain	CO7A1_HUMAN	no	1294	COL7A1	0.9966	2	0	0	0	yes
+Human	O95841	1 - high confidence	Angiopoietin-related protein 1	ANGL1_HUMAN	no	9068	ANGPTL1	0.9964	1	0	0	0	yes
+Human	O00634	1 - high confidence	Netrin-3	NET3_HUMAN	no	4917	NTN3	0.9957	1	0	0	0	yes
+Human	O75629	1 - high confidence	Protein CREG1	CREG1_HUMAN	no	8804	CREG1	0.9957	5	0	0	0	yes
+Human	O95158	1 - high confidence	Neurexophilin-4	NXPH4_HUMAN	no	11247	NXPH4	0.9957	1	0	0	0	yes
+Human	Q6UXH1	1 - high confidence	Cysteine-rich with EGF-like domain protein 2	CREL2_HUMAN	no	79174	CRELD2	0.9957	3	0	0	0	yes
+Human	O43897	1 - high confidence	Tolloid-like protein 1	TLL1_HUMAN	no	7092	TLL1	0.9956	3	0	0	0	yes
+Human	P01033	1 - high confidence	Metalloproteinase inhibitor 1	TIMP1_HUMAN	no	7076	TIMP1	0.9956	27	0	0	0	yes
+Human	P05997	1 - high confidence	Collagen alpha-2(V) chain	CO5A2_HUMAN	no	1290	COL5A2	0.9956	9	0	0	0	yes
+Human	Q96JB6	1 - high confidence	Lysyl oxidase homolog 4	LOXL4_HUMAN	no	84171	LOXL4	0.9956	1	0	0	0	yes
+Human	Q9BY76	1 - high confidence	Angiopoietin-related protein 4	ANGL4_HUMAN	no	51129	ANGPTL4	0.9956	4	0	0	0	yes
+Human	O75094	1 - high confidence	Slit homolog 3 protein	SLIT3_HUMAN	no	6586	SLIT3	0.9952	9	0	0	0	yes
+Human	P36955	1 - high confidence	Pigment epithelium-derived factor	PEDF_HUMAN	no	5176	SERPINF1	0.9952	6	0	0	0	yes
+Human	Q68BL7	1 - high confidence	Olfactomedin-like protein 2A	OLM2A_HUMAN	no	169611	OLFML2A	0.9952	1	0	0	0	yes
+Human	O60565	1 - high confidence	Gremlin-1	GREM1_HUMAN	no	26585	GREM1	0.9946	2	0	0	0	yes
+Human	P55058	1 - high confidence	Phospholipid transfer protein	PLTP_HUMAN	no	5360	PLTP	0.9946	17	0	0	0	yes
+Human	Q15063	1 - high confidence	Periostin	POSTN_HUMAN	no	10631	POSTN	0.9946	3	0	0	0	yes
+Human	Q76M96	1 - high confidence	Coiled-coil domain-containing protein 80	CCD80_HUMAN	no	151887	CCDC80	0.9945	2	0	0	0	yes
+Human	P00488	1 - high confidence	Coagulation factor XIII A chain	F13A_HUMAN	no	2162	F13A1	0.9942	1	0	0	0	yes
+Human	P01009	1 - high confidence	Alpha-1-antitrypsin	A1AT_HUMAN	no	5265	SERPINA1	0.9942	6	0	0	0	yes
+Human	P0C0L4	1 - high confidence	Complement C4-A	CO4A_HUMAN	no	720	C4A	0.9942	9	0	0	0	yes
+Human	P20774	1 - high confidence	Mimecan	MIME_HUMAN	no	4969	OGN	0.9942	1	0	0	0	yes
+Human	Q6UY14	1 - high confidence	ADAMTS-like protein 4	ATL4_HUMAN	no	54507	ADAMTSL4	0.9942	3	0	0	0	yes
+Human	Q9BXN1	1 - high confidence	Asporin	ASPN_HUMAN	no	54829	ASPN	0.9942	1	0	0	0	yes
+Human	A8TX70	1 - high confidence	Collagen alpha-5(VI) chain	CO6A5_HUMAN	no	256076	COL29A1	0.9939	2	0	0	0	yes
+Human	P01861	1 - high confidence	Ig gamma-4 chain C region	IGHG4_HUMAN	no	3503	IGHG4	0.9939	4	0	0	0	yes
+Human	P12107	1 - high confidence	Collagen alpha-1(XI) chain	COBA1_HUMAN	no	1301	COL11A1	0.9939	2	0	0	0	yes
+Human	Q9UJJ9	1 - high confidence	N-acetylglucosamine-1-phosphotransferase subunit gamma	GNPTG_HUMAN	no	84572	GNPTG	0.9939	1	0	0	0	yes
+Human	Q9UM22	1 - high confidence	Mammalian ependymin-related protein 1	EPDR1_HUMAN	no	54749	EPDR1	0.9938	2	0	0	0	yes
+Human	P02675	1 - high confidence	Fibrinogen beta chain [Cleaved into: Fibrinopeptide B]	FIBB_HUMAN	no	2244	FGB	0.9934	21	0	0	0	yes
+Human	P00749	1 - high confidence	Urokinase-type plasminogen activator	UROK_HUMAN	no	5328	PLAU	0.9933	19	0	0	0	yes
+Human	P02458	1 - high confidence	Collagen alpha-1(II) chain	CO2A1_HUMAN	no	1280	COL2A1	0.9924	3	0	0	0	yes
+Human	Q9UKU9	1 - high confidence	Angiopoietin-related protein 2	ANGL2_HUMAN	no	23452	ANGPTL2	0.9924	4	0	0	0	yes
+Human	P02671	1 - high confidence	Fibrinogen alpha chain [Cleaved into: Fibrinopeptide A]	FIBA_HUMAN	no	2243	FGA	0.9918	5	0	0	0	yes
+Human	Q9UBP4	1 - high confidence	Dickkopf-related protein 3	DKK3_HUMAN	no	27122	DKK3	0.9909	3	0	0	0	yes
+Human	Q66K79	1 - high confidence	Carboxypeptidase Z	CBPZ_HUMAN	no	8532	CPZ	0.9906	2	0	0	0	yes
+Human	P02760	1 - high confidence	Protein AMBP [Cleaved into: Alpha-1-microglobulin	AMBP_HUMAN	no	259	AMBP	0.9905	2	0	0	0	yes
+Human	Q9H741	1 - high confidence	UPF0454 protein C12orf49	CL049_HUMAN	no	79794	C12orf49	0.9905	3	0	0	0	yes
+Human	Q15438	1 - high confidence	Cytohesin-1	CYH1_HUMAN	no	9267	CYTH1	0.9902	5	0	0	0	yes
+Human	Q15517	1 - high confidence	Corneodesmosin	CDSN_HUMAN	no	1041	CDSN	0.9901	10	0	0	0	yes
+Human	Q96GW7	1 - high confidence	Brevican core protein	PGCB_HUMAN	no	63827	BCAN	0.99	2	0	0	1	yes
+Human	P02763	1 - high confidence	Alpha-1-acid glycoprotein 1	A1AG1_HUMAN	no	5004	ORM1	0.9877	4	0	0	0	yes
+Human	P98095	1 - high confidence	Fibulin-2	FBLN2_HUMAN	no	2199	FBLN2	0.9872	2	0	0	0	yes
+Human	Q8IUX7	1 - high confidence	Adipocyte enhancer-binding protein 1	AEBP1_HUMAN	no	165	AEBP1	0.9872	4	0	0	0	yes
+Human	P01023	1 - high confidence	Alpha-2-macroglobulin	A2MG_HUMAN	no	2	A2M	0.9859	5	0	0	0	yes
+Human	Q9P2M7	1 - high confidence	Cingulin	CING_HUMAN	no	57530	CGN	0.9803	2	0	0	0	yes
+Human	Q8TE58	1 - high confidence	A disintegrin and metalloproteinase with thrombospondin motifs 15	ATS15_HUMAN	no	170689	ADAMTS15	0.9768	2	0	0	0	yes
+Human	O96014	1 - high confidence	Protein Wnt-11	WNT11_HUMAN	no	7481	WNT11	0.9751	1	0	0	0	yes
+Human	Q8TAD2	1 - high confidence	Interleukin-17D	IL17D_HUMAN	no	53342	IL17D	0.9748	1	0	0	0	yes
+Human	Q96EE4	1 - high confidence	Coiled-coil domain-containing protein 126	CC126_HUMAN	no	90693	CCDC126	0.9708	10	0	0	0	yes
+Human	P02788	1 - high confidence	Lactotransferrin	TRFL_HUMAN	no	4057	LTF	0.9577	1	0	0	0	yes
+Human	P00750	1 - high confidence	Tissue-type plasminogen activator	TPA_HUMAN	no	5327	PLAT	0.9432	3	0	0	0	yes
+Human	P12259	1 - high confidence	Coagulation factor V	FA5_HUMAN	no	2153	F5	0.9361	19	0	0	0	yes
+Human	Q9BXJ5	1 - high confidence	Complement C1q tumor necrosis factor-related protein 2	C1QT2_HUMAN	no	114898	C1QTNF2	0.9041	2	0	0	0	yes
+Human	Q12805	1 - high confidence	EGF-containing fibulin-like extracellular matrix protein 1	FBLN3_HUMAN	no	2202	EFEMP1	0.8419	1	0	0	0	yes
+Human	P49767	1 - high confidence	Vascular endothelial growth factor C	VEGFC_HUMAN	no	7424	VEGFC	0.8412	1	0	0	0	yes
+Human	P13497	1 - high confidence	Bone morphogenetic protein 1	BMP1_HUMAN	no	649	BMP1	1	1	0	0	0	yes
+Human	P61978	1 - high confidence	Heterogeneous nuclear ribonucleoprotein K	HNRPK_HUMAN	no	3190	HNRNPK	1	19	0	0	0	yes
+Human	Q99784	1 - high confidence	Noelin	NOE1_HUMAN	no	10439	OLFM1	1	1	0	0	0	yes
+Human	Q9UHL4	1 - high confidence	Dipeptidyl peptidase 2	DPP2_HUMAN	no	29952	DPP7	1	4	0	0	0	yes
+Human	P07339	1 - high confidence	Cathepsin D	CATD_HUMAN	no	1509	CTSD	0.9956	21	0	0	0	yes
+Human	P33527	1 - high confidence	Multidrug resistance-associated protein 1	MRP1_HUMAN	no	4363	ABCC1	1	16	1	16	0	yes
+Human	Q96PB1	1 - high confidence	CAS1 domain-containing protein 1	CASD1_HUMAN	no	64921	CASD1	1	4	1	14	0	yes
+Human	Q9UHW9	1 - high confidence	Solute carrier family 12 member 6	S12A6_HUMAN	no	9990	SLC12A6	1	24	1	14	0	yes
+Human	P19634	1 - high confidence	Sodium/hydrogen exchanger 1	SL9A1_HUMAN	no	6548	SLC9A1	1	20	1	13	0	yes
+Human	Q9BXP2	1 - high confidence	Solute carrier family 12 member 9	S12A9_HUMAN	no	56996	SLC12A9	1	18	1	13	0	yes
+Human	P11166	1 - high confidence	"Solute carrier family 2, facilitated glucose transporter member 1"	GTR1_HUMAN	no	6513	SLC2A1	1	42	1	12	0	yes
+Human	P31641	1 - high confidence	Sodium- and chloride-dependent taurine transporter	SC6A6_HUMAN	no	6533	SLC6A6	1	11	1	12	0	yes
+Human	Q96BD0	1 - high confidence	Solute carrier organic anion transporter family member 4A1	SO4A1_HUMAN	no	28231	SLCO4A1	1	14	1	12	0	yes
+Human	Q9UGH3	1 - high confidence	Solute carrier family 23 member 2	S23A2_HUMAN	no	9962	SLC23A2	1	6	1	12	0	yes
+Human	Q9UIG8	1 - high confidence	Solute carrier organic anion transporter family member 3A1	SO3A1_HUMAN	no	28232	SLCO3A1	1	15	1	12	0	yes
+Human	P58743	1 - high confidence	Prestin	S26A5_HUMAN	no	375611	SLC26A5	1	1	1	11	0	yes
+Human	Q14542	1 - high confidence	Equilibrative nucleoside transporter 2	S29A2_HUMAN	no	3177	SLC29A2	1	15	1	11	0	yes
+Human	Q99808	1 - high confidence	Equilibrative nucleoside transporter 1	S29A1_HUMAN	no	2030	SLC29A1	1	45	1	11	0	yes
+Human	Q9H2H9	1 - high confidence	Sodium-coupled neutral amino acid transporter 1	S38A1_HUMAN	no	81539	SLC38A1	1	28	1	11	0	yes
+Human	Q9Y6M7	1 - high confidence	Sodium bicarbonate cotransporter 3	S4A7_HUMAN	no	9497	SLC4A7	1	34	1	11	0	yes
+Human	Q13336	1 - high confidence	Urea transporter 1	UT1_HUMAN	no	6563	SLC14A1	1	5	1	10	0	yes
+Human	Q6UWJ1	1 - high confidence	Transmembrane and coiled-coil domain-containing protein 3	TMCO3_HUMAN	no	55002	TMCO3	1	2	1	10	0	yes
+Human	Q8TCT8	1 - high confidence	Signal peptide peptidase-like 2A	PSL2_HUMAN	no	84888	SPPL2A	1	15	1	9	0	yes
+Human	Q9HD45	1 - high confidence	Transmembrane 9 superfamily member 3	TM9S3_HUMAN	no	56889	TM9SF3	1	44	1	9	0	yes
+Human	A1A5B4	1 - high confidence	Anoctamin-9	ANO9_HUMAN	no	338440	ANO9	1	8	1	8	0	yes
+Human	P05023	1 - high confidence	Sodium/potassium-transporting ATPase subunit alpha-1	AT1A1_HUMAN	no	476	ATP1A1	1	12	1	8	0	yes
+Human	P13637	1 - high confidence	Sodium/potassium-transporting ATPase subunit alpha-3	AT1A3_HUMAN	no	478	ATP1A3	1	2	1	8	0	yes
+Human	Q4KMQ2	1 - high confidence	Anoctamin-6	ANO6_HUMAN	no	196527	ANO6	1	45	1	8	0	yes
+Human	Q9Y487	1 - high confidence	V-type proton ATPase 116 kDa subunit a isoform 2	VPP2_HUMAN	no	23545	ATP6V0A2	1	16	1	8	0	yes
+Human	O00398	1 - high confidence	Putative P2Y purinoceptor 10	P2Y10_HUMAN	no	27334	P2RY10	1	3	1	7	0	yes
+Human	O43194	1 - high confidence	G-protein coupled receptor 39	GPR39_HUMAN	no	2863	GPR39	1	11	1	7	0	yes
+Human	O95136	1 - high confidence	Sphingosine 1-phosphate receptor 2	S1PR2_HUMAN	no	9294	S1PR2	1	31	1	7	0	yes
+Human	O95490	1 - high confidence	Latrophilin-2	LPHN2_HUMAN	no	23266	LPHN2	1	17	1	7	0	yes
+Human	P07550	1 - high confidence	Beta-2 adrenergic receptor	ADRB2_HUMAN	no	154	ADRB2	1	2	1	7	0	yes
+Human	P18825	1 - high confidence	Alpha-2C adrenergic receptor	ADA2C_HUMAN	no	152	ADRA2C	1	3	1	7	0	yes
+Human	P21731	1 - high confidence	Thromboxane A2 receptor	TA2R_HUMAN	no	6915	TBXA2R	1	13	1	7	0	yes
+Human	P25105	1 - high confidence	Platelet-activating factor receptor	PTAFR_HUMAN	no	5724	PTAFR	1	5	1	7	0	yes
+Human	P25116	1 - high confidence	Proteinase-activated receptor 1	PAR1_HUMAN	no	2149	F2R	1	19	1	7	0	yes
+Human	P25929	1 - high confidence	Neuropeptide Y receptor type 1	NPY1R_HUMAN	no	4886	NPY1R	1	2	1	7	0	yes
+Human	P30556	1 - high confidence	Type-1 angiotensin II receptor	AGTR1_HUMAN	no	185	AGTR1	1	1	1	7	0	yes
+Human	P30989	1 - high confidence	Neurotensin receptor type 1	NTR1_HUMAN	no	4923	NTSR1	1	2	1	7	0	yes
+Human	P34972	1 - high confidence	Cannabinoid receptor 2	CNR2_HUMAN	no	1269	CNR2	1	3	1	7	0	yes
+Human	P43116	1 - high confidence	Prostaglandin E2 receptor EP2 subtype	PE2R2_HUMAN	no	5732	PTGER2	1	8	1	7	0	yes
+Human	Q16602	1 - high confidence	Calcitonin gene-related peptide type 1 receptor	CALRL_HUMAN	no	10203	CALCRL	1	5	1	7	0	yes
+Human	Q5VW38	1 - high confidence	Protein GPR107	GP107_HUMAN	no	57720	GPR107	1	20	1	7	0	yes
+Human	Q86SQ4	1 - high confidence	G-protein coupled receptor 126	GP126_HUMAN	no	57211	GPR126	1	16	1	7	0	yes
+Human	Q86VZ1	1 - high confidence	P2Y purinoceptor 8	P2RY8_HUMAN	no	286530	P2RY8	1	8	1	7	0	yes
+Human	Q8IWK6	1 - high confidence	Probable G-protein coupled receptor 125	GP125_HUMAN	no	166647	GPR125	1	15	1	7	0	yes
+Human	Q8NBN3	1 - high confidence	Transmembrane protein 87A	TM87A_HUMAN	no	25963	TMEM87A	1	27	1	7	0	yes
+Human	Q96AM1	1 - high confidence	Mas-related G-protein coupled receptor member F	MRGRF_HUMAN	no	116535	MRGPRF	1	3	1	7	0	yes
+Human	Q96K49	1 - high confidence	Transmembrane protein 87B	TM87B_HUMAN	no	84910	TMEM87B	1	12	1	7	0	yes
+Human	Q96RI0	1 - high confidence	Proteinase-activated receptor 4	PAR4_HUMAN	no	9002	F2RL3	1	1	1	7	0	yes
+Human	Q99835	1 - high confidence	Smoothened homolog	SMO_HUMAN	no	6608	SMO	1	5	1	7	0	yes
+Human	Q9BY15	1 - high confidence	EGF-like module-containing mucin-like hormone receptor-like 3	EMR3_HUMAN	no	84658	EMR3	1	1	1	7	0	yes
+Human	Q9HB89	1 - high confidence	Neuromedin-U receptor 1	NMUR1_HUMAN	no	10316	NMUR1	1	2	1	7	0	yes
+Human	Q9HBW9	1 - high confidence	"EGF, latrophilin and seven transmembrane domain-containing protein 1"	ELTD1_HUMAN	no	64123	ELTD1	1	3	1	7	0	yes
+Human	Q9HCN3	1 - high confidence	Transmembrane protein 8A	TMM8A_HUMAN	no	58986	TMEM8A	1	8	1	7	0	yes
+Human	Q9HCU4	1 - high confidence	Cadherin EGF LAG seven-pass G-type receptor 2	CELR2_HUMAN	no	1952	CELSR2	1	8	1	7	0	yes
+Human	Q9NYQ6	1 - high confidence	Cadherin EGF LAG seven-pass G-type receptor 1	CELR1_HUMAN	no	9620	CELSR1	1	13	1	7	0	yes
+Human	Q9NYQ7	1 - high confidence	Cadherin EGF LAG seven-pass G-type receptor 3	CELR3_HUMAN	no	1951	CELSR3	1	2	1	7	0	yes
+Human	Q9Y271	1 - high confidence	Cysteinyl leukotriene receptor 1	CLTR1_HUMAN	no	10800	CYSLTR1	1	2	1	7	0	yes
+Human	Q9Y653	1 - high confidence	G-protein coupled receptor 56	GPR56_HUMAN	no	9289	GPR56	1	15	1	7	0	yes
+Human	O14494	1 - high confidence	Lipid phosphate phosphohydrolase 1	LPP1_HUMAN	no	8611	PPAP2A	1	10	1	6	0	yes
+Human	P22001	1 - high confidence	Potassium voltage-gated channel subfamily A member 3	KCNA3_HUMAN	no	3738	KCNA3	1	4	1	6	0	yes
+Human	Q13433	1 - high confidence	Zinc transporter ZIP6	S39A6_HUMAN	no	25800	SLC39A6	1	41	1	6	0	yes
+Human	Q15043	1 - high confidence	Zinc transporter ZIP14	S39AE_HUMAN	no	23516	SLC39A14	1	42	1	6	0	yes
+Human	Q96G91	1 - high confidence	P2Y purinoceptor 11	P2Y11_HUMAN	no	5032	P2RY11	1	5	1	6	0	yes
+Human	Q9ULF5	1 - high confidence	Zinc transporter ZIP10	S39AA_HUMAN	no	57181	SLC39A10	1	32	1	6	0	yes
+Human	P04839	1 - high confidence	Cytochrome b-245 heavy chain	CY24B_HUMAN	no	1536	CYBB	1	13	1	5	0	yes
+Human	Q8N271	1 - high confidence	Prominin-2	PROM2_HUMAN	no	150696	PROM2	1	2	1	5	0	yes
+Human	Q9BSA4	1 - high confidence	Protein tweety homolog 2	TTYH2_HUMAN	no	94015	TTYH2	1	6	1	5	0	yes
+Human	Q9C0H2	1 - high confidence	Protein tweety homolog 3	TTYH3_HUMAN	no	80727	TTYH3	1	24	1	5	0	yes
+Human	P28472	1 - high confidence	Gamma-aminobutyric acid receptor subunit beta-3	GBRB3_HUMAN	no	2562	GABRB3	1	1	1	4	0	yes
+Human	Q13003	1 - high confidence	"Glutamate receptor, ionotropic kainate 3"	GRIK3_HUMAN	no	2899	GRIK3	1	2	1	4	0	yes
+Human	Q13491	1 - high confidence	Neuronal membrane glycoprotein M6-b	GPM6B_HUMAN	no	2824	GPM6B	1	9	1	4	0	yes
+Human	Q6P4Q7	1 - high confidence	Metal transporter CNNM4	CNNM4_HUMAN	no	26504	CNNM4	1	35	1	4	0	yes
+Human	Q8NE01	1 - high confidence	Metal transporter CNNM3	CNNM3_HUMAN	no	26505	CNNM3	1	7	1	3	0	yes
+Human	Q96PD2	1 - high confidence	"Discoidin, CUB and LCCL domain-containing protein 2"	DCBD2_HUMAN	no	131566	DCBLD2	1	18	1	3	0	yes
+Human	A2VDJ0	1 - high confidence	Transmembrane protein 131-like	T131L_HUMAN	no	23240	KIAA0922	1	2	1	2	0	yes
+Human	O43155	1 - high confidence	Leucine-rich repeat transmembrane protein FLRT2	FLRT2_HUMAN	no	23768	FLRT2	1	9	1	2	0	yes
+Human	O75882	1 - high confidence	Attractin	ATRN_HUMAN	no	8455	ATRN	1	29	1	2	0	yes
+Human	P23470	1 - high confidence	Receptor-type tyrosine-protein phosphatase gamma	PTPRG_HUMAN	no	5793	PTPRG	1	21	1	2	0	yes
+Human	P48551	1 - high confidence	Interferon alpha/beta receptor 2	INAR2_HUMAN	no	3455	IFNAR2	1	21	1	2	0	yes
+Human	P54756	1 - high confidence	Ephrin type-A receptor 5	EPHA5_HUMAN	no	2044	EPHA5	1	5	1	2	0	yes
+Human	Q01973	1 - high confidence	Tyrosine-protein kinase transmembrane receptor ROR1	ROR1_HUMAN	no	4919	ROR1	1	5	1	2	0	yes
+Human	Q8IYR6	1 - high confidence	Tomoregulin-1	TEFF1_HUMAN	no	8577	TMEFF1	1	1	1	2	0	yes
+Human	Q99572	1 - high confidence	P2X purinoceptor 7	P2RX7_HUMAN	no	5027	P2RX7	1	7	1	2	0	yes
+Human	Q9BRN9	1 - high confidence	TM2 domain-containing protein 3	TM2D3_HUMAN	no	80213	TM2D3	1	11	1	2	0	yes
+Human	Q9BX74	1 - high confidence	TM2 domain-containing protein 1	TM2D1_HUMAN	no	83941	TM2D1	1	17	1	2	0	yes
+Human	A8MVW5	1 - high confidence	HEPACAM family member 2	HECA2_HUMAN	no	253012	HEPACAM2	1	1	1	1	0	yes
+Human	O00478	1 - high confidence	Butyrophilin subfamily 3 member A3	BT3A3_HUMAN	no	10384	BTN3A3	1	33	1	1	0	yes
+Human	O00533	1 - high confidence	Neural cell adhesion molecule L1-like protein	CHL1_HUMAN	no	10752	CHL1	1	4	1	1	0	yes
+Human	O00592	1 - high confidence	Podocalyxin-like protein 1	PODXL_HUMAN	no	5420	PODXL	1	13	1	1	0	yes
+Human	O14917	1 - high confidence	Protocadherin-17	PCD17_HUMAN	no	27253	PCDH17	1	2	1	1	0	yes
+Human	O15031	1 - high confidence	Plexin-B2	PLXB2_HUMAN	no	23654	PLXNB2	1	40	1	1	0	yes
+Human	O15394	1 - high confidence	Neural cell adhesion molecule 2	NCAM2_HUMAN	no	4685	NCAM2	1	9	1	1	0	yes
+Human	O43570	1 - high confidence	Carbonic anhydrase 12	CAH12_HUMAN	no	771	CA12	1	8	1	1	0	yes
+Human	O60330	1 - high confidence	Protocadherin gamma-A12	PCDGC_HUMAN	no	26025	PCDHGA12	1	2	1	1	0	yes
+Human	O60462	1 - high confidence	Neuropilin-2	NRP2_HUMAN	no	8828	NRP2	1	18	1	1	0	yes
+Human	O75054	1 - high confidence	Immunoglobulin superfamily member 3	IGSF3_HUMAN	no	3321	IGSF3	1	24	1	1	0	yes
+Human	O75096	1 - high confidence	Low-density lipoprotein receptor-related protein 4	LRP4_HUMAN	no	4038	LRP4	1	6	1	1	0	yes
+Human	O75976	1 - high confidence	Carboxypeptidase D	CBPD_HUMAN	no	1362	CPD	1	18	1	1	0	yes
+Human	O94856	1 - high confidence	Neurofascin	NFASC_HUMAN	no	23114	NFASC	1	8	1	1	0	yes
+Human	O95185	1 - high confidence	Netrin receptor UNC5C	UNC5C_HUMAN	no	8633	UNC5C	1	6	1	1	0	yes
+Human	O95196	1 - high confidence	Chondroitin sulfate proteoglycan 5	CSPG5_HUMAN	no	10675	CSPG5	1	15	1	1	0	yes
+Human	O95274	1 - high confidence	Ly6/PLAUR domain-containing protein 3	LYPD3_HUMAN	no	27076	LYPD3	1	7	1	1	1	yes
+Human	O95297	1 - high confidence	Myelin protein zero-like protein 1	MPZL1_HUMAN	no	9019	MPZL1	1	46	1	1	0	yes
+Human	O95498	1 - high confidence	Vascular non-inflammatory molecule 2	VNN2_HUMAN	no	8875	VNN2	1	6	1	1	1	yes
+Human	O95866	1 - high confidence	Protein G6b	G6B_HUMAN	no	80739	G6B	1	3	1	1	0	yes
+Human	P00533	1 - high confidence	Epidermal growth factor receptor	EGFR_HUMAN	no	1956	EGFR	1	27	1	1	0	yes
+Human	P01130	1 - high confidence	Low-density lipoprotein receptor	LDLR_HUMAN	no	3949	LDLR	1	4	1	1	0	yes
+Human	P01889	1 - high confidence	"HLA class I histocompatibility antigen, B-7 alpha chain"	1B07_HUMAN	no	3106	HLA-B	1	8	1	1	0	yes
+Human	P01891	1 - high confidence	"HLA class I histocompatibility antigen, A-68 alpha chain"	1A68_HUMAN	no	3105	HLA-A	1	19	1	1	0	yes
+Human	P01892	1 - high confidence	"HLA class I histocompatibility antigen, A-2 alpha chain"	1A02_HUMAN	no	3105	HLA-A	1	21	1	1	0	yes
+Human	P01903	1 - high confidence	"HLA class II histocompatibility antigen, DR alpha chain"	2DRA_HUMAN	no	3122	HLA-DRA	1	18	1	1	0	yes
+Human	P01906	1 - high confidence	"HLA class II histocompatibility antigen, DQ alpha 2 chain"	2DA2_HUMAN	no	3118	HLA-DQA2	1	1	1	1	0	yes
+Human	P01909	1 - high confidence	"HLA class II histocompatibility antigen, DQ alpha 1 chain"	2DA1_HUMAN	no	3117	HLA-DQA1	1	3	1	1	0	yes
+Human	P01911	1 - high confidence	"HLA class II histocompatibility antigen, DRB1-15 beta chain"	2B1F_HUMAN	no	3123	HLA-DRB1	1	4	1	1	0	yes
+Human	P01912	1 - high confidence	"HLA class II histocompatibility antigen, DRB1-3 chain"	HB2B_HUMAN	no	3123	HLA-DRB1	1	12	1	1	0	yes
+Human	P01920	1 - high confidence	"HLA class II histocompatibility antigen, DQ beta 1 chain"	DQB1_HUMAN	no	3119	HLA-DQB1	1	10	1	1	0	yes
+Human	P03989	1 - high confidence	"HLA class I histocompatibility antigen, B-27 alpha chain"	1B27_HUMAN	no	3106	HLA-B	1	9	1	1	0	yes
+Human	P04222	1 - high confidence	"HLA class I histocompatibility antigen, Cw-3 alpha chain"	1C03_HUMAN	no	3107	HLA-C	1	21	1	1	0	yes
+Human	P04229	1 - high confidence	"HLA class II histocompatibility antigen, DRB1-1 beta chain"	2B11_HUMAN	no	3123	HLA-DRB1	1	3	1	1	0	yes
+Human	P04439	1 - high confidence	"HLA class I histocompatibility antigen, A-3 alpha chain"	1A03_HUMAN	no	3105	HLA-A	1	10	1	1	0	yes
+Human	P04440	1 - high confidence	"HLA class II histocompatibility antigen, DP beta 1 chain"	DPB1_HUMAN	no	3115	HLA-DPB1	1	18	1	1	0	yes
+Human	P04629	1 - high confidence	High affinity nerve growth factor receptor	NTRK1_HUMAN	no	4914	NTRK1	1	5	1	1	0	yes
+Human	P05026	1 - high confidence	Sodium/potassium-transporting ATPase subunit beta-1	AT1B1_HUMAN	no	481	ATP1B1	1	40	1	1	0	yes
+Human	P05534	1 - high confidence	"HLA class I histocompatibility antigen, A-24 alpha chain"	1A24_HUMAN	no	3105	HLA-A	1	11	1	1	0	yes
+Human	P08581	1 - high confidence	Hepatocyte growth factor receptor	MET_HUMAN	no	4233	MET	1	18	1	1	0	yes
+Human	P09758	1 - high confidence	Tumor-associated calcium signal transducer 2	TACD2_HUMAN	no	4070	TACSTD2	1	3	1	1	0	yes
+Human	P0C7U0	1 - high confidence	Extracellular leucine-rich repeat and fibronectin type-III domain-containing protein 1	ELFN1_HUMAN	no	392617	ELFN1	1	9	1	1	0	yes
+Human	P10314	1 - high confidence	"HLA class I histocompatibility antigen, A-32 alpha chain"	1A32_HUMAN	no	3105	HLA-A	1	1	1	1	0	yes
+Human	P10316	1 - high confidence	"HLA class I histocompatibility antigen, A-69 alpha chain"	1A69_HUMAN	no	3105	HLA-A	1	1	1	1	0	yes
+Human	P10321	1 - high confidence	"HLA class I histocompatibility antigen, Cw-7 alpha chain"	1C07_HUMAN	no	3107	HLA-C	1	5	1	1	0	yes
+Human	P10586	1 - high confidence	Receptor-type tyrosine-protein phosphatase F	PTPRF_HUMAN	no	5792	PTPRF	1	28	1	1	0	yes
+Human	P13746	1 - high confidence	"HLA class I histocompatibility antigen, A-11 alpha chain"	1A11_HUMAN	no	3105	HLA-A	1	11	1	1	0	yes
+Human	P13747	1 - high confidence	"HLA class I histocompatibility antigen, alpha chain E"	HLAE_HUMAN	no	3133	HLA-E	1	4	1	1	0	yes
+Human	P13760	1 - high confidence	"HLA class II histocompatibility antigen, DRB1-4 beta chain"	2B14_HUMAN	no	3123	HLA-DRB1	1	7	1	1	0	yes
+Human	P13762	1 - high confidence	"HLA class II histocompatibility antigen, DR beta 4 chain"	DRB4_HUMAN	no	3126	HLA-DRB4	1	5	1	1	0	yes
+Human	P14384	1 - high confidence	Carboxypeptidase M	CBPM_HUMAN	no	1368	CPM	1	22	1	1	1	yes
+Human	P14415	1 - high confidence	Sodium/potassium-transporting ATPase subunit beta-2	AT1B2_HUMAN	no	482	ATP1B2	1	7	1	1	0	yes
+Human	P14679	1 - high confidence	Tyrosinase	TYRO_HUMAN	no	7299	TYR	1	2	1	1	0	yes
+Human	P15328	1 - high confidence	Folate receptor alpha	FOLR1_HUMAN	no	2348	FOLR1	1	9	1	1	1	yes
+Human	P16066	1 - high confidence	Atrial natriuretic peptide receptor 1	ANPRA_HUMAN	no	4881	NPR1	1	1	1	1	0	yes
+Human	P16188	1 - high confidence	"HLA class I histocompatibility antigen, A-30 alpha chain"	1A30_HUMAN	no	3105	HLA-A	1	1	1	1	0	yes
+Human	P16444	1 - high confidence	Dipeptidase 1	DPEP1_HUMAN	no	1800	DPEP1	1	4	1	1	1	yes
+Human	P17181	1 - high confidence	Interferon alpha/beta receptor 1	INAR1_HUMAN	no	3454	IFNAR1	1	32	1	1	0	yes
+Human	P17643	1 - high confidence	"5,6-dihydroxyindole-2-carboxylic acid oxidase"	TYRP1_HUMAN	no	7306	TYRP1	1	2	1	1	0	yes
+Human	P18084	1 - high confidence	Integrin beta-5	ITB5_HUMAN	no	3693	ITGB5	1	20	1	1	0	yes
+Human	P18433	1 - high confidence	Receptor-type tyrosine-protein phosphatase alpha	PTPRA_HUMAN	no	5786	PTPRA	1	1	1	1	0	yes
+Human	P18462	1 - high confidence	"HLA class I histocompatibility antigen, A-25 alpha chain"	1A25_HUMAN	no	3105	HLA-A	1	5	1	1	0	yes
+Human	P18464	1 - high confidence	"HLA class I histocompatibility antigen, B-51 alpha chain"	1B51_HUMAN	no	3106	HLA-B	1	4	1	1	0	yes
+Human	P18564	1 - high confidence	Integrin beta-6	ITB6_HUMAN	no	3694	ITGB6	1	2	1	1	0	yes
+Human	P20036	1 - high confidence	"HLA class II histocompatibility antigen, DP alpha 1 chain"	DPA1_HUMAN	no	3113	HLA-DPA1	1	23	1	1	0	yes
+Human	P20039	1 - high confidence	"HLA class II histocompatibility antigen, DRB1-11 beta chain"	2B1B_HUMAN	no	3123	HLA-DRB1	1	4	1	1	0	yes
+Human	P21709	1 - high confidence	Ephrin type-A receptor 1	EPHA1_HUMAN	no	2041	EPHA1	1	2	1	1	0	yes
+Human	P21860	1 - high confidence	Receptor tyrosine-protein kinase erbB-3	ERBB3_HUMAN	no	2065	ERBB3	1	7	1	1	0	yes
+Human	P22413	1 - high confidence	Ectonucleotide pyrophosphatase/phosphodiesterase family member 1	ENPP1_HUMAN	no	5167	ENPP1	1	20	1	1	0	yes
+Human	P23467	1 - high confidence	Receptor-type tyrosine-protein phosphatase beta	PTPRB_HUMAN	no	5787	PTPRB	1	3	1	1	0	yes
+Human	P23471	1 - high confidence	Receptor-type tyrosine-protein phosphatase zeta	PTPRZ_HUMAN	no	5803	PTPRZ1	1	5	1	1	0	yes
+Human	P25189	1 - high confidence	Myelin protein P0	MYP0_HUMAN	no	4359	MPZ	1	3	1	1	0	yes
+Human	P26012	1 - high confidence	Integrin beta-8	ITB8_HUMAN	no	3696	ITGB8	1	10	1	1	0	yes
+Human	P26992	1 - high confidence	Ciliary neurotrophic factor receptor subunit alpha	CNTFR_HUMAN	no	1271	CNTFR	1	3	1	1	1	yes
+Human	P27037	1 - high confidence	Activin receptor type-2A	AVR2A_HUMAN	no	92	ACVR2A	1	5	1	1	0	yes
+Human	P28827	1 - high confidence	Receptor-type tyrosine-protein phosphatase mu	PTPRM_HUMAN	no	5797	PTPRM	1	18	1	1	0	yes
+Human	P29317	1 - high confidence	Ephrin type-A receptor 2	EPHA2_HUMAN	no	1969	EPHA2	1	26	1	1	0	yes
+Human	P29320	1 - high confidence	Ephrin type-A receptor 3	EPHA3_HUMAN	no	2042	EPHA3	1	6	1	1	0	yes
+Human	P29323	1 - high confidence	Ephrin type-B receptor 2	EPHB2_HUMAN	no	2048	EPHB2	1	28	1	1	0	yes
+Human	P30450	1 - high confidence	"HLA class I histocompatibility antigen, A-26 alpha chain"	1A26_HUMAN	no	3105	HLA-A	1	30	1	1	0	yes
+Human	P30453	1 - high confidence	"HLA class I histocompatibility antigen, A-34 alpha chain"	1A34_HUMAN	no	3105	HLA-A	1	1	1	1	0	yes
+Human	P30459	1 - high confidence	"HLA class I histocompatibility antigen, A-74 alpha chain"	1A74_HUMAN	no	3105	HLA-A	1	6	1	1	0	yes
+Human	P30460	1 - high confidence	"HLA class I histocompatibility antigen, B-8 alpha chain"	1B08_HUMAN	no	3106	HLA-B	1	2	1	1	0	yes
+Human	P30462	1 - high confidence	"HLA class I histocompatibility antigen, B-14 alpha chain"	1B14_HUMAN	no	3106	HLA-B	1	4	1	1	0	yes
+Human	P30464	1 - high confidence	"HLA class I histocompatibility antigen, B-15 alpha chain"	1B15_HUMAN	no	3106	HLA-B	1	19	1	1	0	yes
+Human	P30479	1 - high confidence	"HLA class I histocompatibility antigen, B-41 alpha chain"	1B41_HUMAN	no	3106	HLA-B	1	5	1	1	0	yes
+Human	P30481	1 - high confidence	"HLA class I histocompatibility antigen, B-44 alpha chain"	1B44_HUMAN	no	3106	HLA-B	1	7	1	1	0	yes
+Human	P30483	1 - high confidence	"HLA class I histocompatibility antigen, B-45 alpha chain"	1B45_HUMAN	no	3106	HLA-B	1	1	1	1	0	yes
+Human	P30485	1 - high confidence	"HLA class I histocompatibility antigen, B-47 alpha chain"	1B47_HUMAN	no	3106	HLA-B	1	3	1	1	0	yes
+Human	P30487	1 - high confidence	"HLA class I histocompatibility antigen, B-49 alpha chain"	1B49_HUMAN	no	3106	HLA-B	1	2	1	1	0	yes
+Human	P30498	1 - high confidence	"HLA class I histocompatibility antigen, B-78 alpha chain"	1B78_HUMAN	no	3106	HLA-B	1	3	1	1	0	yes
+Human	P30508	1 - high confidence	"HLA class I histocompatibility antigen, Cw-12 alpha chain"	1C12_HUMAN	no	3107	HLA-C	1	2	1	1	0	yes
+Human	P30510	1 - high confidence	"HLA class I histocompatibility antigen, Cw-14 alpha chain"	1C14_HUMAN	no	3107	HLA-C	1	2	1	1	0	yes
+Human	P30511	1 - high confidence	"HLA class I histocompatibility antigen, alpha chain F"	HLAF_HUMAN	no	3134	HLA-F	1	7	1	1	0	yes
+Human	P30512	1 - high confidence	"HLA class I histocompatibility antigen, A-29 alpha chain"	1A29_HUMAN	no	3105	HLA-A	1	2	1	1	0	yes
+Human	P30530	1 - high confidence	Tyrosine-protein kinase receptor UFO	UFO_HUMAN	no	558	AXL	1	22	1	1	0	yes
+Human	P30685	1 - high confidence	"HLA class I histocompatibility antigen, B-35 alpha chain"	1B35_HUMAN	no	3106	HLA-B	1	6	1	1	0	yes
+Human	P34925	1 - high confidence	Tyrosine-protein kinase RYK	RYK_HUMAN	no	6259	RYK	1	10	1	1	0	yes
+Human	P35052	1 - high confidence	Glypican-1 [Cleaved into: Secreted glypican-1]	GPC1_HUMAN	no	2817	GPC1	1	28	1	1	1	yes
+Human	P37173	1 - high confidence	TGF-beta receptor type-2	TGFR2_HUMAN	no	7048	TGFBR2	1	11	1	1	0	yes
+Human	P42892	1 - high confidence	Endothelin-converting enzyme 1	ECE1_HUMAN	no	1889	ECE1	1	40	1	1	0	yes
+Human	P51693	1 - high confidence	Amyloid-like protein 1	APLP1_HUMAN	no	333	APLP1	1	6	1	1	0	yes
+Human	P51805	1 - high confidence	Plexin-A3	PLXA3_HUMAN	no	55558	PLXNA3	1	3	1	1	0	yes
+Human	P52798	1 - high confidence	Ephrin-A4	EFNA4_HUMAN	no	1945	EFNA4	1	6	1	1	1	yes
+Human	P52799	1 - high confidence	Ephrin-B2	EFNB2_HUMAN	no	1948	EFNB2	1	6	1	1	0	yes
+Human	P53708	1 - high confidence	Integrin alpha-8 [Cleaved into: Integrin alpha-8 heavy chain; Integrin alpha-8 light chain]	ITA8_HUMAN	no	8516	ITGA8	1	3	1	1	0	yes
+Human	P54289	1 - high confidence	Voltage-dependent calcium channel subunit alpha-2/delta-1	CA2D1_HUMAN	no	781	CACNA2D1	1	23	1	1	0	yes
+Human	P54760	1 - high confidence	Ephrin type-B receptor 4	EPHB4_HUMAN	no	2050	EPHB4	1	17	1	1	0	yes
+Human	P54762	1 - high confidence	Ephrin type-B receptor 1	EPHB1_HUMAN	no	2047	EPHB1	1	8	1	1	0	yes
+Human	P55082	1 - high confidence	Microfibril-associated glycoprotein 3	MFAP3_HUMAN	no	4238	MFAP3	1	4	1	1	0	yes
+Human	P55285	1 - high confidence	Cadherin-6	CADH6_HUMAN	no	1004	CDH6	1	11	1	1	0	yes
+Human	P55291	1 - high confidence	Cadherin-15	CAD15_HUMAN	no	1013	CDH15	1	3	1	1	0	yes
+Human	P56159	1 - high confidence	GDNF family receptor alpha-1	GFRA1_HUMAN	no	2674	GFRA1	1	10	1	1	1	yes
+Human	P69849	1 - high confidence	Nodal modulator 3	NOMO3_HUMAN	no	408050	NOMO3	1	23	1	1	0	yes
+Human	P78310	1 - high confidence	Coxsackievirus and adenovirus receptor	CXAR_HUMAN	no	1525	CXADR	1	3	1	1	0	yes
+Human	P78357	1 - high confidence	Contactin-associated protein 1	CNTP1_HUMAN	no	8506	CNTNAP1	1	16	1	1	0	yes
+Human	P79483	1 - high confidence	"HLA class II histocompatibility antigen, DR beta 3 chain"	DRB3_HUMAN	no	3125	HLA-DRB3	1	7	1	1	0	yes
+Human	P98172	1 - high confidence	Ephrin-B1	EFNB1_HUMAN	no	1947	EFNB1	1	13	1	1	0	yes
+Human	Q01974	1 - high confidence	Tyrosine-protein kinase transmembrane receptor ROR2	ROR2_HUMAN	no	4920	ROR2	1	7	1	1	0	yes
+Human	Q04771	1 - high confidence	Activin receptor type-1	ACVR1_HUMAN	no	90	ACVR1	1	8	1	1	0	yes
+Human	Q06418	1 - high confidence	Tyrosine-protein kinase receptor TYRO3	TYRO3_HUMAN	no	7301	TYRO3	1	17	1	1	0	yes
+Human	Q06481	1 - high confidence	Amyloid-like protein 2	APLP2_HUMAN	no	334	APLP2	1	20	1	1	0	yes
+Human	Q09160	1 - high confidence	"HLA class I histocompatibility antigen, A-80 alpha chain"	1A80_HUMAN	no	3105	HLA-A	1	2	1	1	0	yes
+Human	Q12860	1 - high confidence	Contactin-1	CNTN1_HUMAN	no	1272	CNTN1	1	8	1	1	1	yes
+Human	Q12864	1 - high confidence	Cadherin-17	CAD17_HUMAN	no	1015	CDH17	1	1	1	1	0	yes
+Human	Q12866	1 - high confidence	Tyrosine-protein kinase Mer	MERTK_HUMAN	no	10461	MERTK	1	11	1	1	0	yes
+Human	Q13308	1 - high confidence	Tyrosine-protein kinase-like 7	PTK7_HUMAN	no	5754	PTK7	1	32	1	1	0	yes
+Human	Q13332	1 - high confidence	Receptor-type tyrosine-protein phosphatase S	PTPRS_HUMAN	no	5802	PTPRS	1	20	1	1	0	yes
+Human	Q13444	1 - high confidence	Disintegrin and metalloproteinase domain-containing protein 15	ADA15_HUMAN	no	8751	ADAM15	1	21	1	1	0	yes
+Human	Q13449	1 - high confidence	Limbic system-associated membrane protein	LSAMP_HUMAN	no	4045	LSAMP	1	16	1	1	1	yes
+Human	Q13586	1 - high confidence	Stromal interaction molecule 1	STIM1_HUMAN	no	6786	STIM1	1	18	1	1	0	yes
+Human	Q13641	1 - high confidence	Trophoblast glycoprotein	TPBG_HUMAN	no	7162	TPBG	1	27	1	1	0	yes
+Human	Q13683	1 - high confidence	Integrin alpha-7 [Cleaved into: Integrin alpha-7 heavy chain; Integrin alpha-7 light chain]	ITA7_HUMAN	no	3679	ITGA7	1	9	1	1	0	yes
+Human	Q13797	1 - high confidence	Integrin alpha-9	ITA9_HUMAN	no	3680	ITGA9	1	9	1	1	0	yes
+Human	Q13873	1 - high confidence	Bone morphogenetic protein receptor type-2	BMPR2_HUMAN	no	659	BMPR2	1	15	1	1	0	yes
+Human	Q14118	1 - high confidence	Dystroglycan	DAG1_HUMAN	no	1605	DAG1	1	25	1	1	0	yes
+Human	Q14126	1 - high confidence	Desmoglein-2	DSG2_HUMAN	no	1829	DSG2	1	27	1	1	0	yes
+Human	Q14392	1 - high confidence	Leucine-rich repeat-containing protein 32	LRC32_HUMAN	no	2615	LRRC32	1	3	1	1	0	yes
+Human	Q14517	1 - high confidence	Protocadherin Fat 1	FAT1_HUMAN	no	2195	FAT1	1	21	1	1	0	yes
+Human	Q14956	1 - high confidence	Transmembrane glycoprotein NMB	GPNMB_HUMAN	no	10457	GPNMB	1	8	1	1	0	yes
+Human	Q15262	1 - high confidence	Receptor-type tyrosine-protein phosphatase kappa	PTPRK_HUMAN	no	5796	PTPRK	1	17	1	1	0	yes
+Human	Q15768	1 - high confidence	Ephrin-B3	EFNB3_HUMAN	no	1949	EFNB3	1	7	1	1	0	yes
+Human	Q16620	1 - high confidence	BDNF/NT-3 growth factors receptor	NTRK2_HUMAN	no	4915	NTRK2	1	5	1	1	0	yes
+Human	Q29980	1 - high confidence	MHC class I polypeptide-related sequence B	MICB_HUMAN	no	4277	MICB	1	10	1	1	0	yes
+Human	Q29983	1 - high confidence	MHC class I polypeptide-related sequence A	MICA_HUMAN	no	4276	MICA	1	32	1	1	0	yes
+Human	Q30134	1 - high confidence	"HLA class II histocompatibility antigen, DRB1-8 beta chain"	2B18_HUMAN	no	3123	HLA-DRB1	1	5	1	1	0	yes
+Human	Q30154	1 - high confidence	"HLA class II histocompatibility antigen, DR beta 5 chain"	DRB5_HUMAN	no	3127	HLA-DRB5	1	5	1	1	0	yes
+Human	Q3ZCQ3	1 - high confidence	Membrane protein FAM174B	F174B_HUMAN	no	400451	FAM174B	1	12	1	1	0	yes
+Human	Q495A1	1 - high confidence	T cell immunoreceptor with Ig and ITIM domains	TIGIT_HUMAN	no	201633	TIGIT	1	3	1	1	0	yes
+Human	Q58EX2	1 - high confidence	Protein sidekick-2	SDK2_HUMAN	no	54549	SDK2	1	9	1	1	0	yes
+Human	Q5IJ48	1 - high confidence	Crumbs homolog 2	CRUM2_HUMAN	no	286204	CRB2	1	3	1	1	0	yes
+Human	Q5R3F8	1 - high confidence	Leucine-rich repeat and fibronectin type-III domain-containing protein 6	LRFN6_HUMAN	no	114794	ELFN2	1	16	1	1	0	yes
+Human	Q5SZK8	1 - high confidence	FRAS1-related extracellular matrix protein 2	FREM2_HUMAN	no	341640	FREM2	1	6	1	1	0	yes
+Human	Q68D85	1 - high confidence	Putative Ig-like domain-containing protein DKFZp686O24166/DKFZp686I21167	YK047_HUMAN	no	374383	0	1	14	1	1	0	yes
+Human	Q6DN72	1 - high confidence	Fc receptor-like protein 6	FCRL6_HUMAN	no	343413	FCRL6	1	1	1	1	0	yes
+Human	Q6H3X3	1 - high confidence	Retinoic acid early transcript 1G protein	RET1G_HUMAN	no	353091	RAET1G	1	18	1	1	0	yes
+Human	Q6IEE7	1 - high confidence	Transmembrane protein 132E	T132E_HUMAN	no	124842	TMEM132E	1	1	1	1	0	yes
+Human	Q6PCB8	1 - high confidence	Embigin	EMB_HUMAN	no	133418	EMB	1	30	1	1	0	yes
+Human	Q6UVK1	1 - high confidence	Chondroitin sulfate proteoglycan 4	CSPG4_HUMAN	no	1464	CSPG4	1	21	1	1	0	yes
+Human	Q6UW56	1 - high confidence	Apoptosis-related protein 3	APR3_HUMAN	no	51374	APR3	1	11	1	1	0	yes
+Human	Q6UWB1	1 - high confidence	Interleukin-27 receptor subunit alpha	I27RA_HUMAN	no	9466	IL27RA	1	10	1	1	0	yes
+Human	Q6UWL2	1 - high confidence	Sushi domain-containing protein 1	SUSD1_HUMAN	no	64420	SUSD1	1	4	1	1	0	yes
+Human	Q6UX27	1 - high confidence	V-set and transmembrane domain-containing protein 1	VSTM1_HUMAN	no	284415	VSTM1	1	1	1	1	0	yes
+Human	Q6UXB8	1 - high confidence	Peptidase inhibitor 16	PI16_HUMAN	no	221476	PI16	1	3	1	1	0	yes
+Human	Q6UXD5	1 - high confidence	Seizure 6-like protein 2	SE6L2_HUMAN	no	26470	SEZ6L2	1	16	1	1	0	yes
+Human	Q6V0I7	1 - high confidence	Protocadherin Fat 4	FAT4_HUMAN	no	79633	FAT4	1	10	1	1	0	yes
+Human	Q6ZN44	1 - high confidence	Netrin receptor UNC5A	UNC5A_HUMAN	no	90249	UNC5A	1	2	1	1	0	yes
+Human	Q6ZRP7	1 - high confidence	Sulfhydryl oxidase 2	QSOX2_HUMAN	no	169714	QSOX2	1	7	1	1	0	yes
+Human	Q7KYR7	1 - high confidence	Butyrophilin subfamily 2 member A1	BT2A1_HUMAN	no	11120	BTN2A1	1	33	1	1	0	yes
+Human	Q7Z5N4	1 - high confidence	Protein sidekick-1	SDK1_HUMAN	no	221935	SDK1	1	14	1	1	0	yes
+Human	Q7Z6M3	1 - high confidence	Probable mast cell antigen 32 homolog	MCA32_HUMAN	no	284021	MCA32	1	20	1	1	0	yes
+Human	Q86SJ2	1 - high confidence	Amphoterin-induced protein 2	AMGO2_HUMAN	no	347902	AMIGO2	1	11	1	1	0	yes
+Human	Q86T13	1 - high confidence	C-type lectin domain family 14 member A	CLC14_HUMAN	no	161198	CLEC14A	1	2	1	1	0	yes
+Human	Q86XX4	1 - high confidence	Extracellular matrix protein FRAS1	FRAS1_HUMAN	no	80144	FRAS1	1	2	1	1	0	yes
+Human	Q86YT9	1 - high confidence	Junctional adhesion molecule-like	JAML1_HUMAN	no	120425	AMICA1	1	2	1	1	0	yes
+Human	Q8IW52	1 - high confidence	SLIT and NTRK-like protein 4	SLIK4_HUMAN	no	139065	SLITRK4	1	3	1	1	0	yes
+Human	Q8IZJ1	1 - high confidence	Netrin receptor UNC5B	UNC5B_HUMAN	no	219699	UNC5B	1	4	1	1	0	yes
+Human	Q8N0W4	1 - high confidence	"Neuroligin-4, X-linked"	NLGNX_HUMAN	no	57502	NLGN4X	1	3	1	1	0	yes
+Human	Q8N0Z9	1 - high confidence	Ig-like domain-containing protein FLJ20674	YL020_HUMAN	no	54621	0	1	5	1	1	0	yes
+Human	Q8N126	1 - high confidence	Cell adhesion molecule 3	CADM3_HUMAN	no	57863	CADM3	1	3	1	1	0	yes
+Human	Q8N2Q7	1 - high confidence	Neuroligin-1	NLGN1_HUMAN	no	22871	NLGN1	1	7	1	1	0	yes
+Human	Q8N441	1 - high confidence	Fibroblast growth factor receptor-like 1	FGRL1_HUMAN	no	53834	FGFRL1	1	26	1	1	0	yes
+Human	Q8N6Y1	1 - high confidence	Protocadherin-20	PCD20_HUMAN	no	64881	PCDH20	1	3	1	1	0	yes
+Human	Q8NC42	1 - high confidence	E3 ubiquitin-protein ligase RNF149	RN149_HUMAN	no	284996	RNF149	1	8	1	1	0	yes
+Human	Q8NFT8	1 - high confidence	Delta and Notch-like epidermal growth factor-related receptor	DNER_HUMAN	no	92737	DNER	1	1	1	1	0	yes
+Human	Q8NFZ8	1 - high confidence	Cell adhesion molecule 4	CADM4_HUMAN	no	199731	CADM4	1	20	1	1	0	yes
+Human	Q8TDY8	1 - high confidence	Immunoglobulin superfamily DCC subclass member 4	IGDC4_HUMAN	no	57722	IGDCC4	1	2	1	1	0	yes
+Human	Q8TF66	1 - high confidence	Leucine-rich repeat-containing protein 15	LRC15_HUMAN	no	131578	LRRC15	1	7	1	1	0	yes
+Human	Q8WTV0	1 - high confidence	Scavenger receptor class B member 1	SCRB1_HUMAN	no	949	SCARB1	1	31	1	1	0	yes
+Human	Q8WXI7	1 - high confidence	Mucin-16	MUC16_HUMAN	no	94025	MUC16	1	5	1	1	0	yes
+Human	Q92542	1 - high confidence	Nicastrin	NICA_HUMAN	no	23385	NCSTN	1	33	1	1	0	yes
+Human	Q92673	1 - high confidence	Sortilin-related receptor	SORL_HUMAN	no	6653	SORL1	1	12	1	1	0	yes
+Human	Q92823	1 - high confidence	Neuronal cell adhesion molecule	NRCAM_HUMAN	no	4897	NRCAM	1	16	1	1	0	yes
+Human	Q92859	1 - high confidence	Neogenin	NEO1_HUMAN	no	4756	NEO1	1	36	1	1	0	yes
+Human	Q95365	1 - high confidence	"HLA class I histocompatibility antigen, B-38 alpha chain"	1B38_HUMAN	no	0	HLA-B	1	2	1	1	0	yes
+Human	Q95IE3	1 - high confidence	"HLA class II histocompatibility antigen, DRB1-12 beta chain"	2B1C_HUMAN	no	3123	HLA-DRB1	1	6	1	1	0	yes
+Human	Q96BF3	1 - high confidence	Transmembrane and immunoglobulin domain-containing protein 2	TMIG2_HUMAN	no	126259	TMIGD2	1	2	1	1	0	yes
+Human	Q96DU3	1 - high confidence	SLAM family member 6	SLAF6_HUMAN	no	114836	SLAMF6	1	10	1	1	0	yes
+Human	Q96GP6	1 - high confidence	Scavenger receptor class F member 2	SREC2_HUMAN	no	91179	SCARF2	1	4	1	1	0	yes
+Human	Q96HA4	1 - high confidence	Uncharacterized protein C1orf159	CA159_HUMAN	no	54991	C1orf159	1	32	1	1	0	yes
+Human	Q96J84	1 - high confidence	Kin of IRRE-like protein 1	KIRR1_HUMAN	no	55243	KIRREL	1	27	1	1	0	yes
+Human	Q96JQ0	1 - high confidence	Protocadherin-16	PCD16_HUMAN	no	8642	DCHS1	1	5	1	1	0	yes
+Human	Q96LA5	1 - high confidence	Fc receptor-like protein 2	FCRL2_HUMAN	no	79368	FCRL2	1	2	1	1	0	yes
+Human	Q96LC7	1 - high confidence	Sialic acid-binding Ig-like lectin 10	SIG10_HUMAN	no	89790	SIGLEC10	1	1	1	1	0	yes
+Human	Q96LD1	1 - high confidence	Zeta-sarcoglycan	SGCZ_HUMAN	no	137868	SGCZ	1	2	1	1	0	yes
+Human	Q96P31	1 - high confidence	Fc receptor-like protein 3	FCRL3_HUMAN	no	115352	FCRL3	1	4	1	1	0	yes
+Human	Q96PQ0	1 - high confidence	VPS10 domain-containing receptor SorCS2	SORC2_HUMAN	no	57537	SORCS2	1	3	1	1	0	yes
+Human	Q96PQ1	1 - high confidence	Sialic acid-binding Ig-like lectin 12	SIG12_HUMAN	no	89858	SIGLEC12	1	1	1	1	0	yes
+Human	Q96QU1	1 - high confidence	Protocadherin-15	PCD15_HUMAN	no	65217	PCDH15	1	1	1	1	0	yes
+Human	Q99102	1 - high confidence	Mucin-4	MUC4_HUMAN	no	4585	MUC4	1	2	1	1	0	yes
+Human	Q99523	1 - high confidence	Sortilin	SORT_HUMAN	no	6272	SORT1	1	25	1	1	0	yes
+Human	Q9BRK3	1 - high confidence	Matrix-remodeling-associated protein 8	MXRA8_HUMAN	no	54587	MXRA8	1	6	1	1	0	yes
+Human	Q9BX67	1 - high confidence	Junctional adhesion molecule C	JAM3_HUMAN	no	83700	JAM3	1	14	1	1	0	yes
+Human	Q9BX97	1 - high confidence	Plasmalemma vesicle-associated protein	PLVAP_HUMAN	no	83483	PLVAP	1	2	1	1	0	yes
+Human	Q9BY67	1 - high confidence	Cell adhesion molecule 1	CADM1_HUMAN	no	23705	CADM1	1	32	1	1	0	yes
+Human	Q9C0C4	1 - high confidence	Semaphorin-4C	SEM4C_HUMAN	no	54910	SEMA4C	1	14	1	1	0	yes
+Human	Q9H159	1 - high confidence	Cadherin-19	CAD19_HUMAN	no	28513	CDH19	1	4	1	1	0	yes
+Human	Q9H1E5	1 - high confidence	Thioredoxin-related transmembrane protein 4	TMX4_HUMAN	no	56255	TMX4	1	1	1	1	0	yes
+Human	Q9H2A7	1 - high confidence	C-X-C motif chemokine 16	CXL16_HUMAN	no	58191	CXCL16	1	12	1	1	0	yes
+Human	Q9H3S1	1 - high confidence	Semaphorin-4A	SEM4A_HUMAN	no	64218	SEMA4A	1	5	1	1	0	yes
+Human	Q9H3S3	1 - high confidence	Transmembrane protease serine 5	TMPS5_HUMAN	no	80975	TMPRSS5	1	1	1	1	0	yes
+Human	Q9H5Y7	1 - high confidence	SLIT and NTRK-like protein 6	SLIK6_HUMAN	no	84189	SLITRK6	1	5	1	1	0	yes
+Human	Q9H6B4	1 - high confidence	Adipocyte adhesion molecule	ACAM_HUMAN	no	79827	ACAM	1	22	1	1	0	yes
+Human	Q9H6X2	1 - high confidence	Anthrax toxin receptor 1	ANTR1_HUMAN	no	84168	ANTXR1	1	29	1	1	0	yes
+Human	Q9H7M9	1 - high confidence	Platelet receptor Gi24	GI24_HUMAN	no	64115	C10orf54	1	6	1	1	0	yes
+Human	Q9HC56	1 - high confidence	Protocadherin-9	PCDH9_HUMAN	no	5101	PCDH9	1	14	1	1	0	yes
+Human	Q9HC73	1 - high confidence	Cytokine receptor-like factor 2	CRLF2_HUMAN	no	64109	CRLF2	1	5	1	1	0	yes
+Human	Q9HCL0	1 - high confidence	Protocadherin-18	PCD18_HUMAN	no	54510	PCDH18	1	5	1	1	0	yes
+Human	Q9HCM2	1 - high confidence	Plexin-A4	PLXA4_HUMAN	no	91584	PLXNA4	1	1	1	1	0	yes
+Human	Q9NPH3	1 - high confidence	Interleukin-1 receptor accessory protein	IL1AP_HUMAN	no	3556	IL1RAP	1	16	1	1	0	yes
+Human	Q9NPR2	1 - high confidence	Semaphorin-4B	SEM4B_HUMAN	no	10509	SEMA4B	1	14	1	1	0	yes
+Human	Q9NT68	1 - high confidence	Teneurin-2	TEN2_HUMAN	no	57451	ODZ2	1	13	1	1	0	yes
+Human	Q9NTN9	1 - high confidence	Semaphorin-4G	SEM4G_HUMAN	no	57715	SEMA4G	1	1	1	1	0	yes
+Human	Q9NY15	1 - high confidence	Stabilin-1	STAB1_HUMAN	no	23166	STAB1	1	2	1	1	0	yes
+Human	Q9NY25	1 - high confidence	C-type lectin domain family 5 member A	CLC5A_HUMAN	no	23601	CLEC5A	1	1	1	1	0	yes
+Human	Q9NY47	1 - high confidence	Voltage-dependent calcium channel subunit alpha-2/delta-2	CA2D2_HUMAN	no	9254	CACNA2D2	1	7	1	1	0	yes
+Human	Q9NZU1	1 - high confidence	Leucine-rich repeat transmembrane protein FLRT1	FLRT1_HUMAN	no	23769	FLRT1	1	2	1	1	0	yes
+Human	Q9P0K1	1 - high confidence	Disintegrin and metalloproteinase domain-containing protein 22	ADA22_HUMAN	no	53616	ADAM22	1	12	1	1	0	yes
+Human	Q9P232	1 - high confidence	Contactin-3	CNTN3_HUMAN	no	5067	CNTN3	1	2	1	1	1	yes
+Human	Q9UBS9	1 - high confidence	Protein C1orf9	CA009_HUMAN	no	51430	C1orf9	1	7	1	1	0	yes
+Human	Q9UGT4	1 - high confidence	Sushi domain-containing protein 2	SUSD2_HUMAN	no	56241	SUSD2	1	12	1	1	0	yes
+Human	Q9UIQ6	1 - high confidence	Leucyl-cystinyl aminopeptidase	LCAP_HUMAN	no	4012	LNPEP	1	39	1	1	0	yes
+Human	Q9UIW2	1 - high confidence	Plexin-A1	PLXA1_HUMAN	no	5361	PLXNA1	1	41	1	1	0	yes
+Human	Q9UKJ1	1 - high confidence	Paired immunoglobulin-like type 2 receptor alpha	PILRA_HUMAN	no	29992	PILRA	1	3	1	1	0	yes
+Human	Q9UKX5	1 - high confidence	Integrin alpha-11	ITA11_HUMAN	no	22801	ITGA11	1	4	1	1	0	yes
+Human	Q9ULL4	1 - high confidence	Plexin-B3	PLXB3_HUMAN	no	5365	PLXNB3	1	6	1	1	0	yes
+Human	Q9UM44	1 - high confidence	HERV-H LTR-associating protein 2	HHLA2_HUMAN	no	11148	HHLA2	1	2	1	1	0	yes
+Human	Q9UMZ3	1 - high confidence	Phosphotidylinositol phosphatase PTPRQ	PTPRQ_HUMAN	no	374462	PTPRQ	1	2	1	1	0	yes
+Human	Q9UN70	1 - high confidence	Protocadherin gamma-C3	PCDGK_HUMAN	no	5098	PCDHGC3	1	21	1	1	0	yes
+Human	Q9UNG2	1 - high confidence	Tumor necrosis factor ligand superfamily member 18	TNF18_HUMAN	no	8995	TNFSF18	1	2	1	1	0	yes
+Human	Q9UQC9	1 - high confidence	Calcium-activated chloride channel regulator 2	CLCA2_HUMAN	no	9635	CLCA2	1	2	1	1	0	yes
+Human	Q9Y336	1 - high confidence	Sialic acid-binding Ig-like lectin 9	SIGL9_HUMAN	no	27180	SIGLEC9	1	2	1	1	0	yes
+Human	Q9Y4D7	1 - high confidence	Plexin-D1	PLXD1_HUMAN	no	23129	PLXND1	1	25	1	1	0	yes
+Human	Q9Y5F8	1 - high confidence	Protocadherin gamma-B7	PCDGJ_HUMAN	no	56099	PCDHGB7	1	2	1	1	0	yes
+Human	Q9Y639	1 - high confidence	Neuroplastin	NPTN_HUMAN	no	27020	NPTN	1	46	1	1	0	yes
+Human	Q9Y6N7	1 - high confidence	Roundabout homolog 1	ROBO1_HUMAN	no	6091	ROBO1	1	10	1	1	0	yes
+Human	Q9Y6N8	1 - high confidence	Cadherin-10	CAD10_HUMAN	no	1008	CDH10	1	4	1	1	0	yes
+Human	Q9Y6X5	1 - high confidence	Ectonucleotide pyrophosphatase/phosphodiesterase family member 4	ENPP4_HUMAN	no	22875	ENPP4	1	1	1	1	0	yes
+Human	Q8IZP9	1 - high confidence	G-protein coupled receptor 64	GPR64_HUMAN	no	10149	GPR64	0.9999	3	1	8	0	yes
+Human	Q8IYL9	1 - high confidence	Psychosine receptor	PSYR_HUMAN	no	8477	GPR65	0.9999	2	1	6	0	yes
+Human	P18465	1 - high confidence	"HLA class I histocompatibility antigen, B-57 alpha chain"	1B57_HUMAN	no	3106	HLA-B	0.9999	5	1	1	0	yes
+Human	P21583	1 - high confidence	Kit ligand	SCF_HUMAN	no	4254	KITLG	0.9999	6	1	1	0	yes
+Human	Q04826	1 - high confidence	"HLA class I histocompatibility antigen, B-40 alpha chain"	1B40_HUMAN	no	3106	HLA-B	0.9999	2	1	1	0	yes
+Human	Q01650	1 - high confidence	Large neutral amino acids transporter small subunit 1	LAT1_HUMAN	no	8140	SLC7A5	0.9998	5	1	12	0	yes
+Human	Q99500	1 - high confidence	Sphingosine 1-phosphate receptor 3	S1PR3_HUMAN	no	1903	S1PR3	0.9998	7	1	7	0	yes
+Human	P20594	1 - high confidence	Atrial natriuretic peptide receptor 2	ANPRB_HUMAN	no	4882	NPR2	0.9996	2	1	1	0	yes
+Human	P30490	1 - high confidence	"HLA class I histocompatibility antigen, B-52 alpha chain"	1B52_HUMAN	no	3106	HLA-B	0.9995	1	1	1	0	yes
+Human	Q8TD46	1 - high confidence	Cell surface glycoprotein CD200 receptor 1	MO2R1_HUMAN	no	131450	CD200R1	0.9995	8	1	1	0	yes
+Human	P13761	1 - high confidence	"HLA class II histocompatibility antigen, DRB1-7 beta chain"	2B17_HUMAN	no	3123	HLA-DRB1	0.9993	2	1	1	0	yes
+Human	Q9BZM5	1 - high confidence	NKG2D ligand 2	N2DL2_HUMAN	no	80328	ULBP2	0.9991	4	1	1	1	yes
+Human	Q9UMF0	1 - high confidence	Intercellular adhesion molecule 5	ICAM5_HUMAN	no	7087	ICAM5	0.9991	29	1	1	0	yes
+Human	Q5QGZ9	1 - high confidence	C-type lectin domain family 12 member A	CL12A_HUMAN	no	160364	CLEC12A	0.999	5	1	1	0	yes
+Human	Q29960	1 - high confidence	"HLA class I histocompatibility antigen, Cw-16 alpha chain"	1C16_HUMAN	no	3107	HLA-C	0.9989	1	1	1	0	yes
+Human	P30443	1 - high confidence	"HLA class I histocompatibility antigen, A-1 alpha chain"	1A01_HUMAN	no	3105	HLA-A	0.9983	4	1	1	0	yes
+Human	Q5VUB5	1 - high confidence	Protein FAM171A1	F1711_HUMAN	no	221061	FAM171A1	0.9977	15	1	1	0	yes
+Human	Q92959	1 - high confidence	Solute carrier organic anion transporter family member 2A1	SO2A1_HUMAN	no	6578	SLCO2A1	0.9972	2	1	12	0	yes
+Human	P50052	1 - high confidence	Type-2 angiotensin II receptor	AGTR2_HUMAN	no	186	AGTR2	0.9972	2	1	7	0	yes
+Human	Q9H6L2	1 - high confidence	UPF0513 transmembrane protein	U513_HUMAN	no	79583	UNQ870/PRO1886	0.9972	2	1	2	0	yes
+Human	P23468	1 - high confidence	Receptor-type tyrosine-protein phosphatase delta	PTPRD_HUMAN	no	5789	PTPRD	0.9972	2	1	1	0	yes
+Human	P98153	1 - high confidence	Integral membrane protein DGCR2/IDD	IDD_HUMAN	no	9993	DGCR2	0.9972	2	1	1	0	yes
+Human	Q4KMG0	1 - high confidence	Cell adhesion molecule-related/down-regulated by oncogenes	CDON_HUMAN	no	50937	CDON	0.9972	1	1	1	0	yes
+Human	Q6UXK5	1 - high confidence	Leucine-rich repeat neuronal protein 1	LRRN1_HUMAN	no	57633	LRRN1	0.9972	4	1	1	0	yes
+Human	Q86WC4	1 - high confidence	Osteopetrosis-associated transmembrane protein 1	OSTM1_HUMAN	no	28962	OSTM1	0.9972	7	1	1	0	yes
+Human	Q9UN73	1 - high confidence	Protocadherin alpha-6	PCDA6_HUMAN	no	56142	PCDHA6	0.9972	1	1	1	0	yes
+Human	O14495	1 - high confidence	Lipid phosphate phosphohydrolase 3	LPP3_HUMAN	no	8613	PPAP2B	0.997	1	1	5	0	yes
+Human	Q13443	1 - high confidence	Disintegrin and metalloproteinase domain-containing protein 9	ADAM9_HUMAN	no	8754	ADAM9	0.997	3	1	1	0	yes
+Human	O95980	1 - high confidence	Reversion-inducing cysteine-rich protein with Kazal motifs	RECK_HUMAN	no	8434	RECK	0.9969	4	1	1	1	yes
+Human	Q7L0X0	1 - high confidence	Leucine-rich repeat-containing protein KIAA0644	K0644_HUMAN	no	9865	KIAA0644	0.9969	1	1	1	0	yes
+Human	Q8TDW7	1 - high confidence	Protocadherin Fat 3	FAT3_HUMAN	no	120114	FAT3	0.9969	4	1	1	0	yes
+Human	Q8NE79	1 - high confidence	Blood vessel epicardial substance	POPD1_HUMAN	no	11149	BVES	0.9967	1	1	3	0	yes
+Human	O75051	1 - high confidence	Plexin-A2	PLXA2_HUMAN	no	5362	PLXNA2	0.9967	5	1	1	0	yes
+Human	P55283	1 - high confidence	Cadherin-4	CADH4_HUMAN	no	1002	CDH4	0.9967	8	1	1	0	yes
+Human	Q8N386	1 - high confidence	Leucine-rich repeat-containing protein 25	LRC25_HUMAN	no	126364	LRRC25	0.9967	2	1	1	0	yes
+Human	P54764	1 - high confidence	Ephrin type-A receptor 4	EPHA4_HUMAN	no	2043	EPHA4	0.9966	4	1	1	0	yes
+Human	Q7Z4F1	1 - high confidence	Low-density lipoprotein receptor-related protein 10	LRP10_HUMAN	no	26020	LRP10	0.9964	8	1	1	0	yes
+Human	Q9UN71	1 - high confidence	Protocadherin gamma-B4	PCDGG_HUMAN	no	8641	PCDHGB4	0.9963	11	1	1	0	yes
+Human	Q9Y5G0	1 - high confidence	Protocadherin gamma-B5	PCDGH_HUMAN	no	56101	PCDHGB5	0.9963	3	1	1	0	yes
+Human	Q9Y5G3	1 - high confidence	Protocadherin gamma-B1	PCDGD_HUMAN	no	56104	PCDHGB1	0.9963	4	1	1	0	yes
+Human	O60279	1 - high confidence	Sushi domain-containing protein 5	SUSD5_HUMAN	no	26032	SUSD5	0.9962	7	1	1	0	yes
+Human	Q6J4K2	1 - high confidence	Sodium/potassium/calcium exchanger 6	NCKX6_HUMAN	no	80024	SLC24A6	0.9957	2	1	13	0	yes
+Human	O43184	1 - high confidence	Disintegrin and metalloproteinase domain-containing protein 12	ADA12_HUMAN	no	8038	ADAM12	0.9957	2	1	1	0	yes
+Human	P54753	1 - high confidence	Ephrin type-B receptor 3	EPHB3_HUMAN	no	2049	EPHB3	0.9957	7	1	1	0	yes
+Human	Q16880	1 - high confidence	2-hydroxyacylsphingosine 1-beta-galactosyltransferase	CGT_HUMAN	no	7368	UGT8	0.9957	4	1	1	0	yes
+Human	Q7Z7M0	1 - high confidence	Multiple epidermal growth factor-like domains protein 8	MEGF8_HUMAN	no	1954	MEGF8	0.9957	8	1	1	0	yes
+Human	Q8NFM7	1 - high confidence	Interleukin-17 receptor D	I17RD_HUMAN	no	54756	IL17RD	0.9957	4	1	1	0	yes
+Human	Q8TBP5	1 - high confidence	Membrane protein FAM174A	F174A_HUMAN	no	345757	FAM174A	0.9957	9	1	1	0	yes
+Human	Q969W9	1 - high confidence	Transmembrane prostate androgen-induced protein	PMEPA_HUMAN	no	56937	PMEPA1	0.9957	1	1	1	0	yes
+Human	Q99519	1 - high confidence	Sialidase-1	NEUR1_HUMAN	no	4758	NEU1	0.9957	3	1	1	0	yes
+Human	Q9H013	1 - high confidence	Disintegrin and metalloproteinase domain-containing protein 19	ADA19_HUMAN	no	8728	ADAM19	0.9957	1	1	1	0	yes
+Human	Q9NZV1	1 - high confidence	Cysteine-rich motor neuron 1 protein	CRIM1_HUMAN	no	51232	CRIM1	0.9957	1	1	1	0	yes
+Human	Q9Y5F6	1 - high confidence	Protocadherin gamma-C5	PCDGM_HUMAN	no	56097	PCDHGC5	0.9957	2	1	1	0	yes
+Human	Q9Y5G4	1 - high confidence	Protocadherin gamma-A9	PCDG9_HUMAN	no	56107	PCDHGA9	0.9957	6	1	1	0	yes
+Human	P41595	1 - high confidence	5-hydroxytryptamine receptor 2B	5HT2B_HUMAN	no	3357	HTR2B	0.9956	2	1	7	0	yes
+Human	Q9GZU1	1 - high confidence	Mucolipin-1	MCLN1_HUMAN	no	57192	MCOLN1	0.9956	4	1	6	0	yes
+Human	Q16585	1 - high confidence	Beta-sarcoglycan	SGCB_HUMAN	no	6443	SGCB	0.9956	14	1	1	0	yes
+Human	Q92629	1 - high confidence	Delta-sarcoglycan	SGCD_HUMAN	no	6444	SGCD	0.9956	6	1	1	0	yes
+Human	Q92956	1 - high confidence	Tumor necrosis factor receptor superfamily member 14	TNR14_HUMAN	no	8764	TNFRSF14	0.9956	1	1	1	0	yes
+Human	Q08174	1 - high confidence	Protocadherin-1	PCDH1_HUMAN	no	5097	PCDH1	0.9952	9	1	1	0	yes
+Human	Q8N766	1 - high confidence	Uncharacterized protein KIAA0090	K0090_HUMAN	no	23065	KIAA0090	0.9952	28	1	1	0	yes
+Human	Q8ND94	1 - high confidence	LRRN4 C-terminal-like protein	LRN4L_HUMAN	no	221091	LRRN4CL	0.9952	6	1	1	0	yes
+Human	Q9UHP7	1 - high confidence	C-type lectin domain family 2 member D	CLC2D_HUMAN	no	29121	CLEC2D	0.9952	10	1	1	0	yes
+Human	P55286	1 - high confidence	Cadherin-8	CADH8_HUMAN	no	1006	CDH8	0.9947	2	1	2	0	yes
+Human	P30542	1 - high confidence	Adenosine receptor A1	AA1R_HUMAN	no	134	ADORA1	0.9946	6	1	7	0	yes
+Human	Q5T601	1 - high confidence	Probable G-protein coupled receptor 110	GP110_HUMAN	no	266977	GPR110	0.9946	3	1	7	0	yes
+Human	Q99788	1 - high confidence	Chemokine receptor-like 1	CML1_HUMAN	no	1240	CMKLR1	0.9946	1	1	7	0	yes
+Human	Q04721	1 - high confidence	Neurogenic locus notch homolog protein 2	NOTC2_HUMAN	no	4853	NOTCH2	0.9946	4	1	1	0	yes
+Human	Q12836	1 - high confidence	Zona pellucida sperm-binding protein 4	ZP4_HUMAN	no	57829	ZP4	0.9946	1	1	1	0	yes
+Human	Q8IW00	1 - high confidence	Uncharacterized Ig-like domain-containing protein C10orf72	CJ072_HUMAN	no	196740	C10orf72	0.9946	4	1	1	0	yes
+Human	Q9HB29	1 - high confidence	Interleukin-1 receptor-like 2	ILRL2_HUMAN	no	8808	IL1RL2	0.9946	2	1	1	0	yes
+Human	Q9UPZ6	1 - high confidence	Thrombospondin type-1 domain-containing protein 7A	THS7A_HUMAN	no	221981	THSD7A	0.9946	1	1	1	0	yes
+Human	Q9Y5I2	1 - high confidence	Protocadherin alpha-10	PCDAA_HUMAN	no	56139	PCDHA10	0.9946	1	1	1	0	yes
+Human	Q96NT5	1 - high confidence	Proton-coupled folate transporter	PCFT_HUMAN	no	113235	SLC46A1	0.9945	26	1	11	0	yes
+Human	O95977	1 - high confidence	Sphingosine 1-phosphate receptor 4	S1PR4_HUMAN	no	8698	S1PR4	0.9945	10	1	7	0	yes
+Human	O75578	1 - high confidence	Integrin alpha-10	ITA10_HUMAN	no	8515	ITGA10	0.9945	3	1	1	0	yes
+Human	P05538	1 - high confidence	"HLA class II histocompatibility antigen, DQ beta 2 chain"	DQB2_HUMAN	no	3120	HLA-DQB2	0.9945	11	1	1	0	yes
+Human	P26010	1 - high confidence	Integrin beta-7	ITB7_HUMAN	no	3695	ITGB7	0.9945	9	1	1	0	yes
+Human	P98164	1 - high confidence	Low-density lipoprotein receptor-related protein 2	LRP2_HUMAN	no	4036	LRP2	0.9945	2	1	1	0	yes
+Human	Q5VY43	1 - high confidence	Platelet endothelial aggregation receptor 1	PEAR1_HUMAN	no	375033	PEAR1	0.9945	1	1	1	0	yes
+Human	Q7Z3B1	1 - high confidence	Neuronal growth regulator 1	NEGR1_HUMAN	no	257194	NEGR1	0.9945	8	1	1	1	yes
+Human	Q9NZ53	1 - high confidence	Podocalyxin-like protein 2	PDXL2_HUMAN	no	50512	PODXL2	0.9945	6	1	1	0	yes
+Human	Q9Y219	1 - high confidence	Protein jagged-2	JAG2_HUMAN	no	3714	JAG2	0.9945	5	1	1	0	yes
+Human	O75487	1 - high confidence	Glypican-4	GPC4_HUMAN	no	2239	GPC4	0.9944	3	1	1	1	yes
+Human	Q8WY21	1 - high confidence	VPS10 domain-containing receptor SorCS1	SORC1_HUMAN	no	114815	SORCS1	0.9944	7	1	1	0	yes
+Human	A8MVW0	1 - high confidence	Protein FAM171A2	F1712_HUMAN	no	284069	FAM171A2	0.9943	5	1	2	0	yes
+Human	P08913	1 - high confidence	Alpha-2A adrenergic receptor	ADA2A_HUMAN	no	150	ADRA2A	0.9942	1	1	7	0	yes
+Human	P25106	1 - high confidence	C-X-C chemokine receptor type 7	CXCR7_HUMAN	no	57007	CXCR7	0.9942	7	1	7	0	yes
+Human	P35414	1 - high confidence	Apelin receptor	APJ_HUMAN	no	187	APLNR	0.9942	2	1	7	0	yes
+Human	Q8IZF2	1 - high confidence	Probable G-protein coupled receptor 116	GP116_HUMAN	no	221395	GPR116	0.9942	3	1	7	0	yes
+Human	Q687X5	1 - high confidence	Metalloreductase STEAP4	STEA4_HUMAN	no	79689	STEAP4	0.9942	5	1	6	0	yes
+Human	Q6ZMJ2	1 - high confidence	Scavenger receptor class A member 5	SCAR5_HUMAN	no	286133	SCARA5	0.9942	1	1	1	0	yes
+Human	Q9NZR2	1 - high confidence	Low-density lipoprotein receptor-related protein 1B	LRP1B_HUMAN	no	53353	LRP1B	0.9941	1	1	1	0	yes
+Human	Q6ZQN7	1 - high confidence	Solute carrier organic anion transporter family member 4C1	SO4C1_HUMAN	no	353189	SLCO4C1	0.994	2	1	12	0	yes
+Human	P78348	1 - high confidence	"Amiloride-sensitive cation channel 2, neuronal"	ACCN2_HUMAN	no	41	ACCN2	0.994	1	1	1	0	yes
+Human	Q02487	1 - high confidence	Desmocollin-2	DSC2_HUMAN	no	1824	DSC2	0.994	4	1	1	0	yes
+Human	Q5VU97	1 - high confidence	VWFA and cache domain-containing protein 1	CAHD1_HUMAN	no	57685	CACHD1	0.994	3	1	1	0	yes
+Human	Q8TAB3	1 - high confidence	Protocadherin-19	PCD19_HUMAN	no	57526	PCDH19	0.994	1	1	1	0	yes
+Human	Q96GX1	1 - high confidence	Tectonic-2	TECT2_HUMAN	no	79867	TCTN2	0.994	3	1	1	0	yes
+Human	Q9NRM6	1 - high confidence	Interleukin-17 receptor B	I17RB_HUMAN	no	55540	IL17RB	0.994	2	1	1	0	yes
+Human	O94911	1 - high confidence	ATP-binding cassette sub-family A member 8	ABCA8_HUMAN	no	10351	ABCA8	0.9936	7	1	14	0	yes
+Human	Q96AP7	1 - high confidence	Endothelial cell-selective adhesion molecule	ESAM_HUMAN	no	90952	ESAM	0.9936	3	1	1	0	yes
+Human	P32241	1 - high confidence	Vasoactive intestinal polypeptide receptor 1	VIPR1_HUMAN	no	7433	VIPR1	0.9934	4	1	7	0	yes
+Human	P31994	1 - high confidence	Low affinity immunoglobulin gamma Fc region receptor II-b	FCG2B_HUMAN	no	2213	FCGR2B	0.9934	1	1	1	0	yes
+Human	Q93038	1 - high confidence	Tumor necrosis factor receptor superfamily member 25	TNR25_HUMAN	no	8718	TNFRSF25	0.9934	1	1	1	0	yes
+Human	Q8NBJ9	1 - high confidence	SID1 transmembrane family member 2	SIDT2_HUMAN	no	51092	SIDT2	0.9933	3	1	11	0	yes
+Human	Q7RTT9	1 - high confidence	Equilibrative nucleoside transporter 4	S29A4_HUMAN	no	222962	SLC29A4	0.9933	1	1	10	0	yes
+Human	Q9BXA5	1 - high confidence	Succinate receptor 1	SUCR1_HUMAN	no	56670	SUCNR1	0.9933	1	1	7	0	yes
+Human	Q9H8M5	1 - high confidence	Metal transporter CNNM2	CNNM2_HUMAN	no	54805	CNNM2	0.9933	13	1	4	0	yes
+Human	O43157	1 - high confidence	Plexin-B1	PLXB1_HUMAN	no	5364	PLXNB1	0.9933	25	1	1	0	yes
+Human	O60245	1 - high confidence	Protocadherin-7	PCDH7_HUMAN	no	5099	PCDH7	0.9933	19	1	1	0	yes
+Human	O60487	1 - high confidence	Myelin protein zero-like protein 2	MPZL2_HUMAN	no	10205	MPZL2	0.9933	11	1	1	0	yes
+Human	O75509	1 - high confidence	Tumor necrosis factor receptor superfamily member 21	TNR21_HUMAN	no	27242	TNFRSF21	0.9933	4	1	1	0	yes
+Human	P22794	1 - high confidence	Protein EVI2A	EVI2A_HUMAN	no	2123	EVI2A	0.9933	5	1	1	0	yes
+Human	P52803	1 - high confidence	Ephrin-A5	EFNA5_HUMAN	no	1946	EFNA5	0.9933	12	1	1	1	yes
+Human	P78380	1 - high confidence	Oxidized low-density lipoprotein receptor 1	OLR1_HUMAN	no	4973	OLR1	0.9933	2	1	1	0	yes
+Human	Q30201	1 - high confidence	Hereditary hemochromatosis protein	HFE_HUMAN	no	3077	HFE	0.9933	3	1	1	0	yes
+Human	Q86WK6	1 - high confidence	Amphoterin-induced protein 1	AMGO1_HUMAN	no	57463	AMIGO1	0.9933	7	1	1	0	yes
+Human	Q86YD3	1 - high confidence	Transmembrane protein 25	TMM25_HUMAN	no	84866	TMEM25	0.9933	1	1	1	0	yes
+Human	Q9H156	1 - high confidence	SLIT and NTRK-like protein 2	SLIK2_HUMAN	no	84631	SLITRK2	0.9933	3	1	1	0	yes
+Human	Q9NT99	1 - high confidence	Leucine-rich repeat-containing protein 4B	LRC4B_HUMAN	no	94030	LRRC4B	0.9933	12	1	1	0	yes
+Human	O60896	1 - high confidence	Receptor activity-modifying protein 3	RAMP3_HUMAN	no	10268	RAMP3	0.993	1	1	1	0	yes
+Human	Q9C0B5	1 - high confidence	Probable palmitoyltransferase ZDHHC5	ZDHC5_HUMAN	no	25921	ZDHHC5	0.9928	1	1	4	0	yes
+Human	Q86VW1	1 - high confidence	Solute carrier family 22 member 16	S22AG_HUMAN	no	85413	SLC22A16	0.9927	2	1	12	0	yes
+Human	Q15722	1 - high confidence	Leukotriene B4 receptor 1	LT4R1_HUMAN	no	1241	LTB4R	0.9927	1	1	7	0	yes
+Human	P35916	1 - high confidence	Vascular endothelial growth factor receptor 3	VGFR3_HUMAN	no	2324	FLT4	0.9927	1	1	1	0	yes
+Human	Q96RD7	1 - high confidence	Pannexin-1	PANX1_HUMAN	no	24145	PANX1	0.9926	3	1	4	0	yes
+Human	O95183	1 - high confidence	Vesicle-associated membrane protein 5	VAMP5_HUMAN	no	10791	VAMP5	0.9926	1	1	1	0	yes
+Human	Q9Y561	1 - high confidence	Low-density lipoprotein receptor-related protein 12	LRP12_HUMAN	no	29967	LRP12	0.9926	1	1	1	0	yes
+Human	P46531	1 - high confidence	Neurogenic locus notch homolog protein 1	NOTC1_HUMAN	no	4851	NOTCH1	0.9925	10	1	1	0	yes
+Human	Q5TF39	1 - high confidence	Sodium-dependent glucose transporter 1	NAGT1_HUMAN	no	91749	NAGLT1	0.9924	1	1	11	0	yes
+Human	P32418	1 - high confidence	Sodium/calcium exchanger 1	NAC1_HUMAN	no	6546	SLC8A1	0.9924	1	1	10	0	yes
+Human	P32297	1 - high confidence	Neuronal acetylcholine receptor subunit alpha-3	ACHA3_HUMAN	no	1136	CHRNA3	0.9924	1	1	4	0	yes
+Human	A8MWY0	1 - high confidence	UPF0577 protein KIAA1324-like	K132L_HUMAN	no	222223	KIAA1324L	0.9924	2	1	1	0	yes
+Human	O95754	1 - high confidence	Semaphorin-4F	SEM4F_HUMAN	no	10505	SEMA4F	0.9924	4	1	1	0	yes
+Human	Q16288	1 - high confidence	NT-3 growth factor receptor	NTRK3_HUMAN	no	4916	NTRK3	0.9924	4	1	1	0	yes
+Human	Q95460	1 - high confidence	Major histocompatibility complex class I-related gene protein	HMR1_HUMAN	no	3140	MR1	0.9921	7	1	1	0	yes
+Human	Q17RY6	1 - high confidence	Lymphocyte antigen 6K	LY6K_HUMAN	no	54742	LY6K	0.992	1	1	1	1	yes
+Human	Q8NFJ5	1 - high confidence	Retinoic acid-induced protein 3	RAI3_HUMAN	no	9052	GPRC5A	0.9919	2	1	7	0	yes
+Human	Q9H1C0	1 - high confidence	Lysophosphatidic acid receptor 5	LPAR5_HUMAN	no	57121	LPAR5	0.9918	3	1	7	0	yes
+Human	Q9UNW8	1 - high confidence	Probable G-protein coupled receptor 132	GP132_HUMAN	no	29933	GPR132	0.9918	3	1	7	0	yes
+Human	Q96E93	1 - high confidence	Killer cell lectin-like receptor subfamily G member 1	KLRG1_HUMAN	no	10219	KLRG1	0.9918	2	1	1	0	yes
+Human	Q96F05	1 - high confidence	Uncharacterized protein C11orf24	CK024_HUMAN	no	53838	C11orf24	0.9914	1	1	1	0	yes
+Human	Q9UHC6	1 - high confidence	Contactin-associated protein-like 2	CNTP2_HUMAN	no	26047	CNTNAP2	0.9912	1	1	1	0	yes
+Human	Q13705	1 - high confidence	Activin receptor type-2B	AVR2B_HUMAN	no	93	ACVR2B	0.991	1	1	1	0	yes
+Human	Q9H228	1 - high confidence	Sphingosine 1-phosphate receptor 5	S1PR5_HUMAN	no	53637	S1PR5	0.99	5	1	7	0	yes
+Human	A6NKC4	1 - high confidence	Putative high affinity immunoglobulin gamma Fc receptor IC	FCGRC_HUMAN	no	100132417	FCGR1C	0.99	3	1	1	0	yes
+Human	O43556	1 - high confidence	Epsilon-sarcoglycan	SGCE_HUMAN	no	8910	SGCE	0.99	17	1	1	0	yes
+Human	O60939	1 - high confidence	Sodium channel subunit beta-2	SCN2B_HUMAN	no	6327	SCN2B	0.99	1	1	1	0	yes
+Human	P40126	1 - high confidence	L-dopachrome tautomerase	TYRP2_HUMAN	no	1638	DCT	0.99	2	1	1	0	yes
+Human	Q13018	1 - high confidence	Secretory phospholipase A2 receptor	PLA2R_HUMAN	no	22925	PLA2R1	0.99	1	1	1	0	yes
+Human	Q9P244	1 - high confidence	Leucine-rich repeat and fibronectin type III domain-containing protein 1	LRFN1_HUMAN	no	57622	LRFN1	0.99	2	1	1	0	yes
+Human	P25101	1 - high confidence	Endothelin-1 receptor	EDNRA_HUMAN	no	1909	EDNRA	0.9896	4	1	7	0	yes
+Human	Q8NFZ4	1 - high confidence	Neuroligin-2	NLGN2_HUMAN	no	57555	NLGN2	0.9893	1	1	1	0	yes
+Human	Q9ULB4	1 - high confidence	Cadherin-9	CADH9_HUMAN	no	1007	CDH9	0.9892	1	1	1	0	yes
+Human	O75121	1 - high confidence	Microfibrillar-associated protein 3-like	MFA3L_HUMAN	no	9848	MFAP3L	0.989	2	1	1	0	yes
+Human	Q96PE1	1 - high confidence	Probable G-protein coupled receptor 124	GP124_HUMAN	no	25960	GPR124	0.9888	8	1	7	0	yes
+Human	Q8IWT1	1 - high confidence	Sodium channel subunit beta-4	SCN4B_HUMAN	no	6330	SCN4B	0.9886	3	1	1	0	yes
+Human	P35590	1 - high confidence	Tyrosine-protein kinase receptor Tie-1	TIE1_HUMAN	no	7075	TIE1	0.9882	2	1	1	0	yes
+Human	P17948	1 - high confidence	Vascular endothelial growth factor receptor 1	VGFR1_HUMAN	no	2321	FLT1	0.9877	1	1	1	0	yes
+Human	P36941	1 - high confidence	Tumor necrosis factor receptor superfamily member 3	TNR3_HUMAN	no	4055	LTBR	0.9877	26	1	1	0	yes
+Human	Q99650	1 - high confidence	Oncostatin-M-specific receptor subunit beta	OSMR_HUMAN	no	9180	OSMR	0.9877	18	1	1	0	yes
+Human	Q9Y666	1 - high confidence	Solute carrier family 12 member 7	S12A7_HUMAN	no	10723	SLC12A7	0.9872	1	1	12	0	yes
+Human	P16473	1 - high confidence	Thyrotropin receptor	TSHR_HUMAN	no	7253	TSHR	0.9872	1	1	7	0	yes
+Human	Q9Y5S1	1 - high confidence	Transient receptor potential cation channel subfamily V member 2	TRPV2_HUMAN	no	51393	TRPV2	0.9872	1	1	6	0	yes
+Human	Q9ULK0	1 - high confidence	Glutamate receptor delta-1 subunit	GRID1_HUMAN	no	2894	GRID1	0.9872	3	1	4	0	yes
+Human	P55899	1 - high confidence	IgG receptor FcRn large subunit p51	FCGRN_HUMAN	no	2217	FCGRT	0.9872	3	1	1	0	yes
+Human	Q03167	1 - high confidence	Transforming growth factor beta receptor type 3	TGBR3_HUMAN	no	7049	TGFBR3	0.9868	3	1	1	0	yes
+Human	Q9H3T3	1 - high confidence	Semaphorin-6B	SEM6B_HUMAN	no	10501	SEMA6B	0.9864	1	1	1	0	yes
+Human	P47869	1 - high confidence	Gamma-aminobutyric acid receptor subunit alpha-2	GBRA2_HUMAN	no	2555	GABRA2	0.986	2	1	4	0	yes
+Human	P07949	1 - high confidence	Proto-oncogene tyrosine-protein kinase receptor Ret	RET_HUMAN	no	5979	RET	0.9859	2	1	1	0	yes
+Human	Q9Y5G5	1 - high confidence	Protocadherin gamma-A8	PCDG8_HUMAN	no	9708	PCDHGA8	0.9857	1	1	1	0	yes
+Human	P21453	1 - high confidence	Sphingosine 1-phosphate receptor 1	S1PR1_HUMAN	no	1901	S1PR1	0.9839	7	1	7	0	yes
+Human	Q13591	1 - high confidence	Semaphorin-5A	SEM5A_HUMAN	no	9037	SEMA5A	0.9831	4	1	1	0	yes
+Human	Q8N8Z6	1 - high confidence	"Discoidin, CUB and LCCL domain-containing protein 1"	DCBD1_HUMAN	no	285761	DCBLD1	0.9825	32	1	1	0	yes
+Human	Q86WI1	1 - high confidence	Fibrocystin-L	PKHL1_HUMAN	no	93035	PKHD1L1	0.9819	1	1	1	0	yes
+Human	P15514	1 - high confidence	Amphiregulin	AREG_HUMAN	no	374	AREG	0.9814	3	1	1	0	yes
+Human	P10319	1 - high confidence	"HLA class I histocompatibility antigen, B-58 alpha chain"	1B58_HUMAN	no	3106	HLA-B	0.98	3	1	1	0	yes
+Human	Q6UWI2	1 - high confidence	Prostate androgen-regulated mucin-like protein 1	PARM1_HUMAN	no	25849	PARM1	0.98	9	1	1	0	yes
+Human	P22223	1 - high confidence	Cadherin-3	CADH3_HUMAN	no	1001	CDH3	0.9785	1	1	1	0	yes
+Human	P17342	1 - high confidence	Atrial natriuretic peptide receptor 3	ANPRC_HUMAN	no	4883	NPR3	0.9757	5	1	1	0	yes
+Human	P55287	1 - high confidence	Cadherin-11	CAD11_HUMAN	no	1009	CDH11	0.9722	3	1	1	0	yes
+Human	P43115	1 - high confidence	Prostaglandin E2 receptor EP3 subtype	PE2R3_HUMAN	no	5733	PTGER3	0.968	1	1	7	0	yes
+Human	O75197	1 - high confidence	Low-density lipoprotein receptor-related protein 5	LRP5_HUMAN	no	4041	LRP5	0.9673	4	1	1	0	yes
+Human	Q8J025	1 - high confidence	Protein APCDD1	APCD1_HUMAN	no	147495	APCDD1	0.9644	3	1	1	0	yes
+Human	Q9NZM1	1 - high confidence	Myoferlin	MYOF_HUMAN	no	26509	MYOF	0.964	3	1	1	0	yes
+Human	P09603	1 - high confidence	Macrophage colony-stimulating factor 1	CSF1_HUMAN	no	1435	CSF1	0.9613	15	1	1	0	yes
+Human	Q9UKZ4	1 - high confidence	Teneurin-1	TEN1_HUMAN	no	10178	ODZ1	0.96	2	1	1	0	yes
+Human	Q8N3J6	1 - high confidence	Cell adhesion molecule 2	CADM2_HUMAN	no	253559	CADM2	0.9556	5	1	1	0	yes
+Human	Q9BXC1	1 - high confidence	Probable G-protein coupled receptor 174	GP174_HUMAN	no	84636	GPR174	0.9547	1	1	7	0	yes
+Human	Q86VZ4	1 - high confidence	Low-density lipoprotein receptor-related protein 11	LRP11_HUMAN	no	84918	LRP11	0.9513	3	1	1	0	yes
+Human	Q96J42	1 - high confidence	Thioredoxin domain-containing protein 15	TXD15_HUMAN	no	79770	TXNDC15	0.9448	17	1	1	0	yes
+Human	Q8IUW5	1 - high confidence	RELT-like protein 1	RELL1_HUMAN	no	768211	RELL1	0.94	5	1	1	0	yes
+Human	P42262	1 - high confidence	Glutamate receptor 2	GRIA2_HUMAN	no	2891	GRIA2	0.9365	1	1	3	0	yes
+Human	P51172	1 - high confidence	Amiloride-sensitive sodium channel subunit delta	SCNND_HUMAN	no	6339	SCNN1D	0.936	1	1	2	0	yes
+Human	P28221	1 - high confidence	5-hydroxytryptamine receptor 1D	5HT1D_HUMAN	no	3352	HTR1D	0.9334	1	1	7	0	yes
+Human	Q86XS8	1 - high confidence	Goliath homolog	GOLI_HUMAN	no	55819	RNF130	0.9217	1	1	2	0	yes
+Human	Q8IZY2	1 - high confidence	ATP-binding cassette sub-family A member 7	ABCA7_HUMAN	no	10347	ABCA7	0.919	3	1	11	0	yes
+Human	P43119	1 - high confidence	Prostacyclin receptor	PI2R_HUMAN	no	5739	PTGIR	0.919	3	1	7	0	yes
+Human	Q14439	1 - high confidence	Probable G-protein coupled receptor 176	GP176_HUMAN	no	11245	GPR176	0.9145	3	1	7	0	yes
+Human	O94933	1 - high confidence	SLIT and NTRK-like protein 3	SLIK3_HUMAN	no	22865	SLITRK3	0.9124	1	1	1	0	yes
+Human	P34981	1 - high confidence	Thyrotropin-releasing hormone receptor	TRFR_HUMAN	no	7201	TRHR	0.8995	4	1	7	0	yes
+Human	P56749	1 - high confidence	Claudin-12	CLD12_HUMAN	no	9069	CLDN12	0.89	1	1	4	0	yes
+Human	Q9Y5I1	1 - high confidence	Protocadherin alpha-11	PCDAB_HUMAN	no	56138	PCDHA11	0.8741	1	1	1	0	yes
+Human	Q92508	1 - high confidence	Protein FAM38A	FA38A_HUMAN	no	9780	FAM38A	1	29	1	29	0	yes
+Human	O15118	1 - high confidence	Niemann-Pick C1 protein	NPC1_HUMAN	no	4864	NPC1	1	17	1	13	0	yes
+Human	Q7L0J3	1 - high confidence	Synaptic vesicle glycoprotein 2A	SV2A_HUMAN	no	9900	SV2A	1	13	1	12	0	yes
+Human	Q8TCT7	1 - high confidence	Signal peptide peptidase-like 2B	PSL1_HUMAN	no	56928	SPPL2B	1	22	1	9	0	yes
+Human	Q6PJF5	1 - high confidence	Rhomboid family member 2	RHDF2_HUMAN	no	79651	RHBDF2	1	3	1	7	0	yes
+Human	Q8N6C5	1 - high confidence	Immunoglobulin superfamily member 1	IGSF1_HUMAN	no	3547	IGSF1	1	4	1	4	0	yes
+Human	P04844	1 - high confidence	Dolichyl-diphosphooligosaccharide--protein glycosyltransferase subunit 2	RPN2_HUMAN	no	6185	RPN2	1	15	1	3	0	yes
+Human	Q9BVK6	1 - high confidence	Transmembrane emp24 domain-containing protein 9	TMED9_HUMAN	no	54732	TMED9	1	28	1	2	0	yes
+Human	P20645	1 - high confidence	Cation-dependent mannose-6-phosphate receptor	MPRD_HUMAN	no	4074	M6PR	1	42	1	1	0	yes
+Human	Q15904	1 - high confidence	V-type proton ATPase subunit S1	VAS1_HUMAN	no	537	ATP6AP1	1	30	1	1	0	yes
+Human	Q24JP5	1 - high confidence	Transmembrane protein 132A	T132A_HUMAN	no	54972	TMEM132A	1	10	1	1	0	yes
+Human	Q6EMK4	1 - high confidence	Vasorin	VASN_HUMAN	no	114990	VASN	1	23	1	1	0	yes
+Human	Q8WWB7	1 - high confidence	Lysosomal protein NCU-G1	NCUG1_HUMAN	no	112770	C1orf85	1	13	1	1	0	yes
+Human	Q96JJ7	1 - high confidence	Protein disulfide-isomerase TMX3	TMX3_HUMAN	no	54495	TMX3	1	14	1	1	0	yes
+Human	Q9NS62	1 - high confidence	Thrombospondin type-1 domain-containing protein 1	THSD1_HUMAN	no	55901	THSD1	1	6	1	1	0	yes
+Human	Q9UBV2	1 - high confidence	Protein sel-1 homolog 1	SE1L1_HUMAN	no	6400	SEL1L	1	26	1	1	0	yes
+Human	Q9Y3B3	1 - high confidence	Transmembrane emp24 domain-containing protein 7	TMED7_HUMAN	no	51014	TMED7	1	7	1	1	0	yes
+Human	O43567	1 - high confidence	RING finger protein 13	RNF13_HUMAN	no	11342	RNF13	1	11	1	1	0	yes
+Human	P11117	1 - high confidence	Lysosomal acid phosphatase	PPAL_HUMAN	no	53	ACP2	1	21	1	1	0	yes
+Human	P27824	1 - high confidence	Calnexin	CALX_HUMAN	no	821	CANX	1	31	1	1	0	yes
+Human	P43307	1 - high confidence	Translocon-associated protein subunit alpha	SSRA_HUMAN	no	6745	SSR1	1	10	1	1	0	yes
+Human	P43308	1 - high confidence	Translocon-associated protein subunit beta	SSRB_HUMAN	no	6746	SSR2	1	29	1	1	0	yes
+Human	Q10472	1 - high confidence	Polypeptide N-acetylgalactosaminyltransferase 1	GALT1_HUMAN	no	2589	GALNT1	1	1	1	1	0	yes
+Human	Q12907	1 - high confidence	Vesicular integral-membrane protein VIP36	LMAN2_HUMAN	no	10960	LMAN2	1	29	1	1	0	yes
+Human	Q14314	1 - high confidence	Fibroleukin	FGL2_HUMAN	no	10875	FGL2	1	3	1	1	0	yes
+Human	Q6UVY6	1 - high confidence	DBH-like monooxygenase protein 1	MOXD1_HUMAN	no	26002	MOXD1	1	6	1	1	0	yes
+Human	Q7Z7H5	1 - high confidence	Transmembrane emp24 domain-containing protein 4	TMED4_HUMAN	no	222068	TMED4	1	25	1	1	0	yes
+Human	Q8TEM1	1 - high confidence	Nuclear pore membrane glycoprotein 210	PO210_HUMAN	no	23225	NUP210	1	24	1	1	0	yes
+Human	Q92896	1 - high confidence	Golgi apparatus protein 1	GSLG1_HUMAN	no	2734	GLG1	1	29	1	1	0	yes
+Human	Q969N2	1 - high confidence	GPI transamidase component PIG-T	PIGT_HUMAN	no	51604	PIGT	1	13	1	1	0	yes
+Human	Q9H0V9	1 - high confidence	VIP36-like protein	LMA2L_HUMAN	no	81562	LMAN2L	1	8	1	1	0	yes
+Human	Q9UBQ6	1 - high confidence	Exostosin-like 2	EXTL2_HUMAN	no	2135	EXTL2	1	1	1	1	0	yes
+Human	Q9ULI3	1 - high confidence	Protein HEG homolog 1	HEG1_HUMAN	no	57493	HEG1	1	22	1	1	0	yes
+Human	P40967	1 - high confidence	Melanocyte protein Pmel 17	PME17_HUMAN	no	6490	SILV	0.9999	2	1	1	0	yes
+Human	P04843	1 - high confidence	Dolichyl-diphosphooligosaccharide--protein glycosyltransferase subunit 1	RPN1_HUMAN	no	6184	RPN1	0.9998	29	1	1	0	yes
+Human	O60656	1 - high confidence	UDP-glucuronosyltransferase 1-9	UD19_HUMAN	no	54600	UGT1A9	0.9976	3	1	1	0	yes
+Human	P08842	1 - high confidence	Steryl-sulfatase	STS_HUMAN	no	412	STS	0.9967	2	1	2	0	yes
+Human	Q8NAU1	1 - high confidence	Fibronectin type III domain-containing protein 5	FNDC5_HUMAN	no	252995	FNDC5	0.9967	3	1	1	0	yes
+Human	Q9Y287	1 - high confidence	Integral membrane protein 2B	ITM2B_HUMAN	no	9445	ITM2B	0.9967	2	1	1	0	yes
+Human	P53801	1 - high confidence	Pituitary tumor-transforming gene 1 protein-interacting protein	PTTG_HUMAN	no	754	PTTG1IP	0.9967	4	1	1	0	yes
+Human	O15321	1 - high confidence	Transmembrane 9 superfamily member 1	TM9S1_HUMAN	no	10548	TM9SF1	0.9956	17	1	9	0	yes
+Human	Q5JRA6	1 - high confidence	Melanoma inhibitory activity protein 3	MIA3_HUMAN	no	375056	MIA3	0.9956	9	1	2	0	yes
+Human	P54793	1 - high confidence	Arylsulfatase F	ARSF_HUMAN	no	416	ARSF	0.9943	1	1	2	0	yes
+Human	Q14CZ8	1 - high confidence	Hepatocyte cell adhesion molecule	HECAM_HUMAN	no	220296	HEPACAM	0.9942	2	1	1	0	yes
+Human	Q8IUK5	1 - high confidence	Plexin domain-containing protein 1	PXDC1_HUMAN	no	57125	PLXDC1	0.9941	1	1	1	0	yes
+Human	Q8TB96	1 - high confidence	T-cell immunomodulatory protein	TIP_HUMAN	no	81533	ITFG1	0.994	17	1	1	0	yes
+Human	Q9P0T7	1 - high confidence	Transmembrane protein 9	TMEM9_HUMAN	no	252839	TMEM9	0.9939	13	1	1	0	yes
+Human	P14672	1 - high confidence	"Solute carrier family 2, facilitated glucose transporter member 4"	GTR4_HUMAN	no	6517	SLC2A4	0.9933	11	1	12	0	yes
+Human	P56817	1 - high confidence	Beta-secretase 1	BACE1_HUMAN	no	23621	BACE1	0.9933	1	1	1	0	yes
+Human	Q9UK23	1 - high confidence	N-acetylglucosamine-1-phosphodiester alpha-N-acetylglucosaminidase	NAGPA_HUMAN	no	51172	NAGPA	0.9924	5	1	1	0	yes
+Human	Q75V66	1 - high confidence	Anoctamin-5	ANO5_HUMAN	no	203859	ANO5	0.991	1	1	8	0	yes
+Human	O00391	1 - high confidence	Sulfhydryl oxidase 1	QSOX1_HUMAN	no	5768	QSOX1	0.9871	1	1	1	0	yes
+Human	Q969V3	1 - high confidence	Nicalin	NCLN_HUMAN	no	56926	NCLN	0.9753	1	1	2	0	yes
+Human	Q8TDJ6	1 - high confidence	DmX-like protein 2	DMXL2_HUMAN	no	23312	DMXL2	0.9236	1	1	1	0	yes
+Human	Q8N4V1	1 - high confidence	Membrane magnesium transporter 1	MMGT1_HUMAN	no	93380	MMGT1	0.8675	1	1	1	0	yes
+Human	Q16853	3 - unspecific	Membrane primary amine oxidase	AOC3_HUMAN	no	8639	AOC3	1	3	0	0	0	#N/A
+Human	Q4G148	3 - unspecific	Glucoside xylosyltransferase 1	GXLT1_HUMAN	no	283464	GXYLT1	1	8	0	0	0	#N/A
+Human	Q92478	3 - unspecific	C-type lectin domain family 2 member B	CLC2B_HUMAN	no	9976	CLEC2B	1	9	0	0	0	#N/A
+Human	P36269	3 - unspecific	Gamma-glutamyltransferase 5	GGT5_HUMAN	no	2687	GGT5	0.9999	14	0	0	0	#N/A
+Human	Q9UJ14	3 - unspecific	Gamma-glutamyltransferase 7	GGT7_HUMAN	no	2686	GGT7	0.9972	3	0	0	0	#N/A
+Human	Q68CQ7	3 - unspecific	Glycosyltransferase 8 domain-containing protein 1	GL8D1_HUMAN	no	55830	GLT8D1	0.9962	9	0	0	0	#N/A
+Human	Q9BVA6	3 - unspecific	Adenosine monophosphate-protein transferase FICD	FICD_HUMAN	no	11153	FICD	0.9957	1	0	0	0	#N/A
+Human	Q15165	3 - unspecific	Serum paraoxonase/arylesterase 2	PON2_HUMAN	no	5445	PON2	0.9956	18	0	0	0	#N/A
+Human	P30414	3 - unspecific	NK-tumor recognition protein	NKTR_HUMAN	no	4820	NKTR	0.9945	1	0	0	0	#N/A
+Human	A6NGU5	3 - unspecific	Putative gamma-glutamyltranspeptidase 3	GGT3_HUMAN	no	2679	GGT3P	0.9915	21	0	0	0	#N/A
+Human	O60243	3 - unspecific	Heparan-sulfate 6-O-sulfotransferase 1	H6ST1_HUMAN	no	9394	HS6ST1	0.9341	1	0	0	0	#N/A
+Human	O00469	3 - unspecific	"Procollagen-lysine,2-oxoglutarate 5-dioxygenase 2"	PLOD2_HUMAN	no	5352	PLOD2	1	17	0	0	0	#N/A
+Human	P04062	3 - unspecific	Glucosylceramidase	GLCM_HUMAN	no	2629	GBA	1	19	0	0	0	#N/A
+Human	P30533	3 - unspecific	Alpha-2-macroglobulin receptor-associated protein	AMRP_HUMAN	no	4043	LRPAP1	1	9	0	0	0	#N/A
+Human	Q02809	3 - unspecific	"Procollagen-lysine,2-oxoglutarate 5-dioxygenase 1"	PLOD1_HUMAN	no	5351	PLOD1	1	23	0	0	0	#N/A
+Human	Q8IWU6	3 - unspecific	Extracellular sulfatase Sulf-1	SULF1_HUMAN	no	23213	SULF1	1	4	0	0	0	#N/A
+Human	Q96HE7	3 - unspecific	ERO1-like protein alpha	ERO1A_HUMAN	no	30001	ERO1L	1	8	0	0	0	#N/A
+Human	O00587	3 - unspecific	"Beta-1,3-N-acetylglucosaminyltransferase manic fringe"	MFNG_HUMAN	no	4242	MFNG	1	1	0	0	0	#N/A
+Human	O43505	3 - unspecific	"N-acetyllactosaminide beta-1,3-N-acetylglucosaminyltransferase"	B3GN1_HUMAN	no	11041	B3GNT1	1	9	0	0	0	#N/A
+Human	O60512	3 - unspecific	"Beta-1,4-galactosyltransferase 3"	B4GT3_HUMAN	no	8703	B4GALT3	1	11	0	0	0	#N/A
+Human	O94923	3 - unspecific	D-glucuronyl C5-epimerase	GLCE_HUMAN	no	26035	GLCE	1	6	0	0	0	#N/A
+Human	P04350	3 - unspecific	Tubulin beta-4 chain	TBB4_HUMAN	no	10382	TUBB4	1	3	0	0	0	#N/A
+Human	P07437	3 - unspecific	Tubulin beta chain	TBB5_HUMAN	no	203068	TUBB	1	27	0	0	0	#N/A
+Human	P07737	3 - unspecific	Profilin-1	PROF1_HUMAN	no	5216	PFN1	1	24	0	0	0	#N/A
+Human	P22695	3 - unspecific	"Cytochrome b-c1 complex subunit 2, mitochondrial"	QCR2_HUMAN	no	7385	UQCRC2	1	17	0	0	0	#N/A
+Human	P29966	3 - unspecific	Myristoylated alanine-rich C-kinase substrate	MARCS_HUMAN	no	4082	MARCKS	1	5	0	0	0	#N/A
+Human	P60709	3 - unspecific	"Actin, cytoplasmic 1"	ACTB_HUMAN	no	60	ACTB	1	44	0	0	0	#N/A
+Human	P68366	3 - unspecific	Tubulin alpha-4A chain	TBA4A_HUMAN	no	7277	TUBA4A	1	2	0	0	0	#N/A
+Human	Q00610	3 - unspecific	Clathrin heavy chain 1	CLH1_HUMAN	no	1213	CLTC	1	18	0	0	0	#N/A
+Human	Q495W5	3 - unspecific	"Alpha-(1,3)-fucosyltransferase 11"	FUT11_HUMAN	no	170384	FUT11	1	2	0	0	0	#N/A
+Human	Q6P179	3 - unspecific	Endoplasmic reticulum aminopeptidase 2	ERAP2_HUMAN	no	64167	ERAP2	1	10	0	0	0	#N/A
+Human	Q6PIU2	3 - unspecific	Neutral cholesterol ester hydrolase 1	NCEH1_HUMAN	no	57552	NCEH1	1	11	0	0	0	#N/A
+Human	Q7LGA3	3 - unspecific	Heparan sulfate 2-O-sulfotransferase 1	HS2ST_HUMAN	no	9653	HS2ST1	1	26	0	0	0	#N/A
+Human	Q7Z7M9	3 - unspecific	Polypeptide N-acetylgalactosaminyltransferase 5	GALT5_HUMAN	no	11227	GALNT5	1	4	0	0	0	#N/A
+Human	Q92187	3 - unspecific	"CMP-N-acetylneuraminate-poly-alpha-2,8-sialyltransferase"	SIA8D_HUMAN	no	7903	ST8SIA4	1	1	0	0	0	#N/A
+Human	Q96RQ1	3 - unspecific	Endoplasmic reticulum-Golgi intermediate compartment protein 2	ERGI2_HUMAN	no	51290	ERGIC2	1	7	0	0	0	#N/A
+Human	Q9NZ08	3 - unspecific	Endoplasmic reticulum aminopeptidase 1	ERAP1_HUMAN	no	51752	ERAP1	1	5	0	0	0	#N/A
+Human	P68371	3 - unspecific	Tubulin beta-2C chain	TBB2C_HUMAN	no	10383	TUBB2C	0.9995	8	0	0	0	#N/A
+Human	Q9BUF5	3 - unspecific	Tubulin beta-6 chain	TBB6_HUMAN	no	84617	TUBB6	0.9985	4	0	0	0	#N/A
+Human	P35354	3 - unspecific	Prostaglandin G/H synthase 2	PGH2_HUMAN	no	5743	PTGS2	0.9976	3	0	0	0	#N/A
+Human	O43286	3 - unspecific	"Beta-1,4-galactosyltransferase 5"	B4GT5_HUMAN	no	9334	B4GALT5	0.9972	2	0	0	0	#N/A
+Human	Q9P2E5	3 - unspecific	Chondroitin sulfate glucuronyltransferase	CHPF2_HUMAN	no	54480	CHPF2	0.9969	4	0	0	0	#N/A
+Human	Q8IWU5	3 - unspecific	Extracellular sulfatase Sulf-2	SULF2_HUMAN	no	55959	SULF2	0.9967	4	0	0	0	#N/A
+Human	Q15818	3 - unspecific	Neuronal pentraxin-1	NPTX1_HUMAN	no	4884	NPTX1	0.9966	3	0	0	0	#N/A
+Human	Q9UQ53	3 - unspecific	"Alpha-1,3-mannosyl-glycoprotein 4-beta-N-acetylglucosaminyltransferase B"	MGT4B_HUMAN	no	11282	MGAT4B	0.9966	8	0	0	0	#N/A
+Human	Q6Y288	3 - unspecific	"Beta-1,3-glucosyltransferase"	B3GLT_HUMAN	no	145173	B3GALTL	0.9961	1	0	0	0	#N/A
+Human	Q86YB8	3 - unspecific	ERO1-like protein beta	ERO1B_HUMAN	no	56605	ERO1LB	0.9957	4	0	0	0	#N/A
+Human	Q70JA7	3 - unspecific	Chondroitin sulfate synthase 3	CHSS3_HUMAN	no	337876	CHSY3	0.9957	2	0	0	0	#N/A
+Human	Q9NS84	3 - unspecific	Carbohydrate sulfotransferase 7	CHST7_HUMAN	no	56548	CHST7	0.9957	2	0	0	0	#N/A
+Human	Q8NBJ4	3 - unspecific	Golgi membrane protein 1	GOLM1_HUMAN	no	51280	GOLM1	0.9956	31	0	0	0	#N/A
+Human	Q9NPF2	3 - unspecific	Carbohydrate sulfotransferase 11	CHSTB_HUMAN	no	50515	CHST11	0.9956	4	0	0	0	#N/A
+Human	Q5NDL2	3 - unspecific	Uncharacterized glycosyltransferase AER61	AER61_HUMAN	no	285203	AER61	0.9952	3	0	0	0	#N/A
+Human	O75063	3 - unspecific	Protein FAM20B	FA20B_HUMAN	no	9917	FAM20B	0.9947	1	0	0	0	#N/A
+Human	Q9Y644	3 - unspecific	"Beta-1,3-N-acetylglucosaminyltransferase radical fringe"	RFNG_HUMAN	no	5986	RFNG	0.994	8	0	0	0	#N/A
+Human	O75477	3 - unspecific	Erlin-1	ERLN1_HUMAN	no	10613	ERLIN1	0.9931	6	0	0	0	#N/A
+Human	O60568	3 - unspecific	"Procollagen-lysine,2-oxoglutarate 5-dioxygenase 3"	PLOD3_HUMAN	no	8985	PLOD3	0.993	24	0	0	0	#N/A
+Human	Q6IS24	3 - unspecific	Putative polypeptide N-acetylgalactosaminyltransferase-like protein 3	GLTL3_HUMAN	no	64409	WBSCR17	0.9927	1	0	0	0	#N/A
+Human	Q8NDV1	3 - unspecific	"Alpha-N-acetylgalactosaminide alpha-2,6-sialyltransferase 3"	SIA7C_HUMAN	no	256435	ST6GALNAC3	0.9918	1	0	0	0	#N/A
+Human	O75072	3 - unspecific	Fukutin	FKTN_HUMAN	no	2218	FKTN	0.9744	1	0	0	0	#N/A
+Human	Q9GZX3	3 - unspecific	Carbohydrate sulfotransferase 6	CHST6_HUMAN	no	4166	CHST6	0.9376	7	0	0	0	#N/A
+Human	Q99550	3 - unspecific	M-phase phosphoprotein 9	MPP9_HUMAN	no	10198	MPHOSPH9	0.9216	1	0	0	0	#N/A
+Human	O00754	3 - unspecific	Lysosomal alpha-mannosidase	MA2B1_HUMAN	no	4125	MAN2B1	1	12	0	0	0	#N/A
+Human	P01733	3 - unspecific	T-cell receptor beta chain V region YT35	TVB1_HUMAN	no	28577	TRBV12-3	1	4	0	0	0	#N/A
+Human	P01737	3 - unspecific	T-cell receptor alpha chain V region PY14	TVA3_HUMAN	no	0	0	1	1	0	0	0	#N/A
+Human	P04435	3 - unspecific	T-cell receptor beta chain V region CTL-L17	TVB2_HUMAN	no	0	TCRB	1	1	0	0	0	#N/A
+Human	P05164	3 - unspecific	Myeloperoxidase	PERM_HUMAN	no	4353	MPO	1	5	0	0	0	#N/A
+Human	P07602	3 - unspecific	Proactivator polypeptide [Cleaved into: Saposin-A	SAP_HUMAN	no	5660	PSAP	1	8	0	0	0	#N/A
+Human	P07996	3 - unspecific	Thrombospondin-1	TSP1_HUMAN	no	7057	THBS1	1	33	0	0	0	#N/A
+Human	P10619	3 - unspecific	Lysosomal protective protein	PPGB_HUMAN	no	5476	CTSA	1	4	0	0	0	#N/A
+Human	P13674	3 - unspecific	Prolyl 4-hydroxylase subunit alpha-1	P4HA1_HUMAN	no	5033	P4HA1	1	14	0	0	0	#N/A
+Human	P14314	3 - unspecific	Glucosidase 2 subunit beta	GLU2B_HUMAN	no	5589	PRKCSH	1	12	0	0	0	#N/A
+Human	P14625	3 - unspecific	Endoplasmin	ENPL_HUMAN	no	7184	HSP90B1	1	31	0	0	0	#N/A
+Human	P15586	3 - unspecific	N-acetylglucosamine-6-sulfatase	GNS_HUMAN	no	2799	GNS	1	8	0	0	0	#N/A
+Human	P23141	3 - unspecific	Liver carboxylesterase 1	EST1_HUMAN	no	1066	CES1	1	1	0	0	0	#N/A
+Human	P23284	3 - unspecific	Peptidyl-prolyl cis-trans isomerase B	PPIB_HUMAN	no	5479	PPIB	1	20	0	0	0	#N/A
+Human	P35442	3 - unspecific	Thrombospondin-2	TSP2_HUMAN	no	7058	THBS2	1	6	0	0	0	#N/A
+Human	P38571	3 - unspecific	Lysosomal acid lipase/cholesteryl ester hydrolase	LICH_HUMAN	no	3988	LIPA	1	6	0	0	0	#N/A
+Human	P48723	3 - unspecific	Heat shock 70 kDa protein 13	HSP13_HUMAN	no	6782	HSPA13	1	7	0	0	0	#N/A
+Human	P49184	3 - unspecific	Deoxyribonuclease-1-like 1	DNSL1_HUMAN	no	1774	DNASE1L1	1	9	0	0	0	#N/A
+Human	P53634	3 - unspecific	Dipeptidyl peptidase 1	CATC_HUMAN	no	1075	CTSC	1	13	0	0	0	#N/A
+Human	P54802	3 - unspecific	Alpha-N-acetylglucosaminidase	ANAG_HUMAN	no	4669	NAGLU	1	6	0	0	0	#N/A
+Human	Q13510	3 - unspecific	Acid ceramidase	ASAH1_HUMAN	no	427	ASAH1	1	12	0	0	0	#N/A
+Human	Q15293	3 - unspecific	Reticulocalbin-1	RCN1_HUMAN	no	5954	RCN1	1	18	0	0	0	#N/A
+Human	Q7Z4H8	3 - unspecific	KDEL motif-containing protein 2	KDEL2_HUMAN	no	143888	KDELC2	1	8	0	0	0	#N/A
+Human	Q8IYK4	3 - unspecific	Procollagen galactosyltransferase 2	GT252_HUMAN	no	23127	GLT25D2	1	2	0	0	0	#N/A
+Human	Q8NBJ5	3 - unspecific	Procollagen galactosyltransferase 1	GT251_HUMAN	no	79709	GLT25D1	1	13	0	0	0	#N/A
+Human	Q8NHP8	3 - unspecific	Putative phospholipase B-like 2	PLBL2_HUMAN	no	196463	PLBD2	1	6	0	0	0	#N/A
+Human	Q96AY3	3 - unspecific	Peptidyl-prolyl cis-trans isomerase FKBP10	FKB10_HUMAN	no	60681	FKBP10	1	19	0	0	0	#N/A
+Human	Q96D15	3 - unspecific	Reticulocalbin-3	RCN3_HUMAN	no	57333	RCN3	1	2	0	0	0	#N/A
+Human	Q99538	3 - unspecific	Legumain	LGMN_HUMAN	no	5641	LGMN	1	5	0	0	0	#N/A
+Human	Q9H3G5	3 - unspecific	Probable serine carboxypeptidase CPVL	CPVL_HUMAN	no	54504	CPVL	1	3	0	0	0	#N/A
+Human	Q9UHG3	3 - unspecific	Prenylcysteine oxidase 1	PCYOX_HUMAN	no	51449	PCYOX1	1	18	0	0	0	#N/A
+Human	Q9Y4L1	3 - unspecific	Hypoxia up-regulated protein 1	HYOU1_HUMAN	no	10525	HYOU1	1	40	0	0	0	#N/A
+Human	Q9Y680	3 - unspecific	Peptidyl-prolyl cis-trans isomerase FKBP7	FKBP7_HUMAN	no	51661	FKBP7	1	7	0	0	0	#N/A
+Human	O43707	3 - unspecific	Alpha-actinin-4	ACTN4_HUMAN	no	81	ACTN4	1	17	0	0	0	#N/A
+Human	P02545	3 - unspecific	Lamin-A/C	LMNA_HUMAN	no	4000	LMNA	1	14	0	0	0	#N/A
+Human	P04220	3 - unspecific	Ig mu heavy chain disease protein	MUCB_HUMAN	no	0	0	1	1	0	0	0	#N/A
+Human	P04406	3 - unspecific	Glyceraldehyde-3-phosphate dehydrogenase	G3P_HUMAN	no	2597	GAPDH	1	28	0	0	0	#N/A
+Human	P05387	3 - unspecific	60S acidic ribosomal protein P2	RLA2_HUMAN	no	6181	RPLP2	1	21	0	0	0	#N/A
+Human	P08238	3 - unspecific	Heat shock protein HSP 90-beta	HS90B_HUMAN	no	3326	HSP90AB1	1	18	0	0	0	#N/A
+Human	P08670	3 - unspecific	Vimentin	VIME_HUMAN	no	7431	VIM	1	32	0	0	0	#N/A
+Human	P10809	3 - unspecific	"60 kDa heat shock protein, mitochondrial"	CH60_HUMAN	no	3329	HSPD1	1	29	0	0	0	#N/A
+Human	P11142	3 - unspecific	Heat shock cognate 71 kDa protein	HSP7C_HUMAN	no	3312	HSPA8	1	23	0	0	0	#N/A
+Human	P12956	3 - unspecific	ATP-dependent DNA helicase 2 subunit 1	KU70_HUMAN	no	2547	XRCC6	1	13	0	0	0	#N/A
+Human	P14618	3 - unspecific	Pyruvate kinase isozymes M1/M2	KPYM_HUMAN	no	5315	PKM2	1	32	0	0	0	#N/A
+Human	P18077	3 - unspecific	60S ribosomal protein L35a	RL35A_HUMAN	no	6165	RPL35A	1	13	0	0	0	#N/A
+Human	P27348	3 - unspecific	14-3-3 protein theta	1433T_HUMAN	no	10971	YWHAQ	1	11	0	0	0	#N/A
+Human	P29692	3 - unspecific	Elongation factor 1-delta	EF1D_HUMAN	no	1936	EEF1D	1	4	0	0	0	#N/A
+Human	P32969	3 - unspecific	60S ribosomal protein L9	RL9_HUMAN	no	6133	RPL9	1	8	0	0	0	#N/A
+Human	P35579	3 - unspecific	Myosin-9	MYH9_HUMAN	no	4627	MYH9	1	20	0	0	0	#N/A
+Human	P39023	3 - unspecific	60S ribosomal protein L3	RL3_HUMAN	no	6122	RPL3	1	21	0	0	0	#N/A
+Human	P45880	3 - unspecific	Voltage-dependent anion-selective channel protein 2	VDAC2_HUMAN	no	7417	VDAC2	1	15	0	0	0	#N/A
+Human	P46778	3 - unspecific	60S ribosomal protein L21	RL21_HUMAN	no	6144	RPL21	1	8	0	0	0	#N/A
+Human	P48735	3 - unspecific	"Isocitrate dehydrogenase [NADP], mitochondrial"	IDHP_HUMAN	no	3418	IDH2	1	9	0	0	0	#N/A
+Human	P60174	3 - unspecific	Triosephosphate isomerase	TPIS_HUMAN	no	7167	TPI1	1	19	0	0	0	#N/A
+Human	P62266	3 - unspecific	40S ribosomal protein S23	RS23_HUMAN	no	6228	RPS23	1	13	0	0	0	#N/A
+Human	P62910	3 - unspecific	60S ribosomal protein L32	RL32_HUMAN	no	6161	RPL32	1	13	0	0	0	#N/A
+Human	P68104	3 - unspecific	Elongation factor 1-alpha 1	EF1A1_HUMAN	no	1915	EEF1A1	1	34	0	0	0	#N/A
+Human	P84098	3 - unspecific	60S ribosomal protein L19	RL19_HUMAN	no	6143	RPL19	1	8	0	0	0	#N/A
+Human	P84103	3 - unspecific	"Splicing factor, arginine/serine-rich 3"	SFRS3_HUMAN	no	6428	SFRS3	1	7	0	0	0	#N/A
+Human	Q07020	3 - unspecific	60S ribosomal protein L18	RL18_HUMAN	no	6141	RPL18	1	23	0	0	0	#N/A
+Human	Q15366	3 - unspecific	Poly(rC)-binding protein 2	PCBP2_HUMAN	no	5094	PCBP2	1	3	0	0	0	#N/A
+Human	Q92791	3 - unspecific	Synaptonemal complex protein SC65	SC65_HUMAN	no	10609	SC65	1	9	0	0	0	#N/A
+Human	Q9Y6N5	3 - unspecific	"Sulfide:quinone oxidoreductase, mitochondrial"	SQRD_HUMAN	no	58472	SQRDL	1	4	0	0	0	#N/A
+Human	P46779	3 - unspecific	60S ribosomal protein L28	RL28_HUMAN	no	6158	RPL28	0.9999	12	0	0	0	#N/A
+Human	P61513	3 - unspecific	60S ribosomal protein L37a	RL37A_HUMAN	no	6168	RPL37A	0.9999	12	0	0	0	#N/A
+Human	P62244	3 - unspecific	40S ribosomal protein S15a	RS15A_HUMAN	no	6210	RPS15A	0.9999	7	0	0	0	#N/A
+Human	Q00839	3 - unspecific	Heterogeneous nuclear ribonucleoprotein U	HNRPU_HUMAN	no	3192	HNRNPU	0.9999	15	0	0	0	#N/A
+Human	Q96AE7	3 - unspecific	Tetratricopeptide repeat protein 17	TTC17_HUMAN	no	55761	TTC17	0.9998	5	0	0	0	#N/A
+Human	P20718	3 - unspecific	Granzyme H	GRAH_HUMAN	no	2999	GZMH	0.9996	1	0	0	0	#N/A
+Human	P26599	3 - unspecific	Polypyrimidine tract-binding protein 1	PTBP1_HUMAN	no	5725	PTBP1	0.9996	2	0	0	0	#N/A
+Human	P11678	3 - unspecific	Eosinophil peroxidase	PERE_HUMAN	no	8288	EPX	0.9993	1	0	0	0	#N/A
+Human	P50454	3 - unspecific	Serpin H1	SERPH_HUMAN	no	871	SERPINH1	0.9989	18	0	0	0	#N/A
+Human	Q7Z2W4	3 - unspecific	Zinc finger CCCH-type antiviral protein 1	ZCCHV_HUMAN	no	56829	ZC3HAV1	0.9982	1	0	0	0	#N/A
+Human	P01876	3 - unspecific	Ig alpha-1 chain C region	IGHA1_HUMAN	no	3493	IGHA1	0.9975	4	0	0	0	#N/A
+Human	P16278	3 - unspecific	Beta-galactosidase	BGAL_HUMAN	no	2720	GLB1	0.9972	7	0	0	0	#N/A
+Human	P49746	3 - unspecific	Thrombospondin-3	TSP3_HUMAN	no	7059	THBS3	0.9972	1	0	0	0	#N/A
+Human	Q02083	3 - unspecific	N-acylethanolamine-hydrolyzing acid amidase	NAAA_HUMAN	no	27163	NAAA	0.9972	2	0	0	0	#N/A
+Human	Q5T4B2	3 - unspecific	Glycosyltransferase 25 family member 3	GT253_HUMAN	no	51148	CERCAM	0.9972	3	0	0	0	#N/A
+Human	Q9H173	3 - unspecific	Nucleotide exchange factor SIL1	SIL1_HUMAN	no	64374	SIL1	0.9972	6	0	0	0	#N/A
+Human	Q9H497	3 - unspecific	Torsin-3A	TOR3A_HUMAN	no	64222	TOR3A	0.9972	3	0	0	0	#N/A
+Human	P42766	3 - unspecific	60S ribosomal protein L35	RL35_HUMAN	no	11224	RPL35	0.9972	12	0	0	0	#N/A
+Human	P49588	3 - unspecific	"Alanyl-tRNA synthetase, cytoplasmic"	SYAC_HUMAN	no	16	AARS	0.9971	2	0	0	0	#N/A
+Human	O14773	3 - unspecific	Tripeptidyl-peptidase 1	TPP1_HUMAN	no	1200	TPP1	0.997	6	0	0	0	#N/A
+Human	Q9H1A3	3 - unspecific	Methyltransferase-like protein 9	METL9_HUMAN	no	51108	METTL9	0.997	4	0	0	0	#N/A
+Human	P14649	3 - unspecific	Myosin light chain 6B	MYL6B_HUMAN	no	140465	MYL6B	0.9968	5	0	0	0	#N/A
+Human	O60911	3 - unspecific	Cathepsin L2	CATL2_HUMAN	no	1515	CTSL2	0.9967	1	0	0	0	#N/A
+Human	Q9BZQ6	3 - unspecific	ER degradation-enhancing alpha-mannosidase-like 3	EDEM3_HUMAN	no	80267	EDEM3	0.9967	4	0	0	0	#N/A
+Human	O15460	3 - unspecific	Prolyl 4-hydroxylase subunit alpha-2	P4HA2_HUMAN	no	8974	P4HA2	0.9966	10	0	0	0	#N/A
+Human	O95302	3 - unspecific	Peptidyl-prolyl cis-trans isomerase FKBP9	FKBP9_HUMAN	no	11328	FKBP9	0.9966	6	0	0	0	#N/A
+Human	P07686	3 - unspecific	Beta-hexosaminidase subunit beta	HEXB_HUMAN	no	3074	HEXB	0.9966	5	0	0	0	#N/A
+Human	Q99623	3 - unspecific	Prohibitin-2	PHB2_HUMAN	no	11331	PHB2	0.9966	17	0	0	0	#N/A
+Human	P50897	3 - unspecific	Palmitoyl-protein thioesterase 1	PPT1_HUMAN	no	5538	PPT1	0.9964	5	0	0	0	#N/A
+Human	Q9Y2G5	3 - unspecific	GDP-fucose protein O-fucosyltransferase 2	OFUT2_HUMAN	no	23275	POFUT2	0.9964	5	0	0	0	#N/A
+Human	P07711	3 - unspecific	Cathepsin L1	CATL1_HUMAN	no	1514	CTSL1	0.9956	8	0	0	0	#N/A
+Human	P08236	3 - unspecific	Beta-glucuronidase	BGLR_HUMAN	no	2990	GUSB	0.9956	18	0	0	0	#N/A
+Human	P17050	3 - unspecific	Alpha-N-acetylgalactosaminidase	NAGAB_HUMAN	no	4668	NAGA	0.9956	2	0	0	0	#N/A
+Human	P43235	3 - unspecific	Cathepsin K	CATK_HUMAN	no	1513	CTSK	0.9956	2	0	0	0	#N/A
+Human	Q8NBK3	3 - unspecific	Sulfatase-modifying factor 1	SUMF1_HUMAN	no	285362	SUMF1	0.9956	8	0	0	0	#N/A
+Human	Q9NWM8	3 - unspecific	Peptidyl-prolyl cis-trans isomerase FKBP14	FKB14_HUMAN	no	55033	FKBP14	0.9956	1	0	0	0	#N/A
+Human	Q9NS25	3 - unspecific	Sperm protein associated with the nucleus on the X chromosome B/F	SPNXB_HUMAN	no	728695	SPANXB1	0.9956	3	0	0	0	#N/A
+Human	O14657	3 - unspecific	Torsin-1B	TOR1B_HUMAN	no	27348	TOR1B	0.9952	6	0	0	0	#N/A
+Human	P34059	3 - unspecific	N-acetylgalactosamine-6-sulfatase	GALNS_HUMAN	no	2588	GALNS	0.9952	1	0	0	0	#N/A
+Human	Q9NYU1	3 - unspecific	UDP-glucose:glycoprotein glucosyltransferase 2	UGGG2_HUMAN	no	55757	UGGT2	0.9952	1	0	0	0	#N/A
+Human	P46776	3 - unspecific	60S ribosomal protein L27a	RL27A_HUMAN	no	6157	RPL27A	0.9945	18	0	0	0	#N/A
+Human	P49915	3 - unspecific	GMP synthase [glutamine-hydrolyzing]	GUAA_HUMAN	no	8833	GMPS	0.9945	1	0	0	0	#N/A
+Human	P06865	3 - unspecific	Beta-hexosaminidase subunit alpha	HEXA_HUMAN	no	3073	HEXA	0.9943	9	0	0	0	#N/A
+Human	Q8IVL1	3 - unspecific	Neuron navigator 2	NAV2_HUMAN	no	89797	NAV2	0.994	1	0	0	0	#N/A
+Human	Q5D862	3 - unspecific	Filaggrin-2	FILA2_HUMAN	no	388698	FLG2	0.9937	1	0	0	0	#N/A
+Human	O00116	3 - unspecific	"Alkyldihydroxyacetonephosphate synthase, peroxisomal"	ADAS_HUMAN	no	8540	AGPS	0.9933	2	0	0	0	#N/A
+Human	P06280	3 - unspecific	Alpha-galactosidase A	AGAL_HUMAN	no	2717	GLA	0.993	3	0	0	0	#N/A
+Human	P15848	3 - unspecific	Arylsulfatase B	ARSB_HUMAN	no	411	ARSB	0.993	3	0	0	0	#N/A
+Human	P62316	3 - unspecific	Small nuclear ribonucleoprotein Sm D2	SMD2_HUMAN	no	6633	SNRPD2	0.9928	7	0	0	0	#N/A
+Human	A2BFH1	3 - unspecific	Peptidylprolyl cis-trans isomerase A-like 4A	PAL4A_HUMAN	no	164022	PPIAL4A	0.9924	3	0	0	0	#N/A
+Human	O76021	3 - unspecific	Ribosomal L1 domain-containing protein 1	RL1D1_HUMAN	no	26156	RSL1D1	0.9924	4	0	0	0	#N/A
+Human	P37802	3 - unspecific	Transgelin-2	TAGL2_HUMAN	no	8407	TAGLN2	0.992	4	0	0	0	#N/A
+Human	Q12931	3 - unspecific	"Heat shock protein 75 kDa, mitochondrial"	TRAP1_HUMAN	no	10131	TRAP1	0.992	5	0	0	0	#N/A
+Human	Q9UQ80	3 - unspecific	Proliferation-associated protein 2G4	PA2G4_HUMAN	no	5036	PA2G4	0.9919	13	0	0	0	#N/A
+Human	Q9UMR5	3 - unspecific	Lysosomal thioesterase PPT2	PPT2_HUMAN	no	9374	PPT2	0.9916	4	0	0	0	#N/A
+Human	O00567	3 - unspecific	Nucleolar protein 56	NOP56_HUMAN	no	10528	NOP56	0.9916	5	0	0	0	#N/A
+Human	Q9Y222	3 - unspecific	Cyclin-D-binding Myb-like transcription factor 1	DMTF1_HUMAN	no	9988	DMTF1	0.9913	14	0	0	0	#N/A
+Human	O14556	3 - unspecific	"Glyceraldehyde-3-phosphate dehydrogenase, testis-specific"	G3PT_HUMAN	no	26330	GAPDHS	0.9901	4	0	0	0	#N/A
+Human	P08246	3 - unspecific	Neutrophil elastase	ELNE_HUMAN	no	1991	ELANE	0.99	4	0	0	0	#N/A
+Human	P57721	3 - unspecific	Poly(rC)-binding protein 3	PCBP3_HUMAN	no	54039	PCBP3	0.99	3	0	0	0	#N/A
+Human	Q8IW19	3 - unspecific	Aprataxin and PNK-like factor	APLF_HUMAN	no	200558	APLF	0.9898	2	0	0	0	#N/A
+Human	P07900	3 - unspecific	Heat shock protein HSP 90-alpha	HS90A_HUMAN	no	3320	HSP90AA1	0.9886	9	0	0	0	#N/A
+Human	Q08AG5	3 - unspecific	Zinc finger protein 844	ZN844_HUMAN	no	284391	ZNF844	0.9837	15	0	0	0	#N/A
+Human	P46100	3 - unspecific	Transcriptional regulator ATRX	ATRX_HUMAN	no	546	ATRX	0.9784	1	0	0	0	#N/A
+Human	Q9GZY0	3 - unspecific	Nuclear RNA export factor 2	NXF2_HUMAN	no	56001	NXF2	0.9707	2	0	0	0	#N/A
+Human	P50991	3 - unspecific	T-complex protein 1 subunit delta	TCPD_HUMAN	no	10575	CCT4	0.9479	10	0	0	0	#N/A
+Human	Q9UKA4	3 - unspecific	A-kinase anchor protein 11	AKA11_HUMAN	no	11215	AKAP11	0.9451	7	0	0	0	#N/A
+Human	A8MYG8	3 - unspecific	Putative ankyrin repeat domain-containing protein ENSP00000383069	YN011_HUMAN	no	100132257	0	0.9442	1	0	0	0	#N/A
+Human	P18621	3 - unspecific	60S ribosomal protein L17	RL17_HUMAN	no	6139	RPL17	0.9423	5	0	0	0	#N/A
+Human	Q9UKM9	3 - unspecific	RNA-binding protein Raly	RALY_HUMAN	no	22913	RALY	0.9287	3	0	0	0	#N/A
+Human	Q9UK39	3 - unspecific	Nocturnin	NOCT_HUMAN	no	25819	CCRN4L	0.9252	1	0	0	0	#N/A
+Human	Q9NR09	3 - unspecific	Baculoviral IAP repeat-containing protein 6	BIRC6_HUMAN	no	57448	BIRC6	0.9208	19	0	0	0	#N/A
+Human	Q96A58	3 - unspecific	Ras-related and estrogen-regulated growth inhibitor	RERG_HUMAN	no	85004	RERG	0.92	2	0	0	0	#N/A
+Human	Q8N543	3 - unspecific	2-oxoglutarate and iron-dependent oxygenase domain-containing protein 1	OGFD1_HUMAN	no	55239	OGFOD1	0.9177	2	0	0	0	#N/A
+Human	Q07343	3 - unspecific	"cAMP-specific 3',5'-cyclic phosphodiesterase 4B"	PDE4B_HUMAN	no	5142	PDE4B	0.9064	19	0	0	0	#N/A
+Human	Q9NQ48	3 - unspecific	Leucine zipper transcription factor-like protein 1	LZTL1_HUMAN	no	54585	LZTFL1	0.9019	1	0	0	0	#N/A
+Human	Q9H1Z4	3 - unspecific	WD repeat-containing protein 13	WDR13_HUMAN	no	64743	WDR13	0.89	1	0	0	0	#N/A
+Human	P55210	3 - unspecific	Caspase-7	CASP7_HUMAN	no	840	CASP7	0.8093	1	0	0	0	#N/A
+Human	Q9Y520	3 - unspecific	Protein BAT2-like 2	BA2L2_HUMAN	no	23215	BAT2L2	0.8019	1	0	0	0	#N/A
+Human	Q96CB8	3 - unspecific	Integrator complex subunit 12	INT12_HUMAN	no	57117	INTS12	0.7931	1	0	0	0	#N/A
+Human	Q9Y5P6	3 - unspecific	Mannose-1-phosphate guanyltransferase beta	GMPPB_HUMAN	no	29925	GMPPB	0.7729	1	0	0	0	#N/A
+Human	Q9H330	2 - putative	Transmembrane protein C9orf5	CI005_HUMAN	no	23731	C9orf5	1	17	1	16	0	#N/A
+Human	O95477	2 - putative	ATP-binding cassette sub-family A member 1	ABCA1_HUMAN	no	19	ABCA1	1	18	1	14	0	#N/A
+Human	P30825	2 - putative	High affinity cationic amino acid transporter 1	CTR1_HUMAN	no	6541	SLC7A1	1	43	1	14	0	#N/A
+Human	P53794	2 - putative	Sodium/myo-inositol cotransporter	SC5A3_HUMAN	no	6526	SLC5A3	1	13	1	13	0	#N/A
+Human	Q8N697	2 - putative	Solute carrier family 15 member 4	S15A4_HUMAN	no	121260	SLC15A4	1	16	1	13	0	#N/A
+Human	A7MBM2	2 - putative	Protein dispatched homolog 2	DISP2_HUMAN	no	85455	DISP2	1	3	1	12	0	#N/A
+Human	O15439	2 - putative	Multidrug resistance-associated protein 4	MRP4_HUMAN	no	10257	ABCC4	1	4	1	12	0	#N/A
+Human	O15440	2 - putative	Multidrug resistance-associated protein 5	MRP5_HUMAN	no	10057	ABCC5	1	20	1	12	0	#N/A
+Human	O43306	2 - putative	Adenylate cyclase type 6	ADCY6_HUMAN	no	112	ADCY6	1	2	1	12	0	#N/A
+Human	O60266	2 - putative	Adenylate cyclase type 3	ADCY3_HUMAN	no	109	ADCY3	1	16	1	12	0	#N/A
+Human	O60503	2 - putative	Adenylate cyclase type 9	ADCY9_HUMAN	no	115	ADCY9	1	37	1	12	0	#N/A
+Human	O60779	2 - putative	Thiamine transporter 1	S19A2_HUMAN	no	10560	SLC19A2	1	28	1	12	0	#N/A
+Human	O75387	2 - putative	Large neutral amino acids transporter small subunit 3	LAT3_HUMAN	no	8501	SLC43A1	1	6	1	12	0	#N/A
+Human	P22732	2 - putative	"Solute carrier family 2, facilitated glucose transporter member 5"	GTR5_HUMAN	no	6518	SLC2A5	1	10	1	12	0	#N/A
+Human	P48029	2 - putative	Sodium- and chloride-dependent creatine transporter 1	SC6A8_HUMAN	no	6535	SLC6A8	1	15	1	12	0	#N/A
+Human	P48067	2 - putative	Sodium- and chloride-dependent glycine transporter 1	SC6A9_HUMAN	no	6536	SLC6A9	1	21	1	12	0	#N/A
+Human	P49281	2 - putative	Natural resistance-associated macrophage protein 2	NRAM2_HUMAN	no	4891	SLC11A2	1	32	1	12	0	#N/A
+Human	P55011	2 - putative	Solute carrier family 12 member 2	S12A2_HUMAN	no	6558	SLC12A2	1	35	1	12	0	#N/A
+Human	Q13635	2 - putative	Protein patched homolog 1	PTC1_HUMAN	no	5727	PTCH1	1	4	1	12	0	#N/A
+Human	Q16348	2 - putative	Solute carrier family 15 member 2	S15A2_HUMAN	no	6565	SLC15A2	1	1	1	12	0	#N/A
+Human	Q5BKX6	2 - putative	Solute carrier family 45 member 4	S45A4_HUMAN	no	57210	SLC45A4	1	7	1	12	0	#N/A
+Human	Q8NBI5	2 - putative	Solute carrier family 43 member 3	S43A3_HUMAN	no	29015	SLC43A3	1	31	1	12	0	#N/A
+Human	Q96QE2	2 - putative	Proton myo-inositol cotransporter	MYCT_HUMAN	no	114134	SLC2A13	1	9	1	12	0	#N/A
+Human	Q9H2J7	2 - putative	Orphan sodium- and chloride-dependent neurotransmitter transporter NTT73	S6A15_HUMAN	no	55117	SLC6A15	1	8	1	12	0	#N/A
+Human	Q9H2X9	2 - putative	Solute carrier family 12 member 5	S12A5_HUMAN	no	57468	SLC12A5	1	1	1	12	0	#N/A
+Human	Q9UMX9	2 - putative	Membrane-associated transporter protein	S45A2_HUMAN	no	51151	SLC45A2	1	1	1	12	0	#N/A
+Human	Q9UN76	2 - putative	Sodium- and chloride-dependent neutral and basic amino acid transporter B(0+)	S6A14_HUMAN	no	11254	SLC6A14	1	1	1	12	0	#N/A
+Human	P41440	2 - putative	Folate transporter 1	S19A1_HUMAN	no	6573	SLC19A1	1	34	1	11	0	#N/A
+Human	Q5T3F8	2 - putative	Transmembrane protein 63B	TM63B_HUMAN	no	55362	TMEM63B	1	11	1	11	0	#N/A
+Human	Q8IZM9	2 - putative	Probable sodium-coupled neutral amino acid transporter 6	S38A6_HUMAN	no	145389	SLC38A6	1	1	1	11	0	#N/A
+Human	Q8NBW4	2 - putative	Putative sodium-coupled neutral amino acid transporter 9	S38A9_HUMAN	no	153129	SLC38A9	1	2	1	11	0	#N/A
+Human	Q68DH5	2 - putative	LMBR1 domain-containing protein 2	LMBD2_HUMAN	no	92255	LMBRD2	1	8	1	10	0	#N/A
+Human	Q6YBV0	2 - putative	Proton-coupled amino acid transporter 4	S36A4_HUMAN	no	120103	SLC36A4	1	10	1	10	0	#N/A
+Human	Q8IWA5	2 - putative	Choline transporter-like protein 2	CTL2_HUMAN	no	57153	SLC44A2	1	47	1	10	0	#N/A
+Human	Q9BXS9	2 - putative	Solute carrier family 26 member 6	S26A6_HUMAN	no	65010	SLC26A6	1	11	1	10	0	#N/A
+Human	P43007	2 - putative	Neutral amino acid transporter A	SATT_HUMAN	no	6509	SLC1A4	1	43	1	9	0	#N/A
+Human	Q15758	2 - putative	Neutral amino acid transporter B(0)	AAAT_HUMAN	no	6510	SLC1A5	1	38	1	9	0	#N/A
+Human	P50443	2 - putative	Sulfate transporter	S26A2_HUMAN	no	1836	SLC26A2	1	27	1	8	0	#N/A
+Human	P43003	2 - putative	Excitatory amino acid transporter 1	EAA1_HUMAN	no	6507	SLC1A3	1	8	1	7	0	#N/A
+Human	Q6ZUK4	2 - putative	Transmembrane protein 26	TMM26_HUMAN	no	219623	TMEM26	1	5	1	7	0	#N/A
+Human	P29972	2 - putative	Aquaporin-1	AQP1_HUMAN	no	358	AQP1	1	5	1	6	0	#N/A
+Human	Q9C0K1	2 - putative	Zinc transporter ZIP8	S39A8_HUMAN	no	64116	SLC39A8	1	10	1	6	0	#N/A
+Human	O14524	2 - putative	Transmembrane protein 194A	T194A_HUMAN	no	23306	TMEM194A	1	7	1	5	0	#N/A
+Human	O95858	2 - putative	Tetraspanin-15	TSN15_HUMAN	no	23555	TSPAN15	1	13	1	5	0	#N/A
+Human	O14817	2 - putative	Tetraspanin-4	TSN4_HUMAN	no	7106	TSPAN4	1	6	1	4	0	#N/A
+Human	O43657	2 - putative	Tetraspanin-6	TSN6_HUMAN	no	7105	TSPAN6	1	20	1	4	0	#N/A
+Human	O60637	2 - putative	Tetraspanin-3	TSN3_HUMAN	no	10099	TSPAN3	1	40	1	4	0	#N/A
+Human	O95857	2 - putative	Tetraspanin-13	TSN13_HUMAN	no	27075	TSPAN13	1	21	1	4	0	#N/A
+Human	P19075	2 - putative	Tetraspanin-8	TSN8_HUMAN	no	7103	TSPAN8	1	14	1	4	0	#N/A
+Human	P54849	2 - putative	Epithelial membrane protein 1	EMP1_HUMAN	no	2012	EMP1	1	16	1	4	0	#N/A
+Human	Q6P9F7	2 - putative	Leucine-rich repeat-containing protein 8B	LRC8B_HUMAN	no	23507	LRRC8B	1	9	1	4	0	#N/A
+Human	Q86UF1	2 - putative	Tetraspanin-33	TSN33_HUMAN	no	340348	TSPAN33	1	6	1	4	0	#N/A
+Human	Q8IWT6	2 - putative	Leucine-rich repeat-containing protein 8A	LRC8A_HUMAN	no	56262	LRRC8A	1	23	1	4	0	#N/A
+Human	Q8TDW0	2 - putative	Leucine-rich repeat-containing protein 8C	LRC8C_HUMAN	no	84230	LRRC8C	1	5	1	4	0	#N/A
+Human	P54852	2 - putative	Epithelial membrane protein 3	EMP3_HUMAN	no	2014	EMP3	1	32	1	3	0	#N/A
+Human	Q7Z7N9	2 - putative	Transmembrane protein 179B	T179B_HUMAN	no	374395	TMEM179B	1	2	1	3	0	#N/A
+Human	Q9NY35	2 - putative	Claudin domain-containing protein 1	CLDN1_HUMAN	no	56650	CLDND1	1	46	1	3	0	#N/A
+Human	Q3MIR4	2 - putative	Cell cycle control protein 50B	CC50B_HUMAN	no	161291	TMEM30B	1	1	1	2	0	#N/A
+Human	Q92545	2 - putative	Transmembrane protein 131	TM131_HUMAN	no	23505	TMEM131	1	5	1	2	0	#N/A
+Human	Q9H813	2 - putative	Transmembrane protein 206	TM206_HUMAN	no	55248	TMEM206	1	39	1	2	0	#N/A
+Human	Q9HCM3	2 - putative	UPF0606 protein KIAA1549	K1549_HUMAN	no	57670	KIAA1549	1	8	1	2	0	#N/A
+Human	Q9NV96	2 - putative	Cell cycle control protein 50A	CC50A_HUMAN	no	55754	TMEM30A	1	34	1	2	0	#N/A
+Human	Q9NWD8	2 - putative	UPF0458 protein C7orf42	CG042_HUMAN	no	55069	C7orf42	1	13	1	2	0	#N/A
+Human	A2RU67	2 - putative	Uncharacterized protein KIAA1467	K1467_HUMAN	no	57613	KIAA1467	1	6	1	1	0	#N/A
+Human	P01848	2 - putative	T-cell receptor alpha chain C region	TCA_HUMAN	no	28755	TRAC	1	3	1	1	0	#N/A
+Human	P01850	2 - putative	T-cell receptor beta chain C region	TCB_HUMAN	no	28639	TRBC1	1	3	1	1	0	#N/A
+Human	P01908	2 - putative	"HLA class II histocompatibility antigen, DQ(1) alpha chain"	HA21_HUMAN	no	0	0	1	8	1	1	0	#N/A
+Human	Q06643	2 - putative	Lymphotoxin-beta	TNFC_HUMAN	no	4050	LTB	1	2	1	1	0	#N/A
+Human	Q58DX5	2 - putative	Inactive N-acetylated-alpha-linked acidic dipeptidase-like protein 2	NADL2_HUMAN	no	254827	NAALADL2	1	3	1	1	0	#N/A
+Human	Q68CR1	2 - putative	Protein sel-1 homolog 3	SE1L3_HUMAN	no	23231	SEL1L3	1	7	1	1	0	#N/A
+Human	Q6N022	2 - putative	Teneurin-4	TEN4_HUMAN	no	26011	ODZ4	1	10	1	1	0	#N/A
+Human	Q6NSJ0	2 - putative	Uncharacterized family 31 glucosidase KIAA1161	K1161_HUMAN	no	57462	KIAA1161	1	10	1	1	0	#N/A
+Human	Q6P4E1	2 - putative	Protein CASC4	CASC4_HUMAN	no	113201	CASC4	1	26	1	1	0	#N/A
+Human	Q8NC01	2 - putative	C-type lectin domain family 1 member A	CLC1A_HUMAN	no	51267	CLEC1A	1	1	1	1	0	#N/A
+Human	Q96BZ4	2 - putative	Phospholipase D4	PLD4_HUMAN	no	122618	PLD4	1	5	1	1	0	#N/A
+Human	Q9H0X4	2 - putative	Protein ITFG3	ITFG3_HUMAN	no	83986	ITFG3	1	46	1	1	0	#N/A
+Human	Q9H1C3	2 - putative	Glycosyltransferase 8 domain-containing protein 2	GL8D2_HUMAN	no	83468	GLT8D2	1	2	1	1	0	#N/A
+Human	Q9HDC9	2 - putative	Adipocyte plasma membrane-associated protein	APMAP_HUMAN	no	57136	APMAP	1	26	1	1	0	#N/A
+Human	Q9NUM4	2 - putative	Transmembrane protein 106B	T106B_HUMAN	no	54664	TMEM106B	1	13	1	1	0	#N/A
+Human	Q9NX62	2 - putative	Inositol monophosphatase 3	IMPA3_HUMAN	no	54928	IMPAD1	1	13	1	1	0	#N/A
+Human	Q9NZS2	2 - putative	Killer cell lectin-like receptor subfamily F member 1	KLRF1_HUMAN	no	51348	KLRF1	1	1	1	1	0	#N/A
+Human	Q9P273	2 - putative	Teneurin-3	TEN3_HUMAN	no	55714	ODZ3	1	23	1	1	0	#N/A
+Human	Q9UHN6	2 - putative	Transmembrane protein 2	TMEM2_HUMAN	no	23670	TMEM2	1	36	1	1	0	#N/A
+Human	Q9Y5L3	2 - putative	Ectonucleoside triphosphate diphosphohydrolase 2	ENTP2_HUMAN	no	954	ENTPD2	1	3	1	1	0	#N/A
+Human	Q9Y5Y6	2 - putative	Suppressor of tumorigenicity 14 protein	ST14_HUMAN	no	6768	ST14	1	5	1	1	0	#N/A
+Human	Q9Y6H6	2 - putative	Potassium voltage-gated channel subfamily E member 3	KCNE3_HUMAN	no	10008	KCNE3	1	3	1	1	0	#N/A
+Human	O76082	2 - putative	Solute carrier family 22 member 5	S22A5_HUMAN	no	6584	SLC22A5	0.9999	36	1	12	0	#N/A
+Human	O94886	2 - putative	Transmembrane protein 63A	TM63A_HUMAN	no	9725	TMEM63A	0.9999	4	1	9	0	#N/A
+Human	Q9P2C4	2 - putative	Transmembrane protein 181	TM181_HUMAN	no	57583	TMEM181	0.9996	16	1	8	0	#N/A
+Human	Q9UKU6	2 - putative	Thyrotropin-releasing hormone-degrading ectoenzyme	TRHDE_HUMAN	no	29953	TRHDE	0.9991	1	1	1	0	#N/A
+Human	O96005	2 - putative	Cleft lip and palate transmembrane protein 1	CLPT1_HUMAN	no	1209	CLPTM1	0.9988	20	1	5	0	#N/A
+Human	Q8IYP9	2 - putative	Probable palmitoyltransferase ZDHHC23	ZDH23_HUMAN	no	254887	ZDHHC23	0.998	1	1	6	0	#N/A
+Human	Q9BXT2	2 - putative	Voltage-dependent calcium channel gamma-6 subunit	CCG6_HUMAN	no	59285	CACNG6	0.9972	3	1	4	0	#N/A
+Human	P22314	2 - putative	Ubiquitin-like modifier-activating enzyme 1	UBA1_HUMAN	no	7317	UBA1	0.9972	3	1	1	0	#N/A
+Human	Q9H015	2 - putative	Solute carrier family 22 member 4	S22A4_HUMAN	no	6583	SLC22A4	0.9971	7	1	12	0	#N/A
+Human	Q12999	2 - putative	Tetraspanin-31	TSN31_HUMAN	no	6302	TSPAN31	0.9967	3	1	4	0	#N/A
+Human	Q7Z388	2 - putative	Protein dpy-19 homolog 4	D19L4_HUMAN	no	286148	DPY19L4	0.9964	4	1	12	0	#N/A
+Human	P13866	2 - putative	Sodium/glucose cotransporter 1	SC5A1_HUMAN	no	6523	SLC5A1	0.996	1	1	14	0	#N/A
+Human	Q8WY22	2 - putative	BRI3-binding protein	BRI3B_HUMAN	no	140707	BRI3BP	0.996	2	1	3	0	#N/A
+Human	Q8NE00	2 - putative	Transmembrane protein 104	TM104_HUMAN	no	54868	TMEM104	0.9957	1	1	9	0	#N/A
+Human	O43462	2 - putative	Membrane-bound transcription factor site-2 protease	MBTP2_HUMAN	no	51360	MBTPS2	0.9957	7	1	7	0	#N/A
+Human	P51788	2 - putative	Chloride channel protein 2	CLCN2_HUMAN	no	1181	CLCN2	0.9952	7	1	12	0	#N/A
+Human	Q9NRM0	2 - putative	"Solute carrier family 2, facilitated glucose transporter member 9"	GTR9_HUMAN	no	56606	SLC2A9	0.9949	2	1	12	0	#N/A
+Human	Q99250	2 - putative	Sodium channel protein type 2 subunit alpha	SCN2A_HUMAN	no	6326	SCN2A	0.9946	3	1	22	0	#N/A
+Human	A1A5C7	2 - putative	Solute carrier family 22 member 23	S22AN_HUMAN	no	63027	SLC22A23	0.9946	4	1	11	0	#N/A
+Human	A6NKL6	2 - putative	Transmembrane protein TTMA	TTMA_HUMAN	no	645369	TTMA	0.9946	3	1	2	0	#N/A
+Human	Q14DG7	2 - putative	Transmembrane protein 132B	T132B_HUMAN	no	114795	TMEM132B	0.9946	3	1	1	0	#N/A
+Human	Q04941	2 - putative	Proteolipid protein 2	PLP2_HUMAN	no	5355	PLP2	0.9943	11	1	4	0	#N/A
+Human	Q99571	2 - putative	P2X purinoceptor 4	P2RX4_HUMAN	no	5025	P2RX4	0.9942	12	1	2	0	#N/A
+Human	Q9BZC7	2 - putative	ATP-binding cassette sub-family A member 2	ABCA2_HUMAN	no	20	ABCA2	0.994	6	1	14	0	#N/A
+Human	Q9P1W3	2 - putative	Transmembrane protein 63C	TM63C_HUMAN	no	57156	TMEM63C	0.994	4	1	9	0	#N/A
+Human	Q8NCS7	2 - putative	Choline transporter-like protein 5	CTL5_HUMAN	no	204962	SLC44A5	0.9934	1	1	9	0	#N/A
+Human	Q8NG11	2 - putative	Tetraspanin-14	TSN14_HUMAN	no	81619	TSPAN14	0.9934	2	1	4	0	#N/A
+Human	Q9P126	2 - putative	C-type lectin domain family 1 member B	CLC1B_HUMAN	no	51266	CLEC1B	0.9934	2	1	1	0	#N/A
+Human	Q92887	2 - putative	Canalicular multispecific organic anion transporter 1	MRP2_HUMAN	no	1244	ABCC2	0.9933	6	1	16	0	#N/A
+Human	Q6ZS10	2 - putative	C-type lectin and transmembrane domain-containing protein FLJ45910	YS008_HUMAN	no	388512	0	0.9928	1	1	1	0	#N/A
+Human	Q96T54	2 - putative	Potassium channel subfamily K member 17	KCNKH_HUMAN	no	89822	KCNK17	0.9927	1	1	6	0	#N/A
+Human	O75071	2 - putative	EF-hand domain-containing protein KIAA0494	K0494_HUMAN	no	9813	KIAA0494	0.9924	5	1	1	0	#N/A
+Human	P48066	2 - putative	Sodium- and chloride-dependent GABA transporter 3	S6A11_HUMAN	no	6538	SLC6A11	0.9922	1	1	12	0	#N/A
+Human	Q12767	2 - putative	Uncharacterized protein KIAA0195	K0195_HUMAN	no	9772	KIAA0195	0.9921	9	1	10	0	#N/A
+Human	O43688	2 - putative	Lipid phosphate phosphohydrolase 2	LPP2_HUMAN	no	8612	PPAP2C	0.992	17	1	6	0	#N/A
+Human	Q5KU26	2 - putative	Collectin-12	COL12_HUMAN	no	81035	COLEC12	0.9919	18	1	1	0	#N/A
+Human	Q12809	2 - putative	Potassium voltage-gated channel subfamily H member 2	KCNH2_HUMAN	no	3757	KCNH2	0.9916	1	1	5	0	#N/A
+Human	Q30167	2 - putative	"HLA class II histocompatibility antigen, DR-1 beta chain"	HB2C_HUMAN	no	0	0	0.991	2	1	1	0	#N/A
+Human	Q9H5K3	2 - putative	Protein kinase-like protein SgK196	SG196_HUMAN	no	84197	SGK196	0.9909	1	1	1	0	#N/A
+Human	Q96SJ8	2 - putative	Tetraspanin-18	TSN18_HUMAN	no	90139	TSPAN18	0.9908	2	1	4	0	#N/A
+Human	P23975	2 - putative	Sodium-dependent noradrenaline transporter	SC6A2_HUMAN	no	6530	SLC6A2	0.9901	2	1	12	0	#N/A
+Human	Q7Z402	2 - putative	Transmembrane channel-like protein 7	TMC7_HUMAN	no	79905	TMC7	0.99	2	1	9	0	#N/A
+Human	Q96KA5	2 - putative	Cleft lip and palate transmembrane protein 1-like protein	CLP1L_HUMAN	no	81037	CLPTM1L	0.99	3	1	6	0	#N/A
+Human	Q69YZ2	2 - putative	Transmembrane protein 200B	T200B_HUMAN	no	399474	TMEM200B	0.9893	3	1	2	0	#N/A
+Human	Q9H5I5	2 - putative	Protein FAM38B	FA38B_HUMAN	no	63895	FAM38B	0.9892	1	1	4	0	#N/A
+Human	Q8IX19	2 - putative	Mast cell-expressed membrane protein 1	MCEM1_HUMAN	no	199675	MCEMP1	0.9886	1	1	1	0	#N/A
+Human	P81408	2 - putative	Protein FAM189B	F189B_HUMAN	no	10712	FAM189B	0.9884	7	1	4	0	#N/A
+Human	O60636	2 - putative	Tetraspanin-2	TSN2_HUMAN	no	10100	TSPAN2	0.9872	3	1	4	0	#N/A
+Human	P54851	2 - putative	Epithelial membrane protein 2	EMP2_HUMAN	no	2013	EMP2	0.9861	3	1	3	0	#N/A
+Human	P51575	2 - putative	P2X purinoceptor 1	P2RX1_HUMAN	no	5023	P2RX1	0.9859	2	1	2	0	#N/A
+Human	Q9Y210	2 - putative	Short transient receptor potential channel 6	TRPC6_HUMAN	no	7225	TRPC6	0.9856	2	1	8	0	#N/A
+Human	P51828	2 - putative	Adenylate cyclase type 7	ADCY7_HUMAN	no	113	ADCY7	0.9845	3	1	12	0	#N/A
+Human	P52569	2 - putative	Low affinity cationic amino acid transporter 2	CTR2_HUMAN	no	6542	SLC7A2	0.9831	8	1	14	0	#N/A
+Human	Q8IZA0	2 - putative	Uncharacterized protein KIAA0319-like	K319L_HUMAN	no	79932	KIAA0319L	0.9831	7	1	2	0	#N/A
+Human	Q8N468	2 - putative	Major facilitator superfamily domain-containing protein 4	MFSD4_HUMAN	no	148808	MFSD4	0.9699	1	1	12	0	#N/A
+Human	Q01118	2 - putative	Sodium channel protein type 7 subunit alpha	SCN7A_HUMAN	no	6332	SCN7A	0.9698	2	1	21	0	#N/A
+Human	Q5SGD2	2 - putative	Protein phosphatase 1L	PPM1L_HUMAN	no	151742	PPM1L	0.9646	4	1	1	0	#N/A
+Human	Q8N614	2 - putative	Transmembrane protein 156	TM156_HUMAN	no	80008	TMEM156	0.96	2	1	2	0	#N/A
+Human	Q9ULH0	2 - putative	Kinase D-interacting substrate of 220 kDa	KDIS_HUMAN	no	57498	KIDINS220	0.9547	1	1	4	0	#N/A
+Human	O75954	2 - putative	Tetraspanin-9	TSN9_HUMAN	no	10867	TSPAN9	0.9506	2	1	4	0	#N/A
+Human	Q15413	2 - putative	Ryanodine receptor 3	RYR3_HUMAN	no	6263	RYR3	0.94	8	1	7	0	#N/A
+Human	P56180	2 - putative	Putative tyrosine-protein phosphatase TPTE	TPTE_HUMAN	no	7179	TPTE	0.904	1	1	4	0	#N/A
+Human	P37059	2 - putative	Estradiol 17-beta-dehydrogenase 2	DHB2_HUMAN	no	3294	HSD17B2	0.9033	1	1	1	0	#N/A
+Human	P04920	2 - putative	Anion exchange protein 2	B3A2_HUMAN	no	6522	SLC4A2	0.88	1	1	13	0	#N/A
+Human	Q7Z3F1	2 - putative	Integral membrane protein GPR155	GP155_HUMAN	no	151556	GPR155	0.82	6	1	17	0	#N/A
+Human	P46977	2 - putative	Dolichyl-diphosphooligosaccharide--protein glycosyltransferase subunit STT3A	STT3A_HUMAN	no	3703	STT3A	1	27	1	13	0	#N/A
+Human	Q8TCJ2	2 - putative	Dolichyl-diphosphooligosaccharide--protein glycosyltransferase subunit STT3B	STT3B_HUMAN	no	201595	STT3B	1	34	1	13	0	#N/A
+Human	Q8IVB4	2 - putative	Sodium/hydrogen exchanger 9	SL9A9_HUMAN	no	285195	SLC9A9	1	2	1	12	0	#N/A
+Human	Q9UKY4	2 - putative	Protein O-mannosyl-transferase 2	POMT2_HUMAN	no	29954	POMT2	1	3	1	12	0	#N/A
+Human	Q9BU23	2 - putative	Lipase maturation factor 2	LMF2_HUMAN	no	91289	LMF2	1	11	1	11	0	#N/A
+Human	Q68CP4	2 - putative	Heparan-alpha-glucosaminide N-acetyltransferase	HGNAT_HUMAN	no	138050	HGSNAT	1	10	1	11	0	#N/A
+Human	Q9Y6A1	2 - putative	Protein O-mannosyl-transferase 1	POMT1_HUMAN	no	10585	POMT1	1	6	1	11	0	#N/A
+Human	Q9NRX5	2 - putative	Serine incorporator 1	SERC1_HUMAN	no	57515	SERINC1	1	14	1	10	0	#N/A
+Human	Q9NUN5	2 - putative	Probable lysosomal cobalamin transporter	LMBD1_HUMAN	no	55788	LMBRD1	1	22	1	9	0	#N/A
+Human	Q93050	2 - putative	V-type proton ATPase 116 kDa subunit a isoform 1	VPP1_HUMAN	no	535	ATP6V0A1	1	18	1	8	0	#N/A
+Human	Q6ZMG9	2 - putative	LAG1 longevity assurance homolog 6	LASS6_HUMAN	no	253782	LASS6	1	2	1	7	0	#N/A
+Human	P38435	2 - putative	Vitamin K-dependent gamma-carboxylase	VKGC_HUMAN	no	2677	GGCX	1	3	1	6	0	#N/A
+Human	Q8WTR4	2 - putative	Glycerophosphodiester phosphodiesterase domain-containing protein 5	GDPD5_HUMAN	no	81544	GDPD5	1	7	1	6	0	#N/A
+Human	Q7Z3C6	2 - putative	Autophagy-related protein 9A	ATG9A_HUMAN	no	79065	ATG9A	1	29	1	4	0	#N/A
+Human	Q16563	2 - putative	Synaptophysin-like protein 1	SYPL1_HUMAN	no	6856	SYPL1	1	42	1	3	0	#N/A
+Human	Q96G97	2 - putative	Seipin	BSCL2_HUMAN	no	26580	BSCL2	1	3	1	3	0	#N/A
+Human	Q9NQC3	2 - putative	Reticulon-4	RTN4_HUMAN	no	57142	RTN4	1	10	1	3	0	#N/A
+Human	Q3T906	2 - putative	N-acetylglucosamine-1-phosphotransferase subunits alpha/beta	GNPTA_HUMAN	no	79158	GNPTAB	1	21	1	2	0	#N/A
+Human	Q14108	2 - putative	Lysosome membrane protein 2	SCRB2_HUMAN	no	950	SCARB2	1	34	1	1	0	#N/A
+Human	Q6AZY7	2 - putative	Scavenger receptor class A member 3	SCAR3_HUMAN	no	51435	SCARA3	1	6	1	1	0	#N/A
+Human	Q8IV08	2 - putative	Phospholipase D3	PLD3_HUMAN	no	23646	PLD3	1	23	1	1	0	#N/A
+Human	O00461	2 - putative	Golgi integral membrane protein 4	GOLI4_HUMAN	no	27333	GOLIM4	1	13	1	1	0	#N/A
+Human	O43909	2 - putative	Exostosin-like 3	EXTL3_HUMAN	no	2137	EXTL3	1	6	1	1	0	#N/A
+Human	O75396	2 - putative	Vesicle-trafficking protein SEC22b	SC22B_HUMAN	no	9554	SEC22B	1	6	1	1	0	#N/A
+Human	P09172	2 - putative	Dopamine beta-hydroxylase	DOPO_HUMAN	no	1621	DBH	1	1	1	1	0	#N/A
+Human	P21333	2 - putative	Filamin-A	FLNA_HUMAN	no	2316	FLNA	1	21	1	1	0	#N/A
+Human	P49641	2 - putative	Alpha-mannosidase 2x	MA2A2_HUMAN	no	4122	MAN2A2	1	4	1	1	0	#N/A
+Human	Q09328	2 - putative	"Alpha-1,6-mannosylglycoprotein 6-beta-N-acetylglucosaminyltransferase A"	MGT5A_HUMAN	no	4249	MGAT5	1	10	1	1	0	#N/A
+Human	Q16706	2 - putative	Alpha-mannosidase 2	MA2A1_HUMAN	no	4124	MAN2A1	1	10	1	1	0	#N/A
+Human	Q70UQ0	2 - putative	Inhibitor of nuclear factor kappa-B kinase-interacting protein	IKIP_HUMAN	no	121457	IKIP	1	11	1	1	0	#N/A
+Human	Q96AQ6	2 - putative	Pre-B-cell leukemia transcription factor-interacting protein 1	PBIP1_HUMAN	no	57326	PBXIP1	1	8	1	1	0	#N/A
+Human	Q9NPC4	2 - putative	Lactosylceramide 4-alpha-galactosyltransferase	A4GAT_HUMAN	no	53947	A4GALT	1	1	1	1	0	#N/A
+Human	Q9NRB3	2 - putative	Carbohydrate sulfotransferase 12	CHSTC_HUMAN	no	55501	CHST12	1	11	1	1	0	#N/A
+Human	Q9NY97	2 - putative	"UDP-GlcNAc:betaGal beta-1,3-N-acetylglucosaminyltransferase 2"	B3GN2_HUMAN	no	10678	B3GNT2	1	10	1	1	0	#N/A
+Human	Q9Y274	2 - putative	"Type 2 lactosamine alpha-2,3-sialyltransferase"	SIA10_HUMAN	no	10402	ST3GAL6	1	3	1	1	0	#N/A
+Human	P51797	2 - putative	Chloride transport protein 6	CLCN6_HUMAN	no	1185	CLCN6	0.9998	1	1	12	0	#N/A
+Human	Q4ZIN3	2 - putative	Membralin	MBRL_HUMAN	no	91304	C19orf6	0.9972	9	1	6	0	#N/A
+Human	Q96G23	2 - putative	LAG1 longevity assurance homolog 2	LASS2_HUMAN	no	29956	LASS2	0.997	5	1	6	0	#N/A
+Human	Q9H5J4	2 - putative	Elongation of very long chain fatty acids protein 6	ELOV6_HUMAN	no	79071	ELOVL6	0.9967	1	1	7	0	#N/A
+Human	Q5H8A4	2 - putative	GPI ethanolamine phosphate transferase 2	PIGG_HUMAN	no	54872	PIGG	0.9957	2	1	13	0	#N/A
+Human	Q9NQZ7	2 - putative	Ectonucleoside triphosphate diphosphohydrolase 7	ENTP7_HUMAN	no	57089	ENTPD7	0.9957	2	1	2	0	#N/A
+Human	Q7LGC8	2 - putative	Carbohydrate sulfotransferase 3	CHST3_HUMAN	no	9469	CHST3	0.9957	1	1	1	0	#N/A
+Human	Q8WVQ1	2 - putative	Soluble calcium-activated nucleotidase 1	CANT1_HUMAN	no	124583	CANT1	0.9957	2	1	1	0	#N/A
+Human	Q99941	2 - putative	Cyclic AMP-dependent transcription factor ATF-6 beta	ATF6B_HUMAN	no	1388	ATF6B	0.9957	1	1	1	0	#N/A
+Human	O95427	2 - putative	GPI ethanolamine phosphate transferase 1	PIGN_HUMAN	no	23556	PIGN	0.9956	3	1	15	0	#N/A
+Human	Q75T13	2 - putative	GPI inositol-deacylase	PGAP1_HUMAN	no	80055	PGAP1	0.9956	5	1	8	0	#N/A
+Human	Q12770	2 - putative	Sterol regulatory element-binding protein cleavage-activating protein	SCAP_HUMAN	no	22937	SCAP	0.9956	12	1	7	0	#N/A
+Human	Q13563	2 - putative	Polycystin-2	PKD2_HUMAN	no	5311	PKD2	0.9952	2	1	7	0	#N/A
+Human	O60931	2 - putative	Cystinosin	CTNS_HUMAN	no	1497	CTNS	0.9952	7	1	7	0	#N/A
+Human	Q96S52	2 - putative	GPI transamidase component PIG-S	PIGS_HUMAN	no	94005	PIGS	0.9952	22	1	2	0	#N/A
+Human	Q8IY17	2 - putative	Neuropathy target esterase	PLPL6_HUMAN	no	10908	PNPLA6	0.9952	1	1	1	0	#N/A
+Human	Q96T83	2 - putative	Sodium/hydrogen exchanger 7	SL9A7_HUMAN	no	84679	SLC9A7	0.9946	31	1	13	0	#N/A
+Human	O60635	2 - putative	Tetraspanin-1	TSN1_HUMAN	no	10103	TSPAN1	0.9946	1	1	4	0	#N/A
+Human	P28845	2 - putative	Corticosteroid 11-beta-dehydrogenase isozyme 1	DHI1_HUMAN	no	3290	HSD11B1	0.9942	1	1	1	0	#N/A
+Human	Q12797	2 - putative	Aspartyl/asparaginyl beta-hydroxylase	ASPH_HUMAN	no	444	ASPH	0.9942	22	1	1	0	#N/A
+Human	Q8NHS3	2 - putative	Major facilitator superfamily domain-containing protein 8	MFSD8_HUMAN	no	256471	MFSD8	0.994	5	1	12	0	#N/A
+Human	Q9Y2C2	2 - putative	Uronyl 2-sulfotransferase	UST_HUMAN	no	10090	UST	0.994	4	1	1	0	#N/A
+Human	Q14643	2 - putative	"Inositol 1,4,5-trisphosphate receptor type 1"	ITPR1_HUMAN	no	3708	ITPR1	0.9937	4	1	7	0	#N/A
+Human	Q8WWZ7	2 - putative	ATP-binding cassette sub-family A member 5	ABCA5_HUMAN	no	23461	ABCA5	0.993	3	1	16	0	#N/A
+Human	Q9BVX2	2 - putative	Transmembrane protein 106C	T106C_HUMAN	no	79022	TMEM106C	0.9928	2	1	2	0	#N/A
+Human	Q13286	2 - putative	Battenin	CLN3_HUMAN	no	1201	CLN3	0.9872	2	1	9	0	#N/A
+Human	Q3V5L5	2 - putative	"Alpha-1,6-mannosylglycoprotein 6-beta-N-acetylglucosaminyltransferase B"	MGT5B_HUMAN	no	146664	MGAT5B	0.9854	2	1	1	0	#N/A
+Human	Q7Z2K6	2 - putative	Endoplasmic reticulum metallopeptidase 1	ERMP1_HUMAN	no	79956	ERMP1	0.9853	6	1	10	0	#N/A
+Human	Q9UNP4	2 - putative	"Lactosylceramide alpha-2,3-sialyltransferase"	SIAT9_HUMAN	no	8869	ST3GAL5	0.9848	2	1	1	0	#N/A
+Human	Q8NCW6	2 - putative	Polypeptide N-acetylgalactosaminyltransferase 11	GLT11_HUMAN	no	63917	GALNT11	0.9805	4	1	1	0	#N/A
+Human	Q14573	2 - putative	"Inositol 1,4,5-trisphosphate receptor type 3"	ITPR3_HUMAN	no	3710	ITPR3	0.9771	3	1	7	0	#N/A
+Human	Q8NFQ8	2 - putative	Torsin-1A-interacting protein 2	TOIP2_HUMAN	no	163590	TOR1AIP2	0.9586	12	1	1	0	#N/A
+Human	Q9GZR5	2 - putative	Elongation of very long chain fatty acids protein 4	ELOV4_HUMAN	no	6785	ELOVL4	0.9533	8	1	7	0	#N/A
+Human	Q8WXF7	2 - putative	Atlastin-1	ATLA1_HUMAN	no	51062	ATL1	0.9466	4	1	2	0	#N/A
+Human	Q8IY34	2 - putative	Solute carrier family 15 member 3	S15A3_HUMAN	no	51296	SLC15A3	0.8789	1	1	12	0	#N/A
+Human	P10253	2 - putative	Lysosomal alpha-glucosidase	LYAG_HUMAN	no	2548	GAA	1	10	1	1	0	#N/A
+Human	Q9NYU2	2 - putative	UDP-glucose:glycoprotein glucosyltransferase 1	UGGG1_HUMAN	no	56886	UGGT1	1	3	1	1	0	#N/A
+Human	Q8NC56	2 - putative	LEM domain-containing protein 2	LEMD2_HUMAN	no	221496	LEMD2	1	3	1	2	0	#N/A
+Human	Q9UNW1	2 - putative	Multiple inositol polyphosphate phosphatase 1	MINP1_HUMAN	no	9562	MINPP1	0.9972	3	1	2	0	#N/A
+Human	P17405	2 - putative	Sphingomyelin phosphodiesterase	ASM_HUMAN	no	6609	SMPD1	0.9957	1	1	1	0	#N/A
+Human	P51690	2 - putative	Arylsulfatase E	ARSE_HUMAN	no	415	ARSE	0.9952	2	1	2	0	#N/A
+Human	O75503	2 - putative	Ceroid-lipofuscinosis neuronal protein 5	CLN5_HUMAN	no	1203	CLN5	0.9944	2	1	1	0	#N/A
+Human	Q9UH99	2 - putative	Protein unc-84 homolog B	UN84B_HUMAN	no	25777	UNC84B	0.9943	21	1	3	0	#N/A
+Human	Q5JTV8	2 - putative	Torsin-1A-interacting protein 1	TOIP1_HUMAN	no	26092	TOR1AIP1	0.9555	2	1	1	0	#N/A
+Human	P09110	2 - putative	"3-ketoacyl-CoA thiolase, peroxisomal"	THIK_HUMAN	no	30	ACAA1	0.9305	3	1	1	0	#N/A
+Human	O94901	2 - putative	Protein unc-84 homolog A	UN84A_HUMAN	no	23353	UNC84A	0.9155	8	1	2	0	#N/A

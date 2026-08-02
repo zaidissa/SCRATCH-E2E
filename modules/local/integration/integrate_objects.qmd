@@ -1,0 +1,267 @@
+---
+title: "SCRATCH-E2E — Master object integration"
+execute:
+  freeze: false
+  cache: false
+  warning: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 3
+    embed-resources: true
+    code-fold: true
+    fig-format: png
+    fig-dpi: 300
+    fig-align: center
+params:
+  seurat_object: null
+  project_name: "project"
+  stage_inputs: "stage_inputs"
+  work_directory: "."
+  celltype_col: "celltype"
+  sample_col: "sample_id"
+  condition_col: "condition"
+  seed: 1234
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r setup, include = FALSE}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(Matrix)
+  library(data.table)
+  library(ggplot2)
+})
+
+set.seed(params$seed)
+if (!is.null(params$work_directory) && dir.exists(params$work_directory)) {
+  setwd(params$work_directory)
+}
+
+dir.create("data",    showWarnings = FALSE, recursive = TRUE)
+dir.create("figures", showWarnings = FALSE, recursive = TRUE)
+
+stage_root <- params$stage_inputs
+```
+
+## What this step does
+
+Each analysis stage of SCRATCH-E2E writes its own per-cell result: copy-number
+calls, metaprogram scores, pseudotime, TCR clonotypes. Individually they are
+tables keyed by cell barcode. This step joins all of them back onto the object
+the downstream stages were run from, producing:
+
+* `<project>_master_object.RDS` — one Seurat object carrying every stage's
+  per-cell annotation in its metadata
+* `<project>_cell_table.csv` — the same metadata as a tidy table, which is what
+  the cross-stage analysis and the master report read
+
+Joining once here means the cross-stage analyses never have to re-open the
+large object, and any stage that did not run simply contributes no columns.
+
+```{r load-object}
+stopifnot(!is.null(params$seurat_object))
+obj <- readRDS(params$seurat_object)
+
+cat("Master object:", ncol(obj), "cells x", nrow(obj), "features\n")
+
+meta <- as.data.table(obj@meta.data, keep.rownames = "cell_id")
+setkey(meta, cell_id)
+cat("Starting metadata columns:", ncol(meta) - 1L, "\n")
+```
+
+```{r helpers}
+# Discover a stage's contributed files without assuming they exist. A stage that
+# was skipped leaves an empty (or absent) directory and is simply not joined.
+stage_files <- function(stage, pattern = "\\.(csv|tsv|txt)$") {
+  d <- file.path(stage_root, stage)
+  if (!dir.exists(d)) return(character(0))
+  list.files(d, pattern = pattern, recursive = TRUE, full.names = TRUE)
+}
+
+# Read a per-cell table and normalise its barcode column to `cell_id`.
+read_cell_table <- function(path) {
+  dt <- tryCatch(fread(path), error = function(e) NULL)
+  if (is.null(dt) || !nrow(dt)) return(NULL)
+
+  cand <- intersect(c("cell_id", "cell", "barcode", "cellname", "Cell", "Barcode", "V1"),
+                    names(dt))
+  if (!length(cand)) {
+    # Fall back to the first character column that looks like a barcode set.
+    chr <- names(dt)[vapply(dt, is.character, logical(1))]
+    if (!length(chr)) return(NULL)
+    cand <- chr[1]
+  }
+  setnames(dt, cand[1], "cell_id")
+  dt[, cell_id := as.character(cell_id)]
+  unique(dt, by = "cell_id")
+}
+
+# Left-join a stage table onto the master metadata, prefixing its columns so two
+# stages can never silently overwrite each other's annotation.
+join_stage <- function(meta, dt, prefix) {
+  if (is.null(dt)) return(meta)
+  keep <- setdiff(names(dt), "cell_id")
+  if (!length(keep)) return(meta)
+  setnames(dt, keep, paste0(prefix, "_", keep))
+  merge(meta, dt, by = "cell_id", all.x = TRUE, sort = FALSE)
+}
+
+joined <- character(0)
+```
+
+## Copy number
+
+```{r cnv}
+for (stage in c("cnv_infercnv", "cnv_scevan")) {
+  fs <- stage_files(stage)
+  if (!length(fs)) { cat("no output from", stage, "\n"); next }
+
+  # Prefer a file that plainly holds per-cell calls.
+  pick <- fs[grepl("cell|prediction|subclone|malig", basename(fs), ignore.case = TRUE)]
+  if (!length(pick)) pick <- fs
+  dt <- read_cell_table(pick[1])
+
+  if (!is.null(dt)) {
+    meta <- join_stage(meta, dt, sub("cnv_", "cnv", stage))
+    joined <- c(joined, stage)
+    cat("joined", stage, "from", basename(pick[1]), "\n")
+  }
+}
+```
+
+## Metaprograms
+
+```{r metaprog}
+fs <- stage_files("metaprog")
+mp_files <- fs[grepl("MP_list_final|metaprogram|mp_score", basename(fs), ignore.case = TRUE)]
+
+if (length(mp_files)) {
+  # MP_list_final.csv is programme x gene, not per-cell: score cells against
+  # each metaprogram so the result is joinable and directly comparable.
+  mp <- tryCatch(fread(mp_files[1]), error = function(e) NULL)
+
+  if (!is.null(mp) && ncol(mp) > 1L) {
+    mp_sets <- lapply(names(mp)[-1], function(cn) {
+      g <- toupper(as.character(mp[[cn]]))
+      intersect(unique(g[nzchar(g) & !is.na(g)]), toupper(rownames(obj)))
+    })
+    names(mp_sets) <- names(mp)[-1]
+    mp_sets <- mp_sets[vapply(mp_sets, length, integer(1)) >= 5L]
+
+    if (length(mp_sets)) {
+      # Map back to the object's actual gene casing before scoring.
+      lookup <- setNames(rownames(obj), toupper(rownames(obj)))
+      mp_sets <- lapply(mp_sets, function(g) unname(lookup[g]))
+
+      # See tme_characterisation.qmd: Seurat::AddModuleScore is defunct-dependent
+      # under SeuratObject 5.x. scratch_module_score implements the same method.
+      obj <- scratch_module_score(obj, mp_sets, name = "MPscore", seed = params$seed)
+      score_cols <- grep("^MPscore\\d+$", colnames(obj@meta.data), value = TRUE)
+      names(score_cols) <- names(mp_sets)[seq_along(score_cols)]
+
+      sc <- as.data.table(obj@meta.data[, score_cols, drop = FALSE], keep.rownames = "cell_id")
+      setnames(sc, score_cols, paste0("metaprog_", names(score_cols)))
+
+      # Assign each cell to its highest-scoring metaprogram.
+      mat <- as.matrix(sc[, -1, with = FALSE])
+      sc[, metaprog_assigned := colnames(mat)[max.col(mat, ties.method = "first")]]
+      sc[, metaprog_assigned := sub("^metaprog_", "", metaprog_assigned)]
+
+      meta <- merge(meta, sc, by = "cell_id", all.x = TRUE, sort = FALSE)
+      joined <- c(joined, "metaprog")
+      cat("scored", length(mp_sets), "metaprograms\n")
+    }
+  }
+} else {
+  cat("no metaprogram output\n")
+}
+```
+
+## Trajectory
+
+```{r trajectory}
+fs <- stage_files("trajectory")
+pt <- fs[grepl("pseudotime|concordance|slingshot|monocle|cytotrace",
+               basename(fs), ignore.case = TRUE)]
+if (length(pt)) {
+  meta <- join_stage(meta, read_cell_table(pt[1]), "traj")
+  joined <- c(joined, "trajectory")
+  cat("joined trajectory from", basename(pt[1]), "\n")
+} else {
+  cat("no trajectory output\n")
+}
+```
+
+## TCR
+
+```{r tcr}
+fs <- stage_files("tcr")
+tc <- fs[grepl("cell|clone|clonotype", basename(fs), ignore.case = TRUE)]
+if (length(tc)) {
+  meta <- join_stage(meta, read_cell_table(tc[1]), "tcr")
+  joined <- c(joined, "tcr")
+  cat("joined TCR from", basename(tc[1]), "\n")
+} else {
+  cat("no TCR output\n")
+}
+```
+
+## Assemble and save
+
+```{r assemble}
+setDF(meta)
+rownames(meta) <- meta$cell_id
+
+# Only add columns the object does not already carry.
+new_cols <- setdiff(colnames(meta), c("cell_id", colnames(obj@meta.data)))
+if (length(new_cols)) {
+  obj <- AddMetaData(obj, meta[colnames(obj), new_cols, drop = FALSE])
+}
+
+cat("Stages joined:", if (length(joined)) paste(joined, collapse = ", ") else "none", "\n")
+cat("New per-cell columns added:", length(new_cols), "\n")
+
+saveRDS(obj, file.path("data", paste0(params$project_name, "_master_object.RDS")))
+fwrite(meta, file.path("data", paste0(params$project_name, "_cell_table.csv")))
+
+# A compact record of which stages contributed, for the master report.
+fwrite(data.table(stage = c("cnv_infercnv", "cnv_scevan", "metaprog", "trajectory", "tcr"),
+                  joined = c("cnv_infercnv", "cnv_scevan", "metaprog", "trajectory", "tcr") %in% joined),
+       file.path("data", "stage_join_status.csv"))
+```
+
+```{r overview-plot, fig.width = 9, fig.height = 4}
+avail <- intersect(c(params$celltype_col, "metaprog_assigned"), colnames(obj@meta.data))
+if (length(avail) && "umap" %in% Reductions(obj)) {
+  for (col in avail) {
+    print(DimPlot(obj, group.by = col, reduction = "umap", label = TRUE, repel = TRUE) +
+            ggtitle(col) + theme(legend.position = "right"))
+    ggsave(file.path("figures", paste0("umap_", col, ".png")), width = 9, height = 6, dpi = 400)
+  }
+} else {
+  cat("No UMAP reduction on the object; skipping overview plots.\n")
+}
+```
+
+## Session info
+
+```{r session, echo = FALSE}
+sessionInfo()
+```

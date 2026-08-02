@@ -1,0 +1,174 @@
+---
+title: "Quality control"
+subtitle: "GBM / OV / PDAC cohort · 12 samples"
+format:
+  html:
+    theme: cosmo
+    embed-resources: true
+    toc: true
+    toc-location: left
+    toc-depth: 2
+    page-layout: full
+    fig-format: png
+    fig-dpi: 400
+    code-fold: true
+    code-summary: "code"
+execute: { warning: false, message: false }
+---
+
+```{r setup, include=FALSE}
+source("scratch_viz.R"); source("scratch_report.R")
+library(ggplot2); library(data.table); library(crosstalk); library(plotly); library(htmltools)
+
+D <- readRDS("demo.rds"); qc <- as.data.table(D$qc); cells <- as.data.table(D$cells)
+LIN <- scratch_lock_levels(sort(unique(cells$lineage)), key = "lineage")
+THR <- list(min_cells = 500, min_genes = 900, max_mito = 20, max_doublet = 8)
+
+qc[, status := fifelse(n_cells < THR$min_cells | median_genes < THR$min_genes*0.6, "critical",
+              fifelse(median_genes < THR$min_genes | pct_mito > THR$max_mito |
+                      doublet_rate > THR$max_doublet, "warning", "good"))]
+qc[, reason := trimws(gsub("\\s+"," ", paste(
+    fifelse(n_cells < THR$min_cells,"too few cells",""), fifelse(median_genes < THR$min_genes,"low complexity",""),
+    fifelse(pct_mito > THR$max_mito,"high mito",""), fifelse(doublet_rate > THR$max_doublet,"high doublets",""))))]
+nc <- qc[status=="critical",.N]; nw <- qc[status=="warning",.N]; ng <- qc[status=="good",.N]
+```
+
+```{r findings, include=FALSE}
+if (nw) scratch_register("qc_warn","warning", sprintf("%d samples pass with caveats", nw),
+  paste(qc[status=="warning", sprintf("**%s** (%s)", sample, reason)], collapse="; "), stage="qc", value=nw)
+csf <- qc[csf==TRUE]
+if (nrow(csf)) scratch_register("qc_csf","info",
+  sprintf("CSF samples carry %.0f%% fewer cells than resections",
+          100*(1-mean(csf$n_cells)/mean(qc[csf==FALSE]$n_cells))),
+  "Expected for low-cellularity aspirates; thresholds are per sample, not cohort-wide.", stage="qc")
+scratch_register("qc_pass","good", sprintf("%d of %d samples pass unmodified", ng, nrow(qc)), stage="qc", value=ng)
+scratch_findings_json("data/findings.json", stage="qc")
+```
+
+## Verdict
+
+```{r verdict, results='asis'}
+scratch_section(
+  "Every sample scored against the QC thresholds, before any figure.",
+  how  = "Each chip is one sample; the glyph and label carry the verdict, so it reads without relying on colour.",
+  watch= "Any **critical** sample is excluded before the merge — its cells never reach downstream stages.")
+scratch_verdict(setNames(qc$status, qc$sample), labels=qc$sample)
+scratch_tiles(list(
+  Samples=list(value=nrow(qc), sub=sprintf("%d pass · %d warn · %d fail", ng,nw,nc),
+               state=if(nc)"critical" else if(nw)"warning" else "good"),
+  Cells=list(value=format(sum(qc$n_cells),big.mark=","), sub="before filtering"),
+  Retained=list(value=format(sum(qc[status!="critical"]$n_cells),big.mark=","), sub="entering merge"),
+  `Median genes`=list(value=round(median(qc$median_genes)), sub="per cell"),
+  `Mito %`=list(value=sprintf("%.1f%%", median(qc$pct_mito)), sub="cohort median")))
+scratch_headline()
+```
+
+## Per-cell distributions
+
+```{r explain1, results='asis'}
+scratch_section(
+  "Genes detected against mitochondrial content, one point per cell, coloured by lineage.",
+  how  = "Use the **sample** dropdown to filter. Select several to overlay them. Hover any point for its exact values. Dashed lines mark the thresholds.",
+  watch= "A cloud pushed left (low complexity) or up (high mito) is a dying or ambient-contaminated population. Lineages should separate; heavy overlap suggests the annotation is unreliable.")
+```
+
+```{r cells-linked}
+cv <- cells[, .SD[sample(.N, min(.N, 420))], by=sample]          # hover layer only
+cv[, id := .I]
+cv[, hover := sprintf("<b>%s</b><br>lineage: %s<br>genes: %s<br>mito: %.1f%%",
+                      sample, lineage, format(genes, big.mark=","), mito)]
+sd_cells <- SharedData$new(as.data.frame(cv), key = ~id, group = "qc")
+
+p_cells <- plot_ly(sd_cells, x=~genes, y=~mito, color=~lineage, colors=LIN,
+                   type="scatter", mode="markers",
+                   marker=list(size=5, opacity=.65),
+                   hovertext=~hover, hovertemplate="%{hovertext}<extra></extra>") |>
+  layout(xaxis=list(title="genes detected"), yaxis=list(title="mitochondrial %"),
+         hovermode="closest", legend=list(orientation="v", x=1.02),
+         shapes=list(
+           list(type="line", x0=THR$min_genes, x1=THR$min_genes, y0=0, y1=1, yref="paper",
+                line=list(dash="dash", color="#d03b3b", width=1)),
+           list(type="line", x0=0, x1=1, xref="paper", y0=THR$max_mito, y1=THR$max_mito,
+                line=list(dash="dash", color="#d03b3b", width=1)))) |>
+  config(displaylogo=FALSE, toImageButtonOptions=list(format="svg", scale=2))
+
+bscols(widths=c(3,9),
+  list(filter_select("f_sample", "Sample", sd_cells, ~sample, multiple=TRUE),
+       filter_select("f_lin", "Lineage", sd_cells, ~lineage, multiple=TRUE)),
+  p_cells)
+```
+
+## QC metrics across the cohort
+
+```{r explain2, results='asis'}
+scratch_section(
+  "Every QC metric for every sample, on a shared scale per panel.",
+  how  = "Hover a bar for the exact value, the cohort median, and how far the sample sits from it. Bar colour repeats the verdict above.",
+  watch= "A sample that is an outlier on **one** metric is usually recoverable; one that is extreme on several is not.")
+```
+
+```{r metrics-bars}
+m <- melt(qc[, .(sample,status,n_cells,median_genes,median_umi,pct_mito,doublet_rate)],
+          id.vars=c("sample","status"), variable.name="metric")
+m[, med := median(value), by=metric][, dev := value - med]
+m[, hover := sprintf("<b>%s</b><br>%s: <b>%s</b><br>cohort median %s (%+.1f)",
+                     sample, metric, format(round(value,1), big.mark=","),
+                     format(round(med,1), big.mark=","), dev)]
+STAT <- c(good="#0ca30c", warning="#fab219", critical="#d03b3b")
+
+# One panel per metric, shared y so samples line up across panels.
+subplot(lapply(levels(m$metric), function(v) {
+  d <- m[metric==v]
+  plot_ly(d, x=~value, y=~reorder(sample,value), color=~status, colors=STAT,
+          type="bar", orientation="h", showlegend=(v==levels(m$metric)[1]),
+          hovertext=~hover, hovertemplate="%{hovertext}<extra></extra>") |>
+    layout(annotations=list(list(text=v, x=0.5, y=1.04, xref="paper", yref="paper",
+                                 showarrow=FALSE, font=list(size=11))))
+}), nrows=1, shareY=TRUE, titleX=FALSE) |>
+  layout(hovermode="closest", legend=list(orientation="h", y=-0.12)) |>
+  config(displaylogo=FALSE)
+```
+
+## Composition
+
+```{r explain3, results='asis'}
+scratch_section(
+  "Share of each lineage per sample, using the same colour map as every figure above.",
+  how  = "Hover a segment for its cell count and percentage. The dropdown filters both this and the scatter above.",
+  watch= "CSF aspirates should be immune-dominated; a resection that looks immune-dominated may have lost its tumour compartment during dissociation.")
+```
+
+```{r comp}
+comp <- cells[, .N, by=.(sample,lineage)][, frac := N/sum(N), by=sample]
+comp[, hover := sprintf("<b>%s</b><br>%s<br>%s cells — %.1f%%",
+                        sample, lineage, format(N, big.mark=","), 100*frac)]
+plot_ly(comp, x=~sample, y=~frac, color=~lineage, colors=LIN, type="bar",
+        hovertext=~hover, hovertemplate="%{hovertext}<extra></extra>") |>
+  layout(barmode="stack", yaxis=list(title="share of cells", tickformat=".0%"),
+         xaxis=list(title="", tickangle=-35), hovermode="closest") |>
+  config(displaylogo=FALSE)
+```
+
+## Ask
+
+```{r explain4, results='asis'}
+scratch_section(
+  "A question box that answers from this report's own data — no network required.",
+  how  = "Ask in plain language. Every number is computed live from the embedded tables, so it cannot disagree with the figures above.",
+  watch= "If a local model is serving on this machine it phrases the answer; the numbers still come from the computation, never from the model.")
+```
+
+```{r agent, results='asis'}
+scratch_agent(tables=list(
+    qc_metrics=qc[, .(sample,cohort,status,reason,n_cells,median_genes,median_umi,pct_mito,doublet_rate)],
+    composition=comp[, .(sample,lineage,cells=N,percent=round(100*frac,1))]),
+  stage="qc", project="GBM/OV/PDAC cohort", viz_dir=".")
+```
+
+## Data
+
+```{r data}
+scratch_table(as.data.frame(qc[, .(sample,cohort,status,reason,n_cells,median_genes,
+                                   median_umi,pct_mito,doublet_rate)]),
+              caption="Per-sample QC metrics")
+```

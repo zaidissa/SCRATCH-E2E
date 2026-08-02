@@ -1,0 +1,79 @@
+name: celltypist_annotation
+description: This module performs cell annotation using CellTypist on single-cell RNA-seq data stored in an AnnData object. It incorporates various models to enhance data with additional metadata and produces comprehensive visualizations, including UMAP plots and dendrograms to display refined annotations and cell type distinctions.
+keywords:
+  - single-cell
+  - annotation
+  - CellTypist
+  - data visualization
+tools:
+  - quarto:
+      description: Quarto is a scientific and technical publishing system built on Pandoc.
+      homepage: https://quarto.org/
+      documentation: https://quarto.org/docs/
+      tool_dev_url: https://github.com/quarto-dev/quarto-cli
+      licence: "GPL-3.0"
+  - scanpy:
+      description: Scanpy is a scalable toolkit for analyzing single-cell gene expression data.
+      homepage: https://scanpy.readthedocs.io/
+      documentation: https://scanpy.readthedocs.io/
+      tool_dev_url: https://github.com/theislab/scanpy
+  - celltypist:
+      description: CellTypist is a Python tool for automated cell type annotation.
+      homepage: https://www.celltypist.org/
+      documentation: https://celltypist.readthedocs.io/
+      tool_dev_url: https://github.com/Teichlab/celltypist
+  - pandas:
+      description: Pandas is a powerful data analysis and manipulation library for Python.
+      homepage: https://pandas.pydata.org/
+      documentation: https://pandas.pydata.org/pandas-docs/stable/
+      tool_dev_url: https://github.com/pandas-dev/pandas
+  - matplotlib:
+      description: Matplotlib is a comprehensive library for creating static, animated, and interactive visualizations in Python.
+      homepage: https://matplotlib.org/
+      documentation: https://matplotlib.org/stable/contents.html
+      tool_dev_url: https://github.com/matplotlib/matplotlib
+input:
+  - notebook:
+      type: file
+      description: Quarto notebook file (.qmd) that guides the annotation process using CellTypist.
+      pattern: "*.qmd"
+      parameters:
+        project_name: "project"
+        anndata_object: "/Users/affaustino/Projects/SCRATCH-Annotation/data/Ovarian_main_cluster_object.20k_filtered.h5ad"
+        cell_database: "/Users/affaustino/Projects/SCRATCH-Annotation/assets/cell_markers_database.csv"
+        cell_model: ["Immune_All_High.pkl", "Immune_All_Low.pkl"]
+        organism: "Human"
+        model_update: false
+  - anndata_object:
+      type: file
+      description: AnnData object file containing single-cell RNA-seq data.
+      pattern: "*.h5ad"
+  - config:
+      type: file
+      description: Configuration file that may contain additional settings or parameters for the notebook rendering.
+      pattern: "*.{yml,yaml,json}"
+output:
+  - cache:
+      type: directory
+      description: Stores intermediate data and settings used during the rendering process.
+      pattern: "_freeze/${notebook.baseName}"
+  - ann_object:
+      type: file
+      description: Updated AnnData object with CellTypist annotations.
+      pattern: "data/${params.project_name}_celltypist_annotation_object.h5ad"
+  - csv_file:
+      type: directory
+      description: Directory containing the CSV files for Immune_All annotations.
+      pattern: "data/Immune_All"
+  - html:
+      type: file
+      description: The rendered HTML report summarizing the annotation process.
+      pattern: "report/${notebook.baseName}.html"
+  - figures:
+      type: directory
+      description: Directory containing the generated figures from the notebook.
+      pattern: "_freeze/**/figure-html/*.png"
+authors:
+  - Andre Fonseca (@oandrefonseca)
+maintainers:
+  - Andre Fonseca (@oandrefonseca)

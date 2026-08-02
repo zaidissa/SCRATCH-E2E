@@ -1,0 +1,507 @@
+---
+title: "Module - META PROGRAM & DIFFERENTIAL EXPRESSION — PostNMF"
+author: "Syed Shujaat Ali Zaidi"
+execute:
+  freeze: auto
+  cache: false
+  warning: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    fig-format: png
+    fig-dpi: 300
+    fig-responsive: true
+    fig-align: center
+params:
+  # Paths
+  work_directory: "."    # Nextflow will pass $PWD; we look under data/per_sample_mat/nmf_fit here
+  project_name: "project"
+
+  # Clustering / MP construction thresholds (same meanings as your script)
+  min_intersect_initial: 12
+  min_intersect_cluster: 12
+  min_group_size: 4
+  intra_min: 25
+  intra_max: 12
+  inter_min: 8
+
+  # Signature length. Must be declared here because Quarto rejects any -P key
+  # that is not present in the params block. Previously the value 50 was
+  # hardcoded in several places; it is now a single parameter.
+  genes_per_program: 50
+
+  # Which factorisation engine produced the inputs: r | python | both.
+  # Recorded for provenance; the reading logic auto-detects either format.
+  nmf_engine: "python"
+
+  # Seed (only for reproducible tie-breaks or sampling if any)
+  seed: 1234
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r setup}
+suppressPackageStartupMessages({
+  library(NMF)
+  library(Matrix)
+  library(ggplot2)
+  library(reshape2)
+  library(viridis)     # magma() palette
+  library(pheatmap)
+  library(grid)        # for legend title hack on pheatmap
+})
+
+set.seed(params$seed)
+
+# Respect Nextflow-provided working directory
+if (!is.null(params$work_directory) && dir.exists(params$work_directory)) {
+  setwd(params$work_directory)
+}
+
+# Layout used by previous steps
+out_dir  <- file.path("data", "per_sample_mat")
+fit_dir  <- file.path(out_dir, "nmf_fit")
+plot_dir <- file.path("figures", "metaprog")
+
+dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
+
+message("Looking for NMF results in: ", normalizePath(fit_dir, mustWork = FALSE))
+
+# ---------------------------------------------------------------------------
+# Two engines can feed this step (see --metaprog_nmf_engine):
+#
+#   r       <sample>_nmf_fit.rds       an NMF/NMFfitX/NMF.rank object
+#   python  <sample>_basis_matrix.csv  genes x programs, cols "<rank>_<comp>"
+#
+# Everything below this chunk consumes `prog_genes_ls` — a per-sample
+# genes x programs matrix — so both engines converge on the same structure here
+# and the metaprogram construction that follows is untouched.
+# ---------------------------------------------------------------------------
+fit_files   <- list.files(fit_dir, pattern = "_nmf_fit\\.rds$",      full.names = TRUE)
+basis_files <- list.files(fit_dir, pattern = "_basis_matrix\\.csv$", full.names = TRUE)
+
+if (!length(fit_files) && !length(basis_files)) {
+  stop("No NMF results found at: ", fit_dir,
+       "\nExpected <sample>_nmf_fit.rds (R engine) or <sample>_basis_matrix.csv ",
+       "(python engine). Check --metaprog_nmf_engine and publishDir/staging.")
+}
+
+# ---- R engine ----
+nmf_results <- list()
+if (length(fit_files)) {
+  nmf_results <- setNames(lapply(fit_files, readRDS),
+                          sub("_nmf_fit\\.rds$", "", basename(fit_files)))
+  is_bad <- vapply(nmf_results,
+                   function(x) is.null(x) || inherits(x, "error") || inherits(x, "try-error"),
+                   logical(1))
+  nmf_results <- nmf_results[!is_bad]
+  cat("Loaded R NMF fits for ", length(nmf_results), " sample(s): ",
+      paste(names(nmf_results), collapse = ", "), "\n", sep = "")
+}
+
+# ---- Python engine ----
+# Read as a plain gene x program matrix. Column names arrive as "<rank>_<comp>"
+# and are re-emitted below as "<sample>.<rank>.<comp>", which is the naming the
+# metaprogram clustering relies on to recover a program's sample of origin.
+py_basis <- list()
+if (length(basis_files)) {
+  py_basis <- setNames(lapply(basis_files, function(f) {
+    df <- utils::read.csv(f, row.names = 1, check.names = FALSE)
+    m  <- as.matrix(df)
+    storage.mode(m) <- "double"
+    m
+  }), sub("_basis_matrix\\.csv$", "", basename(basis_files)))
+
+  py_basis <- py_basis[vapply(py_basis, function(m) !is.null(dim(m)) && ncol(m) > 0L, logical(1))]
+  cat("Loaded python NMF basis matrices for ", length(py_basis), " sample(s): ",
+      paste(names(py_basis), collapse = ", "), "\n", sep = "")
+}
+
+if (!length(nmf_results) && !length(py_basis)) {
+  stop("All loaded NMF results were empty or unreadable. Cannot proceed.")
+}
+
+# A sample name containing "." would break the `strsplit(prog, '[.]')[[1]][[1]]`
+# lookup used later to map a program back to its sample.
+bad_ids <- grep("\\.", c(names(nmf_results), names(py_basis)), value = TRUE)
+if (length(bad_ids)) {
+  stop("Sample id(s) contain a '.', which collides with the ",
+       "sample.rank.component program naming: ", paste(bad_ids, collapse = ", "))
+}
+```
+
+``` {r Extract programs (basis columns) and build top-50 gene signatures}
+# Return a named list of basis matrices by rank for a given fit
+get_basis_by_rank <- function(fit) {
+  if (inherits(fit, "NMFfit")) {
+    B <- NMF::basis(fit)
+    return(setNames(list(B), as.character(ncol(B))))
+  }
+  if (inherits(fit, "NMFfitX")) {
+    out <- lapply(names(fit), function(rk) NMF::basis(fit[[rk]]))
+    names(out) <- names(fit)
+    return(out)
+  }
+  if (inherits(fit, "NMF.rank")) {
+    obj <- NULL
+    obj <- try(fit@fit,  silent=TRUE); if (inherits(obj, "try-error")) obj <- NULL
+    if (is.null(obj)) {
+      obj <- try(fit@fits, silent=TRUE); if (inherits(obj, "try-error")) obj <- NULL
+    }
+    if (is.null(obj) && is.list(fit) && !is.null(fit$fit)) obj <- fit$fit
+    if (is.null(obj)) stop("NMF.rank object doesn’t expose per-rank fits via @fit/@fits/$fit")
+    out <- lapply(names(obj), function(rk) NMF::basis(obj[[rk]]))
+    names(out) <- names(obj)
+    return(out)
+  }
+  stop("Unexpected fit class: ", paste(class(fit), collapse="/"))
+}
+
+# Build per-sample basis matrices (genes × components)
+prog_genes_ls <- list()
+for (s in names(nmf_results)) {
+  fit <- nmf_results[[s]]
+  br  <- get_basis_by_rank(fit)
+  if (!length(br)) next
+
+  mats <- list()
+  for (rk in names(br)) {
+    B <- br[[rk]]
+    if (is.null(dim(B)) || ncol(B) == 0L) next
+    if (is.null(rownames(B))) rownames(B) <- paste0("g", seq_len(nrow(B)))
+    rownames(B) <- toupper(rownames(B))  # unify gene case
+    colnames(B) <- paste0(s, ".", rk, ".", seq_len(ncol(B)))  # sample.rank.component
+    mats[[rk]] <- B
+  }
+  if (length(mats)) prog_genes_ls[[s]] <- do.call(cbind, mats)
+}
+
+# ---- Python engine: same structure, read straight from the basis CSV --------
+# Columns arrive as "<rank>_<component>"; they are renamed to
+# "<sample>.<rank>.<component>" so the downstream clustering, which splits on
+# "." to recover the sample, sees an identical layout to the R path.
+for (s in names(py_basis)) {
+  B <- py_basis[[s]]
+  if (is.null(dim(B)) || ncol(B) == 0L) next
+  if (is.null(rownames(B))) rownames(B) <- paste0("g", seq_len(nrow(B)))
+  rownames(B) <- toupper(rownames(B))
+
+  parts <- strsplit(colnames(B), "_", fixed = TRUE)
+  colnames(B) <- vapply(seq_along(parts), function(i) {
+    pr <- parts[[i]]
+    if (length(pr) >= 2L) {
+      # "<rank>_<component>"; component is 0-based in python, 1-based in R
+      paste0(s, ".", pr[[1]], ".", as.integer(pr[[2]]) + 1L)
+    } else {
+      paste0(s, ".", ncol(B), ".", i)
+    }
+  }, character(1))
+
+  # If both engines ran (--metaprog_nmf_engine both) keep them side by side
+  # rather than letting one overwrite the other.
+  key <- if (!is.null(prog_genes_ls[[s]])) paste0(s, "_py") else s
+  prog_genes_ls[[key]] <- B
+}
+
+stopifnot(length(prog_genes_ls) > 0L)
+
+cat("Per-sample program counts:\n")
+print(vapply(prog_genes_ls, ncol, integer(1)))
+
+# Top-N genes per program
+genes_per_program <- if (!is.null(params$genes_per_program)) as.integer(params$genes_per_program) else 50L
+
+nmf_programs_by_sample <- lapply(
+  prog_genes_ls,
+  function(M) {
+    nN <- min(genes_per_program, nrow(M))
+    apply(M, 2, function(col) names(sort(col, decreasing = TRUE))[seq_len(nN)])
+  }
+) # N × K (char) per sample
+
+nmf_programs_sig <- do.call(cbind, nmf_programs_by_sample)  # N × P
+cat("Total programs:", ncol(nmf_programs_sig), "\n")
+
+```
+
+``` {r Robust filtering of programs (your original logic)}
+robust_nmf_programs <- function(nmf_programs, intra_min = params$intra_min, intra_max = params$intra_max,
+                                inter_filter = TRUE, inter_min = params$inter_min) {
+
+  intra_intersect <- lapply(
+    nmf_programs,
+    function(z) apply(z, 2, function(x) apply(z, 2, function(y) length(intersect(x, y))))
+  )
+  intra_intersect_max <- lapply(
+    intra_intersect,
+    function(x) apply(x, 2, function(y) sort(y, decreasing = TRUE)[2])
+  )
+
+  nmf_sel <- lapply(
+    names(nmf_programs),
+    function(x) nmf_programs[[x]][, intra_intersect_max[[x]] >= intra_min, drop = FALSE]
+  )
+  names(nmf_sel) <- names(nmf_programs)
+
+  if (all(vapply(nmf_sel, function(a) ncol(a) == 0L, logical(1)))) return(character(0))
+
+  nmf_sel_unlist  <- do.call(cbind, nmf_sel)
+  inter_intersect <- apply(nmf_sel_unlist, 2, function(x)
+    apply(nmf_sel_unlist, 2, function(y) length(intersect(x, y)))
+  )
+
+  final_filter <- character(0)
+  for (i in names(nmf_sel)) {
+    cols_i     <- grep(paste0("^", i, "\\."), colnames(inter_intersect))
+    cols_other <- setdiff(seq_len(ncol(inter_intersect)), cols_i)
+    if (!length(cols_i)) next
+    a <- inter_intersect[cols_other, cols_i, drop = FALSE]
+    if (!nrow(a) || !ncol(a)) next
+
+    b <- sort(apply(a, 2, max), decreasing = TRUE)
+    if (inter_filter) b <- b[b >= params$inter_min]
+    if (!length(b)) next
+
+    keep <- names(b)[1]
+    if (length(b) > 1) {
+      for (nm in names(b)[-1]) {
+        if (max(inter_intersect[keep, nm]) <= intra_max) keep <- c(keep, nm)
+      }
+    }
+    final_filter <- c(final_filter, keep)
+  }
+  final_filter
+}
+
+nmf_filter_all <- robust_nmf_programs(
+  nmf_programs_by_sample,
+  intra_min    = params$intra_min,
+  intra_max    = params$intra_max,
+  inter_filter = TRUE,
+  inter_min    = params$inter_min
+)
+
+if (length(nmf_filter_all)) {
+  nmf_programs_sig <- nmf_programs_sig[, colnames(nmf_programs_sig) %in% nmf_filter_all, drop = FALSE]
+  message("Filtered programs kept: ", ncol(nmf_programs_sig))
+} else {
+  warning("No programs survived robust filtering — proceeding with unfiltered set")
+}
+
+# Persist filtered signatures
+path <- file.path(fit_dir, "nmf_programs_sig_filtered.rds")
+dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+saveRDS(nmf_programs_sig, file = path)
+
+```
+
+``` {r jaccard_heatmaps, message=FALSE, warning=FALSE}
+# Overlap counts between program gene-sets (genes_per_program-length signatures)
+sim_mat <- apply(
+  nmf_programs_sig, 2,
+  function(a) apply(nmf_programs_sig, 2, function(b) length(intersect(a, b)))
+)
+saveRDS(sim_mat, file = file.path(fit_dir, "nmf_intersect.rds"))
+
+hc   <- hclust(as.dist(genes_per_program - sim_mat), method = "average")
+dend <- reorder(as.dendrogram(hc), colMeans(sim_mat))
+ord  <- order.dendrogram(dend)
+
+# Heatmap #1 (ggplot)
+long <- reshape2::melt(sim_mat[ord, ord])
+pal  <- c(
+  colorRampPalette(c("white", rev(magma(323, begin = 0.15))[1]))(10),
+  rev(magma(323, begin = 0.18))
+)
+p_heat <- ggplot(long, aes(Var1, Var2, fill = 100 * value / pmax(1, 100 - value))) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low = pal[1], mid = pal[112], high = pal[223],
+    midpoint = 13.5, oob = scales::squish, name = "Jaccard %"
+  ) +
+  theme_void() + theme(legend.position = "right")
+print(p_heat)
+ggsave(file.path(plot_dir, "jaccard_heatmap_dendrogram22.pdf"), p_heat, width = 7, height = 6)
+
+# Heatmap #2 (pheatmap) with sample bar
+J      <- sim_mat[ord, ord, drop = FALSE]
+J_perc <- 100 * J / pmax(1, 100 - J)
+J_perc[!is.finite(J_perc)] <- NA
+
+progs   <- colnames(J_perc)
+samples <- sub("\\..*$", "", progs)
+annot   <- data.frame(Sample = samples, row.names = progs)
+
+sample_levels <- unique(samples)
+ann_colors <- list(
+  Sample = setNames(scales::hue_pal()(length(sample_levels)), sample_levels)
+)
+
+# Aligned with the pipeline-wide sequential ramp (one hue, light->dark)
+# so this heatmap sits in the same visual family as every other figure.
+custom_magma <- if (exists("scratch_heat_colours")) scratch_heat_colours(256) else c(
+  colorRampPalette(c("white", rev(viridis::magma(323, begin = 0.15))[1]))(10),
+  rev(viridis::magma(323, begin = 0.18))
+)
+
+# pheat2 <- pheatmap::pheatmap(
+#   J_perc,
+#   cluster_rows   = FALSE,
+#   cluster_cols   = FALSE,
+#   show_rownames  = FALSE,
+#   show_colnames  = FALSE,
+#   color          = custom_magma,
+#   annotation_col = annot,
+#   annotation_row = annot,
+#   annotation_colors = ann_colors,
+#   legend         = TRUE,
+#   border_color   = NA,
+#   annotation_names_col = TRUE,
+#   annotation_names_row = FALSE
+# )
+# 
+# pdf(file.path(plot_dir, "jaccard_heatmap_dendrogram3.pdf"), width = 7, height = 6)
+# grid::grid.newpage()
+# grid::grid.draw(pheat2$gtable)
+# grid::grid.text("Jaccard index (%)",
+#                 x = grid::unit(0.92, "npc"), y = grid::unit(0.95, "npc"),
+#                 rot = 0, gp = grid::gpar(cex = 0.8))
+# dev.off()
+```
+
+``` {r MP list}
+min_intersect_initial <- params$min_intersect_initial
+min_intersect_cluster <- params$min_intersect_cluster
+min_group_size        <- params$min_group_size
+
+
+nmf_intersect      <- sim_mat
+nmf_programs_sig_K <- nmf_programs_sig
+
+# Basis matrices per sample (for tie-breaks); ensure uppercase genes
+Genes_nmf_w_basis <- lapply(prog_genes_ls, function(M) {
+  rownames(M) <- toupper(rownames(M))
+  M
+})
+
+Sorted_intersection <- sort(
+  apply(nmf_intersect, 2, function(x) length(which(x >= min_intersect_initial)) - 1L),
+  decreasing = TRUE
+)
+
+Cluster_list <- list()
+MP_list      <- list()
+k <- 1L
+
+while (length(Sorted_intersection) && Sorted_intersection[1] >= min_group_size) {
+
+  Curr_cluster <- c(names(Sorted_intersection)[1])
+
+  Genes_MP <- nmf_programs_sig_K[, Curr_cluster]
+  nmf_programs_sig_K <- nmf_programs_sig_K[, setdiff(colnames(nmf_programs_sig_K), Curr_cluster), drop = FALSE]
+
+  Intersection_with_Genes_MP <- if (ncol(nmf_programs_sig_K)) {
+    sort(apply(nmf_programs_sig_K, 2, function(x) length(intersect(Genes_MP, x))), decreasing = TRUE)
+  } else numeric(0)
+
+  NMF_history <- Genes_MP
+
+  while (length(Intersection_with_Genes_MP) && Intersection_with_Genes_MP[1] >= min_intersect_cluster) {
+    best <- names(Intersection_with_Genes_MP)[1]
+    Curr_cluster <- c(Curr_cluster, best)
+
+    Genes_MP_temp   <- sort(table(c(NMF_history, nmf_programs_sig_K[, best])), decreasing = TRUE)
+    Genes_at_border <- Genes_MP_temp[which(Genes_MP_temp == Genes_MP_temp[genes_per_program])]
+
+    if (length(Genes_at_border) > 1) {
+      Genes_curr_NMF_score <- c()
+      for (i_prog in Curr_cluster) {
+        curr_sample <- strsplit(i_prog, "[.]")[[1]][[1]]
+        B <- Genes_nmf_w_basis[[curr_sample]]
+        if (is.null(B) || !nrow(B)) next
+        idx <- match(names(Genes_at_border), rownames(B))
+        ok  <- which(!is.na(idx))
+        if (length(ok)) {
+          vec <- B[idx[ok], i_prog, drop = TRUE]
+          names(vec) <- rownames(B)[idx[ok]]
+          Genes_curr_NMF_score <- c(Genes_curr_NMF_score, vec)
+        }
+      }
+      Genes_curr_NMF_score_sort <- sort(Genes_curr_NMF_score, decreasing = TRUE)
+      Genes_curr_NMF_score_sort <- Genes_curr_NMF_score_sort[!duplicated(names(Genes_curr_NMF_score_sort))]
+      Genes_MP_temp <- c(
+        names(Genes_MP_temp[which(Genes_MP_temp > Genes_MP_temp[genes_per_program])]),
+        names(Genes_curr_NMF_score_sort)
+      )
+    } else {
+      Genes_MP_temp <- names(Genes_MP_temp)[1:genes_per_program]
+    }
+
+    NMF_history <- c(NMF_history, nmf_programs_sig_K[, best])
+    Genes_MP    <- Genes_MP_temp[1:genes_per_program]
+
+    nmf_programs_sig_K       <- nmf_programs_sig_K[, setdiff(colnames(nmf_programs_sig_K), best), drop = FALSE]
+    Intersection_with_Genes_MP <- if (ncol(nmf_programs_sig_K)) {
+      sort(apply(nmf_programs_sig_K, 2, function(x) length(intersect(Genes_MP, x))), decreasing = TRUE)
+    } else numeric(0)
+  }
+
+  Cluster_list[[paste0("Cluster_", k)]] <- Curr_cluster
+  MP_list[[paste0("MP_", k)]]           <- Genes_MP
+  k <- k + 1L
+
+  keep_cols <- setdiff(colnames(nmf_intersect), Curr_cluster)
+  nmf_intersect <- nmf_intersect[keep_cols, keep_cols, drop = FALSE]
+  Sorted_intersection <- if (ncol(nmf_intersect)) {
+    sort(apply(nmf_intersect, 2, function(x) length(which(x >= min_intersect_initial)) - 1L), decreasing = TRUE)
+  } else numeric(0)
+}
+
+# safety net
+if (!length(Cluster_list) && ncol(sim_mat) > 0) {
+  seed_prog <- names(sort(colSums(sim_mat >= min_intersect_initial), decreasing = TRUE))[1]
+  Cluster_list[[ "Cluster_1" ]] <- seed_prog
+  MP_list[[ "MP_1" ]] <- nmf_programs_sig[, seed_prog]
+}
+
+saveRDS(Cluster_list, file = file.path(fit_dir, "Cluster_list_final.rds"))
+saveRDS(MP_list,      file = file.path(fit_dir, "MP_list_final.rds"))
+write.csv(MP_list,    file = file.path(fit_dir, "MP_list_final.csv"))
+```
+
+``` {r Iterative clustering to derive Meta-Programs (MPs)}
+
+## Parameters log
+
+```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
+
+print(params)
+
+```
+
+## Session info
+
+```{r session_info, message = FALSE, warning = FALSE, echo = FALSE}
+
+sessionInfo()
+
+```

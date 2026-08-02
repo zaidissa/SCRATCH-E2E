@@ -1,0 +1,563 @@
+---
+title: "SCRATCH-E2E — Malignant / non-malignant stratification"
+execute:
+  freeze: false
+  cache: false
+  warning: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 3
+    embed-resources: true
+    code-fold: show
+    fig-format: png
+    fig-dpi: 300
+    fig-align: center
+params:
+  seurat_object: null
+  project_name: "project"
+  cnv_evidence_dir: "cnv_evidence"
+  work_directory: "."
+
+  # consensus | cnv | annotation
+  method: "consensus"
+
+  # How many CNV callers must agree before their verdict is taken.
+  min_callers: 1
+
+  # Annotation labels treated as the tumour lineage (tie-break / fallback).
+  tumor_labels: "Epithelial"
+  celltype_col: "azimuth_labels"
+  sample_col: "sample_id"
+
+  # Lineages that are, a priori, never malignant. Used to build the null
+  # distribution for inferCNV's continuous score.
+  reference_labels: "T_Cells;NK_Cells;Myeloid;B_Plasma_Cells;Endothelial_Cells;Fibroblast"
+
+  # inferCNV score threshold, in SDs above the reference-lineage mean.
+  infercnv_sd_threshold: 3
+
+  # Cell type defines the compartment; CNV adjudicates only within the
+  # compartment that could plausibly be malignant.
+  gate_by_lineage: true
+
+  # exclude | malignant | non_malignant
+  ambiguous: "exclude"
+
+  min_cells_per_compartment: 50
+  seed: 1234
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r setup, include = FALSE}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(data.table)
+  library(ggplot2)
+  library(scales)
+})
+
+set.seed(params$seed)
+if (!is.null(params$work_directory) && dir.exists(params$work_directory)) {
+  setwd(params$work_directory)
+}
+dir.create("data",    showWarnings = FALSE, recursive = TRUE)
+dir.create("figures", showWarnings = FALSE, recursive = TRUE)
+
+# Palette: two compartments plus an ambiguous class. Validated categorical
+# slots; every figure also carries text labels, so colour is never the only
+# channel distinguishing them.
+COL <- c(malignant = "#eb6834", non_malignant = "#2a78d6", ambiguous = "#8a9095")
+INK <- "#0f1417"; INK2 <- "#4e5a60"; MUTED <- "#898781"
+GRID <- "#e1e0d9"; SURFACE <- "#fcfcfb"
+
+theme_scratch <- function(base = 12) {
+  theme_minimal(base_size = base) +
+    theme(plot.background  = element_rect(fill = SURFACE, colour = NA),
+          panel.background = element_rect(fill = SURFACE, colour = NA),
+          panel.grid.major = element_line(colour = GRID, linewidth = .3),
+          panel.grid.minor = element_blank(),
+          axis.text  = element_text(colour = MUTED),
+          axis.title = element_text(colour = INK2),
+          plot.title = element_text(colour = INK, face = "bold"),
+          plot.subtitle = element_text(colour = INK2, size = base * .9),
+          legend.text = element_text(colour = INK2),
+          legend.title = element_text(colour = INK2))
+}
+
+split_list <- function(x) {
+  if (is.null(x)) return(character(0))
+  trimws(unlist(strsplit(as.character(x), "[;,|]")))
+}
+```
+
+## What this step decides
+
+Every cell is assigned to one of three classes:
+
+| class | meaning |
+|---|---|
+| `malignant` | aneuploid by CNV evidence (or tumour-lineage when no CNV evidence exists) |
+| `non_malignant` | diploid by CNV evidence, or a reference immune/stromal lineage |
+| `ambiguous` | the available evidence conflicts |
+
+**CNV evidence decides; the annotation label is the fallback.** Aneuploidy is a
+direct measurement of malignancy, whereas a label such as `Epithelial` is a
+lineage proxy that calls normal epithelium a tumour.
+
+Under `method = "consensus"` (the default) a *majority* CNV verdict wins; when
+the callers split evenly, or when no caller scored the cell, the annotation
+label decides. `ambiguous` therefore means "no CNV verdict and no usable label",
+not "the callers disagreed". Use `method = "cnv"` if you would rather exclude
+conflicting cells than let the label resolve them.
+
+`reference_labels` must match the vocabulary your annotation actually emits —
+they define the null distribution for inferCNV's continuous score, and a name
+that matches nothing silently shrinks it.
+
+```{r load}
+stopifnot(!is.null(params$seurat_object))
+obj <- readRDS(params$seurat_object)
+cat("Input object:", ncol(obj), "cells x", nrow(obj), "features\n")
+
+meta <- as.data.table(obj@meta.data, keep.rownames = "cell_id")
+meta[, cell_id := as.character(cell_id)]
+
+# Resolve the annotation column, tolerating naming drift between stages.
+ct_candidates <- c(params$celltype_col, "azimuth_labels", "celltype", "cell_type",
+                   "annotation", "sctype", "sctype_agg", "sctype_labels", "cell_label")
+# NOTE: "sctype" is what THIS pipeline's own annotation stage writes. Its absence
+# from this list made a real run complete with no labels at all — gate dead,
+# no tie-break, 22.6% of cells dropped to ambiguous, exit code 0.
+col_ct <- ct_candidates[ct_candidates %in% names(meta)][1]
+if (is.na(col_ct)) {
+  msg <- paste0("No annotation column found. Tried: ", paste(ct_candidates, collapse=", "),
+                "\n  Object has: ", paste(head(names(meta), 40), collapse=", "),
+                "\n  Set --stratify_celltype_col to the right column.")
+  # Under `consensus` the label drives BOTH the lineage gate and the tie-break,
+  # so continuing without it silently changes the algorithm. Fail loudly.
+  if (params$method == "consensus" || isTRUE(as.logical(params$gate_by_lineage))) {
+    stop(msg)
+  }
+  warning(msg, "\n  method=", params$method, " does not require it; continuing.")
+  meta[, .__ct := NA_character_]
+  col_ct <- ".__ct"
+}
+cat("Annotation column:", col_ct, "\n")
+
+# Sample column drives the per-sample inferCNV thresholds.
+smp_candidates <- c(params$sample_col, "sample_id", "orig.ident", "sample", "patient_id")
+col_smp <- smp_candidates[smp_candidates %in% names(meta)][1]
+cat("Sample column:", if (is.na(col_smp)) "none (one cohort-wide threshold)" else col_smp, "\n")
+
+tumor_labels <- split_list(params$tumor_labels)
+ref_labels   <- split_list(params$reference_labels)
+cat("Tumour-lineage labels:", paste(tumor_labels, collapse = ", "), "\n")
+```
+
+## Collecting CNV evidence
+
+```{r evidence}
+ev_dir <- params$cnv_evidence_dir
+ev_files <- if (dir.exists(ev_dir)) {
+  list.files(ev_dir, recursive = TRUE, full.names = TRUE)
+} else character(0)
+
+cat("Staged CNV artefacts:", length(ev_files), "\n")
+if (length(ev_files)) cat(paste(" -", basename(ev_files)), sep = "\n")
+
+evidence <- data.table(cell_id = meta$cell_id)
+callers  <- character(0)
+
+# ---- inferCNV: a continuous genome-wide CNV load ---------------------------
+# There is no hard call, so the cutoff is set from the reference lineages: the
+# score distribution of cells that cannot be malignant is the null, and cells
+# more than `infercnv_sd_threshold` SDs above its mean are called aneuploid.
+f <- ev_files[grepl("infercnv_meta_object\\.RDS$", ev_files)]
+if (length(f)) {
+  ic <- tryCatch(readRDS(f[1]), error = function(e) NULL)
+  ic_meta <- if (inherits(ic, "Seurat")) as.data.table(ic@meta.data, keep.rownames = "cell_id")
+             else if (is.data.frame(ic))  as.data.table(ic, keep.rownames = "cell_id")
+             else NULL
+
+  score_col <- if (!is.null(ic_meta)) {
+    intersect(c("genomwide_cnv_proportion", "genomewide_cnv_proportion",
+                "cnv_score", "cnv_load"), names(ic_meta))[1]
+  } else NA_character_
+
+  if (!is.null(ic_meta) && !is.na(score_col)) {
+    ic_meta[, cell_id := as.character(cell_id)]
+    sc <- ic_meta[, .(cell_id, infercnv_score = as.numeric(get(score_col)))]
+    evidence <- merge(evidence, sc, by = "cell_id", all.x = TRUE, sort = FALSE)
+
+    # --- Per-sample thresholds -------------------------------------------
+    # CNV-load distributions shift between samples: a CSF aspirate with a
+    # handful of tumour cells and a resection with thousands do not share a
+    # scale. One global cutoff over-calls in some samples and under-calls in
+    # others, so the null is rebuilt per sample from that sample's own
+    # reference lineages. Samples with too few reference cells fall back to
+    # the cohort-wide null, and only then to a quantile.
+    ref_ids <- meta[get(col_ct) %in% ref_labels, cell_id]
+    ev <- merge(evidence[, .(cell_id, infercnv_score)],
+                meta[, .(cell_id, smp = if (!is.na(col_smp)) as.character(get(col_smp)) else "ALL")],
+                by = "cell_id", all.x = TRUE, sort = FALSE)
+    ev[is.na(smp), smp := "ALL"]
+
+    global_null <- ev[cell_id %in% ref_ids & is.finite(infercnv_score), infercnv_score]
+    k <- as.numeric(params$infercnv_sd_threshold)
+
+    global_cut <- if (length(global_null) >= 30) {
+      mean(global_null) + k * stats::sd(global_null)
+    } else {
+      warning(sprintf("Only %d reference cells cohort-wide; falling back to the 75th percentile. Check that --stratify_reference_labels matches your annotation vocabulary.",
+                      length(global_null)))
+      stats::quantile(ev$infercnv_score, .75, na.rm = TRUE)
+    }
+
+    cuts <- ev[, {
+      nulls <- infercnv_score[cell_id %in% ref_ids & is.finite(infercnv_score)]
+      if (length(nulls) >= 30) .(cutoff = mean(nulls) + k * stats::sd(nulls),
+                                 n_ref = length(nulls), basis = "per_sample")
+      else                     .(cutoff = global_cut, n_ref = length(nulls), basis = "cohort")
+    }, by = smp]
+
+    cat(sprintf("inferCNV cutoffs (mean + %g SD of reference lineages):\n", k))
+    print(cuts[order(smp)])
+    fwrite(cuts, "data/infercnv_thresholds.csv")
+
+    ev <- merge(ev, cuts[, .(smp, cutoff)], by = "smp", all.x = TRUE, sort = FALSE)
+    ev[, call := fifelse(is.na(infercnv_score), NA_character_,
+                  fifelse(infercnv_score > cutoff, "malignant", "non_malignant"))]
+
+    evidence <- merge(evidence, ev[, .(cell_id, infercnv_call = call)],
+                      by = "cell_id", all.x = TRUE, sort = FALSE)
+    callers <- c(callers, "infercnv")
+  } else {
+    cat("inferCNV object staged but no recognised score column.\n")
+  }
+} else cat("No inferCNV evidence.\n")
+
+# ---- SCEVAN: a per-cell tumour/normal class -------------------------------
+f <- ev_files[grepl("scevan_meta_object\\.RDS$", ev_files)]
+if (length(f)) {
+  sv <- tryCatch(readRDS(f[1]), error = function(e) NULL)
+  sv_meta <- if (inherits(sv, "Seurat")) as.data.table(sv@meta.data, keep.rownames = "cell_id")
+             else if (is.data.frame(sv))  as.data.table(sv, keep.rownames = "cell_id")
+             else NULL
+  cls <- if (!is.null(sv_meta)) intersect(c("class", "scevan_class", "pred"), names(sv_meta))[1] else NA_character_
+
+  if (!is.null(sv_meta) && !is.na(cls)) {
+    sv_meta[, cell_id := as.character(cell_id)]
+    sc <- sv_meta[, .(cell_id, raw = tolower(as.character(get(cls))))]
+    sc[, scevan_call := fifelse(grepl("tumou?r|malig|aneupl", raw), "malignant",
+                         fifelse(grepl("normal|diplo", raw), "non_malignant", NA_character_))]
+    evidence <- merge(evidence, sc[, .(cell_id, scevan_call)], by = "cell_id", all.x = TRUE, sort = FALSE)
+    callers <- c(callers, "scevan")
+  }
+} else cat("No SCEVAN evidence.\n")
+
+# ---- CopyKAT: aneuploid/diploid -------------------------------------------
+f <- ev_files[grepl("copykat", ev_files, ignore.case = TRUE) & grepl("\\.(csv|tsv|txt|RDS)$", ev_files)]
+if (length(f)) {
+  ck <- tryCatch(
+    if (grepl("\\.RDS$", f[1])) as.data.table(readRDS(f[1]), keep.rownames = "cell_id") else fread(f[1]),
+    error = function(e) NULL)
+  if (!is.null(ck) && nrow(ck)) {
+    idc <- intersect(c("cell.names", "cell_id", "cell", "barcode", "V1"), names(ck))[1]
+    prd <- intersect(c("copykat.pred", "copykat_pred", "prediction", "pred"), names(ck))[1]
+    if (!is.na(idc) && !is.na(prd)) {
+      setnames(ck, c(idc, prd), c("cell_id", "raw"))
+      ck[, cell_id := as.character(cell_id)]
+      ck[, copykat_call := fifelse(grepl("aneuploid", tolower(raw)), "malignant",
+                            fifelse(grepl("diploid", tolower(raw)), "non_malignant", NA_character_))]
+      evidence <- merge(evidence, ck[, .(cell_id, copykat_call)], by = "cell_id", all.x = TRUE, sort = FALSE)
+      callers <- c(callers, "copykat")
+    }
+  }
+} else cat("No CopyKAT evidence.\n")
+
+# ---- Numbat: allele-aware, already a hard per-cell call --------------------
+# Emitted keyed by the pipeline's own cell_id (numbat_run.R does the join via
+# the explicit barcode map), so unlike the other callers no id translation is
+# needed here.
+f <- ev_files[grepl("_numbat_calls\\.tsv$", ev_files)]
+if (length(f)) {
+  nb <- rbindlist(lapply(f, function(x) tryCatch(fread(x), error = function(e) NULL)),
+                  use.names = TRUE, fill = TRUE)
+  if (!is.null(nb) && nrow(nb) && all(c("cell_id", "numbat_call") %in% names(nb))) {
+    nb[, cell_id := as.character(cell_id)]
+    nb <- unique(nb[, .(cell_id, numbat_call)], by = "cell_id")
+    evidence <- merge(evidence, nb, by = "cell_id", all.x = TRUE, sort = FALSE)
+    callers <- c(callers, "numbat")
+    cat(sprintf("Numbat: %d cells called across %d sample file(s)\n", nrow(nb), length(f)))
+  }
+} else cat("No Numbat evidence.\n")
+
+cat("\nCNV callers contributing:", if (length(callers)) paste(callers, collapse = ", ") else "none", "\n")
+```
+
+```{r annotation-evidence}
+# Annotation-derived call: tumour lineage vs known-reference lineage.
+ann <- meta[, .(cell_id, lab = as.character(get(col_ct)))]
+ann[, annotation_call := fifelse(lab %in% tumor_labels, "malignant",
+                          fifelse(lab %in% ref_labels, "non_malignant", NA_character_))]
+evidence <- merge(evidence, ann[, .(cell_id, annotation_call)], by = "cell_id", all.x = TRUE, sort = FALSE)
+```
+
+## Combining the evidence
+
+```{r combine}
+call_cols <- intersect(c("infercnv_call", "scevan_call", "copykat_call", "numbat_call"),
+                       names(evidence))
+
+n_mal <- if (length(call_cols)) rowSums(evidence[, ..call_cols] == "malignant", na.rm = TRUE) else rep(0L, nrow(evidence))
+n_non <- if (length(call_cols)) rowSums(evidence[, ..call_cols] == "non_malignant", na.rm = TRUE) else rep(0L, nrow(evidence))
+
+evidence[, n_malignant     := n_mal]
+evidence[, n_non_malignant := n_non]
+evidence[, n_cnv_calls     := n_mal + n_non]
+
+method      <- params$method
+min_callers <- as.integer(params$min_callers)
+
+if (method == "annotation" || !length(call_cols)) {
+  if (method != "annotation") {
+    warning("No CNV evidence available; falling back to annotation-only stratification.")
+  }
+  evidence[, malignant_status := fifelse(is.na(annotation_call), "ambiguous", annotation_call)]
+  evidence[, evidence_basis := "annotation"]
+
+} else if (method == "cnv") {
+  evidence[, malignant_status := fifelse(
+      n_cnv_calls == 0L, "ambiguous",
+      fifelse(n_malignant >= min_callers & n_malignant > n_non_malignant, "malignant",
+      fifelse(n_non_malignant >= min_callers & n_non_malignant > n_malignant, "non_malignant",
+              "ambiguous")))]
+  evidence[, evidence_basis := fifelse(n_cnv_calls == 0L, "none", "cnv")]
+
+} else {  # consensus (default)
+  # CNV decides when it reaches a majority verdict. Otherwise — including when
+  # two callers split 1-1 — the annotation label decides. `ambiguous` is
+  # therefore reserved for cells with NO CNV verdict AND no usable label; a
+  # caller disagreement does not by itself produce one. Use method = "cnv" if
+  # you want conflicts to be excluded rather than resolved by the label.
+  evidence[, malignant_status := fifelse(
+      n_malignant >= min_callers & n_malignant > n_non_malignant, "malignant",
+      fifelse(n_non_malignant >= min_callers & n_non_malignant > n_malignant, "non_malignant",
+      fifelse(!is.na(annotation_call), annotation_call, "ambiguous")))]
+  evidence[, evidence_basis := fifelse(
+      n_malignant >= min_callers & n_malignant > n_non_malignant, "cnv",
+      fifelse(n_non_malignant >= min_callers & n_non_malignant > n_malignant, "cnv",
+      fifelse(!is.na(annotation_call), "annotation", "none")))]
+}
+
+cat("Method:", method, "| min_callers:", min_callers, "\n\n")
+print(evidence[, .N, by = .(malignant_status, evidence_basis)][order(malignant_status, -N)])
+```
+
+## Lineage gate
+
+```{r lineage-gate}
+# Cell type defines the biological compartment; CNV adjudicates malignancy only
+# WITHIN the compartment that could plausibly be malignant.
+#
+# Without this gate the procedure is internally inconsistent: the reference
+# lineages define the null distribution for inferCNV's score, yet nothing stops
+# a cell of those same lineages from landing above the cutoff. With a one-sided
+# mean + k*SD threshold a fixed fraction of them will by construction — on a
+# large immune infiltrate that is tens of cells entering the tumour compartment
+# and flowing into the metaprogram stage.
+#
+# Cells NOT in a reference lineage — including unlabelled and "Unknown" cells —
+# are left to the CNV evidence. That matters for tumours whose malignant cells
+# have no entry in the marker database (a glioma's astrocyte-like cells are not
+# "Epithelial", and this database has no glial lineage at all): gating on a
+# positive tumour-lineage list would discard them, gating on the negative
+# reference list keeps them.
+gate_on <- isTRUE(as.logical(params$gate_by_lineage))
+
+evidence <- merge(evidence, meta[, .(cell_id, .lab = as.character(get(col_ct)))],
+                  by = "cell_id", all.x = TRUE, sort = FALSE)
+evidence[, in_reference_lineage := !is.na(.lab) & .lab %in% ref_labels]
+
+if (gate_on) {
+  # Empirical false-positive estimate: cells the CNV evidence called malignant
+  # that a known non-malignant lineage overrides. This is the single most useful
+  # number for judging whether the CNV calls can be trusted.
+  fp <- evidence[in_reference_lineage == TRUE & malignant_status == "malignant"]
+  n_ref_total <- evidence[in_reference_lineage == TRUE, .N]
+
+  if (nrow(fp)) {
+    cat(sprintf("\nLineage gate overrode %d of %d reference-lineage cells (%.2f%%) that CNV had called malignant.\n",
+                nrow(fp), n_ref_total, 100 * nrow(fp) / max(n_ref_total, 1)))
+    cat("Treat that percentage as an empirical false-positive rate for the CNV calls.\n")
+    print(fp[, .N, by = .lab][order(-N)])
+    fwrite(fp[, .N, by = .lab][order(-N)], "data/cnv_false_positive_by_lineage.csv")
+  } else {
+    cat("\nLineage gate overrode no cells: no reference-lineage cell was called malignant.\n")
+  }
+
+  evidence[in_reference_lineage == TRUE,
+           `:=`(malignant_status = "non_malignant", evidence_basis = "lineage_gate")]
+} else {
+  cat("\nLineage gate disabled (--stratify_gate_by_lineage false): CNV calls stand on every lineage.\n")
+}
+
+cat("\nAfter gating:\n")
+print(evidence[, .N, by = .(malignant_status, evidence_basis)][order(malignant_status, -N)])
+evidence[, .lab := NULL]
+```
+
+```{r concordance}
+# Where the callers disagree, and by how much. This is the number to look at
+# before trusting the split.
+if (length(call_cols) >= 2) {
+  conc <- evidence[n_cnv_calls >= 2]
+  if (nrow(conc)) {
+    agree <- conc[n_malignant == 0L | n_non_malignant == 0L, .N]
+    cat(sprintf("\nCaller concordance: %d of %d cells with >=2 calls agree (%.1f%%)\n",
+                agree, nrow(conc), 100 * agree / nrow(conc)))
+  }
+  pair <- evidence[, .N, by = call_cols]
+  fwrite(pair, "data/cnv_caller_agreement.csv")
+  knitr::kable(pair)
+} else {
+  cat("\nFewer than two CNV callers ran; no concordance to report.\n")
+}
+```
+
+## Assignment
+
+```{r assign}
+setkey(evidence, cell_id)
+assign_dt <- evidence[meta$cell_id, .(cell_id, malignant_status, evidence_basis,
+                                      n_malignant, n_non_malignant, annotation_call)]
+assign_dt[is.na(malignant_status), malignant_status := "ambiguous"]
+
+status <- setNames(assign_dt$malignant_status, assign_dt$cell_id)
+obj$malignant_status <- unname(status[colnames(obj)])
+obj$malignancy_evidence <- unname(setNames(assign_dt$evidence_basis, assign_dt$cell_id)[colnames(obj)])
+
+tab <- assign_dt[, .N, by = malignant_status][order(-N)]
+tab[, pct := round(100 * N / sum(N), 1)]
+knitr::kable(tab)
+
+fwrite(assign_dt, file.path("data", paste0(params$project_name, "_malignancy_assignment.csv")))
+```
+
+```{r composition-plot, fig.width = 9, fig.height = 5}
+if (!is.na(col_ct) && col_ct != ".__ct") {
+  comp <- merge(assign_dt[, .(cell_id, malignant_status)],
+                meta[, .(cell_id, lab = as.character(get(col_ct)))],
+                by = "cell_id")
+  comp <- comp[!is.na(lab)][, .N, by = .(lab, malignant_status)][, frac := N / sum(N), by = lab]
+
+  p <- ggplot(comp, aes(x = reorder(lab, -N), y = frac, fill = malignant_status)) +
+    geom_col(width = .72, colour = SURFACE, linewidth = 1) +
+    geom_text(data = comp[frac > .12],
+              aes(label = percent(frac, accuracy = 1)),
+              position = position_stack(vjust = .5), size = 3, colour = "#ffffff") +
+    scale_fill_manual(values = COL, name = "compartment") +
+    scale_y_continuous(labels = percent_format(accuracy = 1), expand = expansion(mult = c(0, .02))) +
+    labs(title = "Malignancy assignment within each annotated lineage",
+         subtitle = "A tumour-lineage label that is largely diploid indicates normal epithelium",
+         x = NULL, y = "share of cells") +
+    theme_scratch() + theme(axis.text.x = element_text(angle = 35, hjust = 1))
+  print(p)
+  ggsave("figures/malignancy_by_lineage.png", p, width = 9, height = 5.5, dpi = 400)
+}
+```
+
+```{r score-plot, fig.width = 9, fig.height = 4}
+if ("infercnv_score" %in% names(evidence)) {
+  d <- merge(evidence[, .(cell_id, infercnv_score)],
+             assign_dt[, .(cell_id, malignant_status)], by = "cell_id")
+  d <- d[is.finite(infercnv_score)]
+  if (nrow(d) > 20) {
+    p <- ggplot(d, aes(x = infercnv_score, fill = malignant_status)) +
+      geom_density(alpha = .55, colour = NA) +
+      scale_fill_manual(values = COL, name = "compartment") +
+      labs(title = "inferCNV genome-wide CNV load by assigned compartment",
+           subtitle = "Separation here is the visual check on the cutoff",
+           x = "CNV load", y = "density") +
+      theme_scratch()
+    print(p)
+    ggsave("figures/infercnv_score_distribution.png", p, width = 9, height = 4, dpi = 400)
+  }
+}
+```
+
+## Writing the two compartments
+
+```{r split}
+ambiguous_rule <- params$ambiguous
+
+tumor_cells <- colnames(obj)[obj$malignant_status == "malignant"]
+normal_cells <- colnames(obj)[obj$malignant_status == "non_malignant"]
+amb_cells   <- colnames(obj)[obj$malignant_status == "ambiguous"]
+
+if (ambiguous_rule == "malignant") {
+  tumor_cells <- c(tumor_cells, amb_cells)
+} else if (ambiguous_rule == "non_malignant") {
+  normal_cells <- c(normal_cells, amb_cells)
+}
+# 'exclude' (default): ambiguous cells enter neither compartment, but they are
+# still recorded in the assignment table and in `malignant_status` on the object.
+
+cat(sprintf("malignant:     %d cells\nnon-malignant: %d cells\nambiguous:     %d cells (%s)\n",
+            length(tumor_cells), length(normal_cells), length(amb_cells), ambiguous_rule))
+
+min_cells <- as.integer(params$min_cells_per_compartment)
+
+if (length(tumor_cells) >= min_cells) {
+  saveRDS(subset(obj, cells = tumor_cells),
+          file.path("data", paste0(params$project_name, "_malignant_object.RDS")))
+} else {
+  warning(sprintf("Only %d malignant cells (< min_cells_per_compartment=%d); no tumour object written. The metaprogram stage will be skipped.",
+                  length(tumor_cells), min_cells))
+}
+
+if (length(normal_cells) >= min_cells) {
+  saveRDS(subset(obj, cells = normal_cells),
+          file.path("data", paste0(params$project_name, "_nonmalignant_object.RDS")))
+} else {
+  warning(sprintf("Only %d non-malignant cells (< min_cells_per_compartment=%d); no non-malignant object written. Batch correction and its downstream stages will be skipped.",
+                  length(normal_cells), min_cells))
+}
+
+# The full object, carrying the assignment, for the integration layer.
+saveRDS(obj, file.path("data", paste0(params$project_name, "_stratified_object.RDS")))
+
+fwrite(data.table(compartment = c("malignant", "non_malignant", "ambiguous"),
+                  cells = c(length(tumor_cells), length(normal_cells), length(amb_cells)),
+                  ambiguous_rule = ambiguous_rule),
+       "data/compartment_sizes.csv")
+```
+
+## Parameters
+
+```{r params_log, echo = FALSE}
+print(params)
+```
+
+## Session info
+
+```{r session, echo = FALSE}
+sessionInfo()
+```

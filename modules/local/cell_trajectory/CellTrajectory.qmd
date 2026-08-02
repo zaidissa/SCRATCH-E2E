@@ -1,0 +1,963 @@
+---
+title: "Trajectory pipeline: CytoTRACE(+CT2) → Slingshot → Monocle3"
+author: "Syed Shujaat Ali Zaidi"
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    df-print: paged
+    fig-format: png
+    fig-dpi: 300
+    fig-responsive: true
+    fig-align: center
+lightbox:
+  match: auto
+  effect: zoom
+  loop: true
+execute:
+  echo: true
+  error: false
+  message: true
+  warning: false
+params:
+  outdir: "trajectory_nonmalignant"
+  work_directory: "."
+  project_name: "project"
+  ct_species: "human"
+
+  # input(s)
+  seurat_object: null
+  input_seurat_object: null     
+  project_object: "./data/project_main_postRPCA_withBEFORE.RDS"
+
+  # optional overrides; safe to leave null
+  n_threads: null
+  n_memory: null
+
+  auto_save: true
+  seed: 1234
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r}
+#| label: 00-setup
+#| message: true
+#| warning: true
+#| include: false
+
+############################################################
+# Trajectory pipeline: CytoTRACE(+CT2) → Slingshot → Monocle3
+# + Monocle3 programs (modules) & concordance across methods
+#
+# Assumptions:
+# - All packages are preinstalled (Docker image).
+# - Input Seurat object: params$input_seurat_object
+# - Working directory is the current directory unless you change it.
+############################################################
+
+# =========================================================
+# 0) SETUP
+# =========================================================
+
+# --- Working directory ---
+wd <- params$work_directory; if (is.null(wd) || !nzchar(wd)) wd <- "."
+# wd <- getwd()
+# setwd(wd)  # change if needed
+
+# --- Libraries ---
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(SeuratObject)
+  library(SeuratWrappers)
+  library(Matrix)
+  library(dplyr)
+  library(data.table)
+  library(ggplot2)
+  library(patchwork)
+  library(cowplot)
+  library(scales)
+  library(RColorBrewer)
+  library(viridis)
+  library(ComplexHeatmap)
+  library(circlize)
+  library(SingleCellExperiment)
+  library(slingshot)
+  library(tradeSeq)
+  library(BiocParallel)
+  library(clusterProfiler)
+  library(fgsea)
+  library(msigdbr)
+  library(WGCNA)
+  library(purrr)
+  library(RhpcBLASctl)
+  library(readr)
+  library(S4Vectors)
+  library(monocle3)
+  library(sf)     
+  library(CytoTRACE2)
+})
+
+set.seed(params$seed)
+allowWGCNAThreads()
+
+# --- Parallel / BLAS knobs to prevent oversubscription ---
+if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+  RhpcBLASctl::blas_set_num_threads(1L)
+  RhpcBLASctl::omp_set_num_threads(1L)
+}
+bpparam <- BiocParallel::MulticoreParam(workers = max(1L, parallel::detectCores() - 1L))
+
+# --- I/O layout (from params) ---
+outdir <- params$outdir
+# figdir <- file.path("figures")
+# resdir <- file.path("results")
+# rdsdir <- file.path("rds")
+# dir.create(figdir, recursive = TRUE, showWarnings = FALSE)
+# dir.create(resdir, recursive = TRUE, showWarnings = FALSE)
+# dir.create(rdsdir, recursive = TRUE, showWarnings = FALSE)
+
+
+data <- file.path(outdir, "data"); dir.create(data, FALSE, TRUE)
+
+CytotraceDir <- file.path(data, "CytoTraceOut"); dir.create(CytotraceDir, FALSE, TRUE)
+SlingshotDir <- file.path(data, "SlingshotOut"); dir.create(SlingshotDir, FALSE, TRUE)
+MonocleDir <- file.path(data, "Monocle3Out"); dir.create(MonocleDir, FALSE, TRUE)
+PseudotimeDir <- file.path(data, "Concordance"); dir.create(PseudotimeDir, FALSE, TRUE)
+
+CytotraceFig <- file.path(CytotraceDir, "figures"); dir.create(CytotraceFig, FALSE, TRUE)
+SlingshotFig <- file.path(SlingshotDir, "figures"); dir.create(SlingshotFig, FALSE, TRUE)
+MonocleFig <- file.path(MonocleDir, "figures"); dir.create(MonocleFig, FALSE, TRUE)
+PseudotimeFig <- file.path(PseudotimeDir, "figures"); dir.create(PseudotimeFig, FALSE, TRUE)
+
+CytotraceTbl  <- file.path(CytotraceDir,  "tables"); dir.create(CytotraceTbl,  FALSE, TRUE)
+SlingshotTbl  <- file.path(SlingshotDir,  "tables"); dir.create(SlingshotTbl,  FALSE, TRUE)
+MonocleTbl    <- file.path(MonocleDir,    "tables"); dir.create(MonocleTbl,    FALSE, TRUE)
+PseudotimeTbl <- file.path(PseudotimeDir, "tables"); dir.create(PseudotimeTbl, FALSE, TRUE)
+
+# --- Load input Seurat object ---
+SOURCE_RDS               <- if (!is.null(params$seurat_object) && nzchar(params$seurat_object)) params$seurat_object else project_object
+
+obj_nonmal <- readRDS(SOURCE_RDS)
+stopifnot(exists("obj_nonmal"))
+
+# --- Idents & UMAP (reuse if present; else compute) ---
+if (is.null(Idents(obj_nonmal, drop = TRUE))) {
+  if ("cluster" %in% colnames(obj_nonmal@meta.data)) {
+    Idents(obj_nonmal) <- "cluster"
+  } else {
+    Idents(obj_nonmal) <- "seurat_clusters"
+  }
+}
+if (!"umap" %in% names(obj_nonmal@reductions)) {
+  obj_nonmal <- FindVariableFeatures(obj_nonmal, nfeatures = 3000)
+  obj_nonmal <- ScaleData(obj_nonmal, verbose = FALSE)
+  obj_nonmal <- RunPCA(obj_nonmal, npcs = 50, verbose = FALSE)
+  obj_nonmal <- RunUMAP(obj_nonmal, dims = 1:30, umap.method = "uwot", metric = "cosine")
+}
+
+# --- Plot helpers ---
+pt_pal   <- viridis::viridis(256)
+theme_pub <- theme_minimal(base_size = 12) + theme(panel.grid = element_blank())
+# save_plot <- function(p, fn, w = 7, h = 5, dpi = 300) {
+#   ggsave(file.path(figdir, paste0(fn, ".pdf")), plot = p, width = w, height = h, limitsize = FALSE)
+#   ggsave(file.path(figdir, paste0(fn, ".png")), plot = p, width = w, height = h, dpi = dpi, limitsize = FALSE)
+# }
+
+save_plot <- function(p, fn, dir = figdir, w = 7, h = 5, dpi = 300) {
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+  ggsave(file.path(dir, paste0(fn, ".pdf")), plot = p, width = w, height = h, limitsize = FALSE)
+  ggsave(file.path(dir, paste0(fn, ".png")), plot = p, width = w, height = h, dpi = dpi, limitsize = FALSE)
+}
+
+rank01 <- function(x) (rank(x, na.last = "keep") / max(rank(x, na.last = "keep"), na.rm = TRUE))
+```
+
+```{r}
+#| label: CYTOTRACE2
+#| echo: false
+#| message: true
+#| warning: true
+# =========================================================
+# 1) CYTOTRACE (CT2 if available)
+#    - Compute potency scores from raw counts (genes x cells)
+#    - Attach to Seurat; plot cluster UMAP + CytoTRACE UMAP
+#    - Save top-2% CytoTRACE “root” cells for downstream use
+# =========================================================
+
+message("[1/6] CytoTRACE ...")
+
+# --- Prepare matrix for CytoTRACE ---
+counts_mat <- GetAssayData(obj_nonmal, layer = "counts")
+keep_genes <- Matrix::rowSums(counts_mat > 0) >= 10
+expr_mat   <- counts_mat[keep_genes, , drop = FALSE]
+
+# --- Convert any CT(2) output to a named numeric vector aligned to expr_mat ---
+get_ct_scores <- function(x, expr_mat) {
+  if (is.numeric(x) && !is.null(names(x))) {
+    v <- x
+  } else if (is.numeric(x) && is.null(names(x)) && length(x) == ncol(expr_mat)) {
+    v <- x; names(v) <- colnames(expr_mat)
+  } else if (is.matrix(x) && ncol(x) == 1L) {
+    v <- as.numeric(x[, 1]); nm <- rownames(x)
+    if (is.null(nm) || anyNA(nm)) nm <- colnames(expr_mat); names(v) <- nm
+  } else if (is.data.frame(x)) {
+    cn <- tolower(colnames(x))
+    score_idx <- which(cn %in% c("cytotrace2_score","cytotrace_score","score","scores","pred","prediction"))
+    if (!length(score_idx)) score_idx <- grep("cytotrace|score|pred", cn, ignore.case = TRUE)[1]
+    cell_idx  <- which(cn %in% c("cell_id","cellid","cell","barcode","cell_name","cellnames","cells"))
+    if (!length(cell_idx) && !is.null(rownames(x))) {
+      v <- as.numeric(x[[score_idx]]); names(v) <- rownames(x)
+    } else if (length(cell_idx)) {
+      v <- as.numeric(x[[score_idx]]); names(v) <- as.character(x[[cell_idx]])
+    } else {
+      v <- as.numeric(x[[score_idx]]); names(v) <- colnames(expr_mat)
+    }
+  } else if (is.list(x)) {
+    keys <- c("scores","cytotrace2_score","cytotrace_score","score","pred","prediction","CytoTRACE2_Score")
+    key <- keys[keys %in% names(x)][1]
+    if (!is.na(key)) return(get_ct_scores(x[[key]], expr_mat))
+    stop("Unrecognized list format for CytoTRACE output.")
+  } else {
+    stop("Unsupported CytoTRACE output type: ", paste(class(x), collapse = "/"))
+  }
+  v <- v[intersect(names(v), colnames(expr_mat))]
+  v <- v[colnames(expr_mat)]
+  stopifnot(length(v) == ncol(expr_mat))
+  v
+}
+
+# --- Robust dispatcher across CT2 builds; fallback to classic CytoTRACE ---
+run_cytotrace <- function(expr_mat,
+                          species = "human",
+                          n_subsamples = 1L,
+                          subsample_size = ncol(expr_mat),
+                          n_cores = max(1L, parallel::detectCores() - 1L)) {
+  stopifnot(is.matrix(expr_mat) || inherits(expr_mat, "dgCMatrix"))
+  if (requireNamespace("CytoTRACE2", quietly = TRUE)) {
+    ex <- getNamespaceExports("CytoTRACE2")
+    cand <- unique(c(ex[grepl("cyto|trace|run|pred", ex, ignore.case = TRUE)],
+                     "CytoTRACE2","cytotrace2","run_CytoTRACE2","run_cytotrace2"))
+    for (nm in cand) {
+      if (!(nm %in% ex)) next
+      fn <- try(getExportedValue("CytoTRACE2", nm), silent = TRUE)
+      if (inherits(fn, "try-error") || !is.function(fn)) next
+      fa <- names(formals(fn)); args <- list()
+      x_arg <- intersect(fa, c("x","expr_mat","expr","mat","data","counts","input"))[1]; if (is.na(x_arg)) x_arg <- fa[1]
+      args[[x_arg]] <- expr_mat
+      if ("species" %in% fa) args[["species"]] <- species
+      core_name <- intersect(fa, c("ncores","n_cores","n.cores","cores","nThreads","threads"))[1]
+      if (!is.na(core_name)) args[[core_name]] <- n_cores
+      if ("n_subsamples" %in% fa)  args[["n_subsamples"]]  <- n_subsamples
+      if ("subsample_size" %in% fa) args[["subsample_size"]] <- subsample_size
+      if ("fast_mode" %in% fa)      args[["fast_mode"]]     <- TRUE
+      out <- try(do.call(fn, args), silent = TRUE)
+      if (!inherits(out, "try-error")) return(out)
+    }
+    stop("CytoTRACE2 present but no compatible entrypoint/args worked.")
+  }
+  if (requireNamespace("CytoTRACE", quietly = TRUE)) {
+    return(CytoTRACE::CytoTRACE(expr_mat, species = species, ncores = n_cores))
+  }
+  stop("Neither CytoTRACE2 nor classic CytoTRACE is available.")
+}
+
+# --- Resource caps & run CT ---
+Sys.setenv(OPENBLAS_NUM_THREADS = "1", OMP_NUM_THREADS = "1", MKL_NUM_THREADS = "1")
+n_cores        <- min(8L, max(1L, parallel::detectCores() - 1L))
+n_subsamples   <- 1L
+subsample_size <- min(8000L, ncol(expr_mat))
+
+scores_raw <- run_cytotrace(
+  expr_mat,
+  species        = "human",
+  n_subsamples   = n_subsamples,
+  subsample_size = subsample_size,
+  n_cores        = n_cores
+)
+scores <- get_ct_scores(scores_raw, expr_mat)
+
+# --- Attach to Seurat (safe matching) ---
+cn <- colnames(obj_nonmal); idx <- match(cn, names(scores)); over <- sum(!is.na(idx))
+if (over == length(cn)) {
+  obj_nonmal$CytoTRACE <- scores[idx]
+} else if (over >= 0.8 * length(cn)) {
+  s_final <- numeric(length(cn)); names(s_final) <- cn
+  s_final[!is.na(idx)] <- scores[idx[!is.na(idx)]]
+  if (length(scores) == length(cn)) s_final[is.na(idx)] <- scores[is.na(idx)]
+  obj_nonmal$CytoTRACE <- s_final
+  warning(sprintf("CytoTRACE: partial name overlap (%.1f%%). Some cells aligned positionally.", 100 * over / length(cn)))
+} else if (length(scores) == length(cn)) {
+  warning("CytoTRACE: low name overlap; assigning by column order.")
+  obj_nonmal$CytoTRACE <- scores; names(obj_nonmal$CytoTRACE) <- cn
+} else stop("CytoTRACE names/length mismatch; inspect 'scores_raw'.")
+
+# --- Overview UMAPs: clusters & CytoTRACE ---
+use_reduction <- if ("umap.rpca" %in% names(obj_nonmal@reductions)) "umap.rpca" else "umap"
+emb_umap      <- Embeddings(obj_nonmal, use_reduction)
+umap_cells    <- rownames(emb_umap)
+valid_cells   <- umap_cells[is.finite(obj_nonmal$CytoTRACE[umap_cells])]
+q_ct          <- quantile(obj_nonmal$CytoTRACE[valid_cells], c(0.05, 0.95), na.rm = TRUE)
+
+meta <- obj_nonmal@meta.data
+grp_candidate <- intersect(c("seurat_clusters","cluster","celltype","cell_type","cell_type_minor","tissue_type","orig.ident"),
+                           colnames(meta))
+if (length(grp_candidate) > 0) {
+  grp <- grp_candidate[1]
+  Idents(obj_nonmal) <- grp
+  p_clusters <- DimPlot(obj_nonmal, reduction = use_reduction, group.by = grp, label = TRUE, repel = TRUE) +
+    ggtitle(paste0("Clusters: ", grp, " (", use_reduction, ")")) + theme_pub
+} else {
+  p_clusters <- DimPlot(obj_nonmal, reduction = use_reduction, label = TRUE, repel = TRUE) +
+    ggtitle(paste0("Clusters (", use_reduction, ")")) + theme_pub
+}
+
+p_ct <- FeaturePlot(
+  obj_nonmal, features = "CytoTRACE", reduction = use_reduction, cols = pt_pal,
+  cells = valid_cells, min.cutoff = unname(q_ct[1]), max.cutoff = unname(q_ct[2]), order = TRUE
+) + ggtitle("CytoTRACE2 (potency)") + theme_pub
+
+panel_ct <- p_clusters | p_ct
+# save_plot(panel_ct, "01_CytoTRACE_overview")         # Step 01 figures
+save_plot(panel_ct, "CytoTRACE_overview", dir = CytotraceFig)         # Step 01 figures
+print(panel_ct)
+
+# --- Root cells (top 2% CT) for downstream rooting ---
+root_cells_ct <- names(sort(obj_nonmal$CytoTRACE, decreasing = TRUE))[1:max(10, floor(0.02 * ncol(obj_nonmal)))]
+saveRDS(list(root_cells = root_cells_ct, score = obj_nonmal$CytoTRACE),
+        file.path(CytotraceDir, "cytotrace_results.rds"))
+
+```
+
+
+```{r}
+#| label: slingshot
+#| echo: false
+#| message: true
+#| warning: true
+
+message("[2/6] Slingshot ...")
+
+sce <- as.SingleCellExperiment(obj_nonmal)
+reducedDims(sce)$UMAP <- obj_nonmal@reductions$umap@cell.embeddings
+cl  <- Idents(obj_nonmal)
+start.clus <- names(which.max(tapply(obj_nonmal$CytoTRACE, cl, median)))
+sce <- slingshot(sce, clusterLabels = cl, reducedDim = "UMAP", start.clus = start.clus)
+
+# --- Figure-style panel with curves & origin ---
+get_embed <- function(sce, prefer = c("UMAP","TSNE","PCA")) {
+  have <- intersect(prefer, names(reducedDims(sce)))
+  if (!length(have)) stop("No UMAP/TSNE/PCA in reducedDims(sce).")
+  list(name = have[1], mat = as.data.frame(reducedDims(sce)[[have[1]]]))
+}
+emb <- get_embed(sce)$mat; colnames(emb)[1:2] <- c("DR1","DR2"); rownames(emb) <- colnames(sce)
+
+cd <- SummarizedExperiment::colData(sce)
+get_cd <- function(cd, nm, default = NULL) if (nm %in% colnames(cd)) as.vector(cd[[nm]]) else default
+patient_vec <- get_cd(cd, "patient", rep("All", ncol(sce)))
+
+pt_mat <- slingPseudotime(sce)
+pt_vec <- apply(pt_mat, 1, function(x) suppressWarnings(min(x, na.rm = TRUE))); pt_vec[!is.finite(pt_vec)] <- NA_real_
+
+meta_df <- obj_nonmal@meta.data
+plotdf <- dplyr::bind_cols(emb[, 1:2], meta_df[rownames(emb), , drop = FALSE]) |>
+  dplyr::mutate(pseudotime = pt_vec, patient = if ("patient" %in% names(meta_df)) patient else "All")
+
+crvs <- slingCurves(sce)
+curves_df <- purrr::map2_dfr(crvs, seq_along(crvs), function(crv, i) {
+  cd <- as.data.frame(crv$s[, c(1, 2), drop = FALSE]); colnames(cd) <- c("DR1", "DR2"); cd$lineage <- paste0("bran. ", i); cd
+})
+
+label_ori <- plotdf |>
+  dplyr::group_by(patient) |>
+  dplyr::slice_min(order_by = pseudotime, n = 1, with_ties = FALSE) |>
+  dplyr::transmute(patient, DR1, DR2, lab = "Ori.")
+label_bran <- curves_df |>
+  dplyr::group_by(lineage) |>
+  dplyr::slice_max(order_by = dplyr::row_number(), n = 1) |>
+  dplyr::mutate(lab = lineage)
+
+p_pseudo <- ggplot(plotdf, aes(DR1, DR2, color = pseudotime)) +
+  geom_point(size = 0.15) +
+  scale_color_viridis_c(option = "magma", direction = -1, name = "Pseudotime") +
+  geom_path(data = curves_df, aes(DR1, DR2), inherit.aes = FALSE, color = "red", linewidth = 0.6) +
+  geom_text(data = label_ori, aes(DR1, DR2, label = lab), inherit.aes = FALSE, size = 3, color = "black") +
+  geom_text(data = label_bran, aes(DR1, DR2, label = lab), inherit.aes = FALSE, size = 3, color = "black", vjust = -0.5) +
+  coord_equal() + theme_bw(base_size = 10) + ggtitle("Slingshot pseudotime (Figure-H style)")
+if (length(unique(plotdf$patient)) > 1L) p_pseudo <- p_pseudo + facet_wrap(~ patient, ncol = 1, scales = "free")
+
+ggsave(file.path(SlingshotFig, "slingshot_figureH.png"), p_pseudo, width = 9, height = 11, dpi = 300)
+p_pseudo
+
+# --- Back to Seurat: UMAP colored by Slingshot pseudotime ---
+pt_list <- slingPseudotime(sce)
+pt_df   <- as.data.frame(pt_list)
+pt_rank <- apply(pt_df, 2, function(x) rank01(x))
+obj_nonmal$slingshot_pseudotime <- rowMeans(pt_rank, na.rm = TRUE)[colnames(obj_nonmal)]
+
+df_umap <- data.frame(Embeddings(obj_nonmal, "umap"),
+                      sl_pt = obj_nonmal$slingshot_pseudotime[colnames(obj_nonmal)])
+p_sl <- ggplot(df_umap, aes(umap_1, umap_2, color = sl_pt)) +
+  geom_point(size = 0.6) + scale_color_viridis_c() + theme_pub + ggtitle("Slingshot pseudotime (UMAP)")
+# save_plot(p_sl, "02b_slingshot_pseudotime_umap")
+save_plot(p_sl, "slingshot_pseudotime_umap", dir = SlingshotFig)
+p_sl
+
+```
+
+```{r}
+#| label: monocle3
+#| echo: false
+#| message: true
+#| warning: true
+
+message("[2b/6] Monocle3 ...")
+
+# --- Build CDS & reuse Seurat UMAP if present ---
+
+cds <- SeuratWrappers::as.cell_data_set(obj_nonmal)
+if ("umap" %in% names(obj_nonmal@reductions)) {
+  reducedDims(cds)$UMAP <- Embeddings(obj_nonmal, "umap")
+} else {
+  cds <- preprocess_cds(cds, num_dim = 50)
+  cds <- reduce_dimension(cds, reduction_method = "UMAP")
+}
+
+# --- Carry cluster/patient metadata ---
+
+cds@colData$seurat_clusters <- Idents(obj_nonmal) |> as.character()
+if ("patientid" %in% colnames(obj_nonmal@meta.data)) {
+  cds@colData$patientid <- obj_nonmal$patientid
+} else if ("patient" %in% colnames(obj_nonmal@meta.data)) {
+  cds@colData$patientid <- obj_nonmal$patient
+} else {
+  cds@colData$patientid <- "All"
+}
+
+# --- Single partition for stability; learn principal graph ---
+
+cds@clusters$UMAP$clusters   <- factor(cds@colData$seurat_clusters)
+cds@clusters$UMAP$partitions <- factor(rep(1, ncol(cds)))
+cds <- preprocess_cds(cds, num_dim = 50)
+cds <- reduce_dimension(cds, reduction_method = "UMAP")
+prts <- try(partitions(cds), silent = TRUE)
+k_target <- 20L
+k_valid  <- if (!inherits(prts, "try-error") && length(unique(prts)) > 1L) {
+  min(k_target, max(5L, min(table(prts)) - 2L))
+} else {
+  min(k_target, max(5L, floor(ncol(cds) / 100)))
+}
+
+cds <- cluster_cells(cds, reduction_method = "UMAP", k = k_valid)
+parts <- tryCatch(monocle3::partitions(cds), error = function(e) NULL)
+use_part <- !is.null(parts) && length(unique(parts)) > 1L
+cds <- monocle3::learn_graph(cds, use_partition = use_part,
+                             learn_graph_control = list(prune_graph = TRUE, minimal_branch_len = 10))
+
+# --- Root using CytoTRACE-high cluster; order cells ---
+
+cl_local   <- Idents(obj_nonmal)
+start.clus <- names(which.max(tapply(obj_nonmal$CytoTRACE, cl_local, median)))
+seu_clusters <- as.character(Idents(obj_nonmal)); names(seu_clusters) <- colnames(obj_nonmal)
+common <- intersect(colnames(cds), names(seu_clusters))
+root_cells <- names(seu_clusters[common][seu_clusters[common] == start.clus])
+if (length(root_cells) == 0) {
+  ct <- obj_nonmal$CytoTRACE; ct <- ct[intersect(names(ct), colnames(cds))]
+  root_cells <- names(sort(ct, decreasing = TRUE))[1:min(200, length(ct))]
+}
+if (length(root_cells) > 1000) { set.seed(123); root_cells <- sample(root_cells, 1000) }
+
+
+cds <- monocle3::order_cells(cds, root_cells = root_cells)
+obj_nonmal$monocle3_pseudotime <- as.numeric(monocle3::pseudotime(cds)[colnames(obj_nonmal)])
+
+# --- Core Monocle3 plots (global, clusters, per-patient, distributions) ---
+
+p_m3_pt <- plot_cells(
+  cds,
+  color_cells_by = "pseudotime",
+  label_groups_by_cluster = FALSE,
+  label_leaves = TRUE,
+  label_branch_points = TRUE,
+  show_trajectory_graph = TRUE,
+  trajectory_graph_color = "#CB181D",
+  trajectory_graph_segment_size = 1.0
+) + ggtitle("Monocle3 pseudotime (global)")
+ggsave(file.path(MonocleFig, "monocle3_pseudotime_global.png"), p_m3_pt, width = 6, height = 5, dpi = 400)
+p_m3_pt
+
+p_m3_clu <- plot_cells(
+  cds,
+  color_cells_by = "seurat_clusters",
+  label_groups_by_cluster = TRUE,
+  label_leaves = FALSE,
+  label_branch_points = TRUE,
+  show_trajectory_graph = TRUE
+) + ggtitle("Monocle3: Seurat clusters on principal graph")
+ggsave(file.path(MonocleFig, "monocle3_clusters_on_graph.png"), p_m3_clu, width = 6, height = 5, dpi = 400)
+p_m3_clu
+
+if (!all(cds@colData$patientid == "All")) {
+  pats <- sort(unique(cds@colData$patientid))
+  for (pp in pats) {
+    keep <- cds@colData$patientid == pp
+    ppp <- plot_cells(
+      cds[, keep],
+      color_cells_by = "pseudotime",
+      label_groups_by_cluster = FALSE,
+      show_trajectory_graph = TRUE,
+      trajectory_graph_color = "#CB181D",
+      label_leaves = TRUE, label_branch_points = TRUE
+    ) + ggtitle(paste("Monocle3 pseudotime — patient", pp))
+ggsave(file.path(MonocleFig, sprintf("monocle3_pseudotime_patient_%s.png", pp)),
+ppp, width = 5, height = 4.5, dpi = 400)
+ppp
+
+}
+}
+
+df_pt <- data.frame(
+  pseudotime = monocle3::pseudotime(cds),
+  cluster    = cds@colData$seurat_clusters,
+  patient    = cds@colData$patientid
+) |> dplyr::filter(is.finite(pseudotime))
+p_density <- ggplot(df_pt, aes(pseudotime, after_stat(density), fill = cluster)) +
+  geom_histogram(bins = 50, position = "identity", alpha = 0.5) +
+  labs(title = "Monocle3 pseudotime distribution by cluster", y = "density") +
+  theme_bw(base_size = 10)
+ggsave(file.path(MonocleFig, "monocle3_pseudotime_density_by_cluster.png"), p_density, width = 7, height = 4.2, dpi = 400)
+p_density
+
+# --- Seurat UMAP side-by-side: CytoTRACE vs Monocle3 PT (NA-safe) ---
+use_red <- if ("umap.rpca" %in% names(obj_nonmal@reductions)) "umap.rpca" else "umap"
+
+p_ct_umap <- FeaturePlot(
+  obj_nonmal, "CytoTRACE", reduction = use_red, cols = viridis::viridis(256), order = TRUE
+) + ggtitle("CytoTRACE")
+
+# guard for non-finite pseudotime so FeaturePlot can't error
+m3_vec <- obj_nonmal$monocle3_pseudotime
+finite_cells <- colnames(obj_nonmal)[is.finite(m3_vec)]
+if (length(finite_cells) == 0L) {
+  stop("Monocle3 pseudotime has no finite values to plot. Check rooting and order_cells().")
+}
+q_m3 <- suppressWarnings(stats::quantile(m3_vec[finite_cells], c(0.05, 0.95), na.rm = TRUE))
+if (!all(is.finite(q_m3))) {
+  r <- range(m3_vec[finite_cells], na.rm = TRUE)
+  if (r[1] == r[2]) r[2] <- r[2] + 1e-6
+  q_m3 <- r
+}
+
+p_m3_umap <- FeaturePlot(
+  obj_nonmal, "monocle3_pseudotime", reduction = use_red, cols = viridis::viridis(256),
+  cells = finite_cells, min.cutoff = unname(q_m3[1]), max.cutoff = unname(q_m3[2]), order = TRUE
+) + ggtitle("Monocle3 PT")
+
+panel_m3 <- p_ct_umap | p_m3_umap
+# save_plot(panel_m3, "02g_monocle3_vs_cytotrace_umap")
+save_plot(panel_m3, "monocle3_vs_cytotrace_umap", dir = MonocleFig)
+panel_m3
+
+```
+
+
+
+```{r}
+#| label: monocle3-genes-programs
+#| echo: false
+#| message: true
+#| warning: true
+
+# ncores_m3 <- max(1, parallel::detectCores() - 1)
+
+# m3_gt <- monocle3::graph_test(cds, neighbor_graph = "principal_graph", cores = ncores_m3)
+ncores_m3 <- as.integer(Sys.getenv("M3_CORES", unset = "1"))
+if (!is.finite(ncores_m3) || ncores_m3 < 1) ncores_m3 <- 1L
+
+max_cores <- as.integer(Sys.getenv("OMP_NUM_THREADS", unset = "8"))
+if (!is.finite(max_cores) || max_cores < 1) max_cores <- 1L
+
+ncores_m3 <- as.integer(min(ncores_m3, max_cores))
+
+safe_graph_test <- function(cds, cores) {
+  tryCatch(
+    monocle3::graph_test(cds, neighbor_graph = "principal_graph", cores = cores),
+    error = function(e) {
+      warning(sprintf("[Monocle3] graph_test failed with cores=%s: %s; retrying with cores=1",
+                      cores, conditionMessage(e)))
+      monocle3::graph_test(cds, neighbor_graph = "principal_graph", cores = 1)
+    }
+  )
+}
+
+m3_gt <- safe_graph_test(cds, cores = ncores_m3)
+m3_gt_df <- as.data.frame(m3_gt)
+if (!"gene_id" %in% colnames(m3_gt_df)) m3_gt_df$gene_id <- rownames(m3_gt_df)
+# data.table::fwrite(m3_gt_df, file.path(resdir, "02h_m3_graph_test_all.csv"))
+data.table::fwrite(m3_gt_df, file.path(MonocleTbl, "monocle3_graph_test_all.csv"))
+
+top_moran <- m3_gt_df |>
+  dplyr::filter(is.finite(q_value)) |>
+  dplyr::slice_head(n = 2000) |>
+  dplyr::select(gene_id, status, p_value, morans_test_statistic, morans_I, q_value)
+# readr::write_tsv(top_moran, file.path(resdir, "02i_m3_graph_test_top2000.tsv"))
+readr::write_tsv(top_moran,  file.path(MonocleTbl, "monocle3_graph_test_top2000.tsv"))
+
+if (nrow(top_moran) == 0) {
+  warning("No genes passed; loosening to q<1e-3.")
+  top_moran <- m3_gt_df |>
+    dplyr::filter(is.finite(q_value), q_value < 1e-3) |>
+    dplyr::arrange(q_value) |>
+    dplyr::slice_head(n = 2000) |>
+    dplyr::select(gene_id, status, p_value, morans_test_statistic, morans_I, q_value)
+  # readr::write_tsv(top_moran, file.path(resdir, "02i_m3_graph_test_top2000_q1e-3.tsv"))
+  readr::write_tsv(top_moran, file.path(MonocleTbl, "monocle3_graph_test_top2000_q1e-3.tsv"))
+
+}
+
+# --- Map top genes to CDS rownames (prefer rownames; fallback gene_short_name) ---
+rd <- as.data.frame(SummarizedExperiment::rowData(cds))
+if (!"gene_short_name" %in% colnames(rd)) {
+  rd$gene_short_name <- rownames(cds)
+  SummarizedExperiment::rowData(cds) <- S4Vectors::DataFrame(rd)
+}
+g_row <- intersect(top_moran$gene_id, rownames(cds))
+map_sym_to_row <- setNames(rownames(cds), rd$gene_short_name)  # symbol -> rowname
+g_sym <- map_sym_to_row[intersect(top_moran$gene_id, rd$gene_short_name)]
+g_sym <- as.character(na.omit(g_sym))
+genes_in_cds <- unique(c(g_row, g_sym))
+genes_in_cds <- genes_in_cds[genes_in_cds %in% rownames(cds)]
+
+message(sprintf("[Monocle3] matched %d/%d top genes into CDS.", length(genes_in_cds), nrow(top_moran)))
+
+# --- Small-multiples: top genes along pseudotime ---
+if (length(genes_in_cds) > 0) {
+  top_show <- head(genes_in_cds, 12)
+  p_small <- monocle3::plot_genes_in_pseudotime(
+    cds[top_show, , drop = FALSE],
+    color_cells_by = "seurat_clusters",
+    min_expr = 0.0,
+    ncol = 3,
+    label_by_short_name = TRUE
+  ) + ggplot2::ggtitle("Top genes along pseudotime (Monocle3)")
+  ggplot2::ggsave(file.path(MonocleFig, "monocle3_top_genes_in_pseudotime.png"),
+                  p_small, width = 10, height = 8, dpi = 400)
+  print(p_small)
+}
+
+# --- Gene programs: find modules and build module/gene heatmaps over pseudotime ---
+set.seed(123)
+if (length(genes_in_cds) > 0) {
+  cds_for_modules <- cds[genes_in_cds, , drop = FALSE]
+  mods <- tryCatch(
+    monocle3::find_gene_modules(cds_for_modules, resolution = 1e-2, cores = ncores_m3),
+    error = function(e) { warning("find_gene_modules failed: ", conditionMessage(e)); NULL }
+  )
+  if (!is.null(mods) && nrow(mods) > 0) {
+    saveRDS(mods, file.path(MonocleDir, "monocle3_gene_modules.rds"))
+    # readr::write_tsv(mods, file.path(resdir, "02k_m3_gene_modules.tsv"))
+    readr::write_tsv(mods,       file.path(MonocleTbl, "monocle3_gene_modules.tsv"))
+    
+    # finite pseudotime → bins
+    pt_all     <- monocle3::pseudotime(cds)
+    keep_cells <- is.finite(pt_all)
+    if (any(keep_cells)) {
+      cds_fin  <- cds[, keep_cells, drop = FALSE]
+      pt_bins  <- cut(monocle3::pseudotime(cds_fin), breaks = 50, labels = FALSE)
+      mods_df  <- as.data.frame(mods)
+      if (!"gene" %in% colnames(mods_df) && "id" %in% colnames(mods_df)) mods_df$gene <- mods_df$id
+      mods_df  <- mods_df[, c("gene","module")]
+      mods_df$gene   <- as.character(mods_df$gene)
+      mods_df$module <- as.character(mods_df$module)
+      
+      g_keep <- intersect(mods_df$gene, rownames(cds_fin))
+      if (length(g_keep) >= 2) {
+        lc <- SummarizedExperiment::assay(cds_fin[g_keep, ], "logcounts"); lc <- as.matrix(lc)
+        
+        # MODULE × BIN mean heatmap
+        df_cells <- data.frame(cell = colnames(cds_fin), bin = as.integer(pt_bins))
+        gene_bin_means <- lapply(split(seq_len(ncol(lc)), df_cells$bin), function(cols_idx) {
+          rowMeans(lc[, cols_idx, drop = FALSE], na.rm = TRUE)
+        })
+        gene_bin_mat <- do.call(cbind, gene_bin_means)  # genes x bins
+        colnames(gene_bin_mat) <- as.character(sort(unique(df_cells$bin)))
+        
+        gb_df <- as.data.frame(gene_bin_mat); gb_df$gene <- rownames(gb_df)
+        gb_long <- tidyr::pivot_longer(gb_df, cols = -gene, names_to = "bin", values_to = "expr")
+        gb_long <- dplyr::left_join(gb_long, mods_df, by = "gene")
+        gb_long$bin <- as.integer(gb_long$bin)
+        
+        mod_bin <- gb_long |>
+          dplyr::group_by(module, bin) |>
+          dplyr::summarise(expr = mean(expr, na.rm = TRUE), .groups = "drop")
+        
+        p_heat_mod <- ggplot2::ggplot(mod_bin, ggplot2::aes(x = bin, y = module, fill = expr)) +
+          ggplot2::geom_tile() +
+          ggplot2::scale_fill_gradientn(colours = c("#313695", "#ffffbf", "#a50026"), na.value = "grey90") +
+          ggplot2::labs(x = "Pseudotime bin", y = "Module", fill = "mean expr",
+                        title = "Monocle3 gene programs (modules) along pseudotime") +
+          ggplot2::theme_bw(base_size = 10)
+        ggplot2::ggsave(file.path(MonocleFig, "monocle3_programs_pseudotime_heatmap_modules.png"),
+                        p_heat_mod, width = 8, height = 10, dpi = 400)
+        print(p_heat_mod)
+        
+        # GENE × BIN z-scored, faceted by module
+        gb_long_z <- gb_long |>
+          dplyr::group_by(gene) |>
+          dplyr::mutate(z = {
+            mu <- mean(expr, na.rm = TRUE); sdv <- sd(expr, na.rm = TRUE)
+            ifelse(is.finite(sdv) & sdv > 0, (expr - mu)/sdv, 0)
+          }) |>
+          dplyr::ungroup()
+        
+        p_heat_gene <- ggplot2::ggplot(gb_long_z, ggplot2::aes(x = bin, y = gene, fill = z)) +
+          ggplot2::geom_tile() +
+          ggplot2::facet_wrap(~ module, scales = "free_y", ncol = 3) +
+          ggplot2::scale_fill_gradientn(colours = c("#313695", "#ffffbf", "#a50026"), na.value = "grey90") +
+          ggplot2::labs(x = "Pseudotime bin", y = "Genes", fill = "z",
+                        title = "Monocle3 gene programs (genes) along pseudotime") +
+          ggplot2::theme_bw(base_size = 9) +
+          ggplot2::theme(axis.text.y = ggplot2::element_blank(),
+                         axis.ticks.y = ggplot2::element_blank())
+        ggplot2::ggsave(file.path(MonocleFig, "monocle3_programs_pseudotime_heatmap_genes.png"),
+                        p_heat_gene, width = 10, height = 8, dpi = 400)
+        print(p_heat_gene)
+      }
+    }
+  } else {
+    warning("No gene modules were produced (mods is NULL or empty).")
+  }
+}
+
+# --- Save cell-level pseudotime table from Monocle3 ---
+readr::write_tsv(
+  data.frame(
+    cell = colnames(cds),
+    pseudotime = monocle3::pseudotime(cds),
+    cluster = cds@colData$seurat_clusters,
+    patient = cds@colData$patientid
+  ),
+  # file.path(resdir, "02n_m3_celllevel_pseudotime.tsv")
+  file.path(MonocleTbl, "monocle3_celllevel_pseudotime.tsv")
+)
+
+# --- Seurat UMAP with Monocle3 pseudotime (NA-safe) ---
+use_red <- if ("umap.rpca" %in% names(obj_nonmal@reductions)) "umap.rpca" else "umap"
+
+m3 <- obj_nonmal$monocle3_pseudotime
+finite_cells <- colnames(obj_nonmal)[is.finite(m3)]
+
+cat(sprintf("[Monocle3 PT] finite=%d / total=%d\n", length(finite_cells), ncol(obj_nonmal)))
+if (length(finite_cells) == 0L) {
+  stop("Monocle3 pseudotime has no finite values. Re-check order_cells() and root_cells.")
+}
+
+# robust cutoffs
+q <- suppressWarnings(quantile(m3[finite_cells], c(0.05, 0.95), na.rm = TRUE))
+if (!all(is.finite(q))) {
+  r <- range(m3[finite_cells], na.rm = TRUE)
+  if (!all(is.finite(r))) stop("Monocle3 pseudotime range is not finite.")
+  if (r[1] == r[2]) r[2] <- r[2] + 1e-6
+  q <- r
+}
+
+p_m3_umap_only <- FeaturePlot(
+  obj_nonmal,
+  features   = "monocle3_pseudotime",
+  reduction  = use_red,
+  cols       = viridis::viridis(256),
+  cells      = finite_cells,           # <— only plot finite PT cells
+  min.cutoff = unname(q[1]),
+  max.cutoff = unname(q[2]),
+  order      = TRUE
+) + ggtitle("Monocle3 pseudotime") + theme_pub
+
+# save_plot(p_m3_umap_only, "02o_monocle3_pseudotime_umap")
+save_plot(p_m3_umap_only, "monocle3_pseudotime_umap", dir = MonocleFig)
+p_m3_umap_only
+
+```
+
+
+```{r}
+#| label: Concordance
+#| echo: false
+#| message: true
+#| warning: true
+
+comp_df <- data.frame(
+  CytoTRACE = rank01(obj_nonmal$CytoTRACE),
+  slingshot = rank01(obj_nonmal$slingshot_pseudotime),
+  monocle3  = if ("monocle3_pseudotime" %in% colnames(obj_nonmal@meta.data))
+    rank01(obj_nonmal$monocle3_pseudotime) else NA_real_
+) |> na.omit()
+
+
+cors <- cor(comp_df, method = "spearman")
+data.table::fwrite(as.data.frame(cors), file.path(PseudotimeTbl, "pseudotime_spearman_correlations.csv"))
+
+ht <- Heatmap(cors, name = "ρ", cluster_rows = FALSE, cluster_columns = FALSE,
+              col = colorRamp2(c(0, 0.5, 1), c("#f0f0f0","#74add1","#08306b")))
+pdf(file.path(PseudotimeFig, "pseudotime_correlation_heatmap.pdf"), width = 2.8, height = 2.4); draw(ht); dev.off()
+ht
+
+saveRDS(
+  list(
+    comp_df = comp_df,
+    cors = cors
+  ),
+  file.path(PseudotimeDir, "concordance_inputs.rds")
+)
+
+#####
+# ================================
+# Repair: realign PT tracks by cell name & replot panel
+# ================================
+
+message("=== Diagnose finite counts before repair ===")
+features <- c("CytoTRACE","slingshot_pseudotime","monocle3_pseudotime")
+# ================================
+# NA-safe UMAP panel WITHOUT FeaturePlot (robust alignment)
+# ================================
+
+use_red  <- if ("umap.rpca" %in% names(obj_nonmal@reductions)) "umap.rpca" else "umap"
+umap_mat <- Embeddings(obj_nonmal, use_red)
+stopifnot(!is.null(umap_mat))
+cell_ids <- rownames(umap_mat)
+
+# If not already defined above in your script, include the same normalizer used elsewhere
+normalize_barcode <- function(x) {
+  x <- as.character(x)
+  x <- sub("\\s+$", "", x)
+  x <- sub("^\\s+", "", x)
+  x <- sub("-[0-9]+$", "", x)
+  x <- sub("\\s.*$", "", x)
+  x <- sub(":.*$", "", x)
+  x
+}
+
+# Helper: pull one meta column aligned to UMAP rows (order-first, then barcode map)
+extract_meta_aligned <- function(obj, feature) {
+  if (!(feature %in% colnames(obj@meta.data))) return(rep(NA_real_, nrow(obj@meta.data)))
+  
+  # Fast path: if UMAP rows == meta rownames, just index by row order
+  if (all(cell_ids %in% rownames(obj@meta.data))) {
+    v <- obj@meta.data[cell_ids, feature, drop = TRUE]
+  } else {
+    # Fallback: barcode-normalized matching (handles -1 suffixes etc.)
+    meta_ids_norm  <- normalize_barcode(rownames(obj@meta.data))
+    umap_ids_norm  <- normalize_barcode(cell_ids)
+    map_idx        <- match(umap_ids_norm, meta_ids_norm)
+    v              <- obj@meta.data[[feature]]
+    v              <- v[map_idx]
+  }
+  
+  # Coerce to clean numeric (your helper)
+  coerce_one_meta <- function(v) {
+    if (is.list(v)) {
+      v <- vapply(v, function(x) suppressWarnings(as.numeric(if (length(x)) x[[1]] else NA)), numeric(1))
+    } else if (is.factor(v)) {
+      v <- suppressWarnings(as.numeric(as.character(v)))
+    } else {
+      v <- suppressWarnings(as.numeric(v))
+    }
+    v[!is.finite(v)] <- NA_real_
+    v
+  }
+  
+  coerce_one_meta(v)
+}
+
+# Build one UMAP colored by a numeric meta vector (already aligned)
+build_umap_panel <- function(emb, vec, title) {
+  df <- data.frame(x = emb[, 1], y = emb[, 2], val = vec)
+  df <- df[is.finite(df$val), , drop = FALSE]
+  if (nrow(df) == 0L) return(NULL)
+  
+  qs <- stats::quantile(df$val, c(0.05, 0.95), na.rm = TRUE)
+  if (!all(is.finite(qs)) || qs[1] == qs[2]) {
+    rng <- range(df$val, na.rm = TRUE)
+    if (rng[1] == rng[2]) rng[2] <- rng[2] + 1e-6
+    qs <- rng
+  }
+  
+  ggplot(df, aes(x, y, color = val)) +
+    geom_point(size = 0.4) +
+    scale_color_viridis_c(limits = c(unname(qs[1]), unname(qs[2])), oob = scales::squish) +
+    coord_equal() +
+    labs(x = paste0(toupper(use_red), "_1"),
+         y = paste0(toupper(use_red), "_2"),
+         color = "",
+         title = title) +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid = element_blank())
+}
+
+# Extract aligned vectors
+v_ct <- if ("CytoTRACE" %in% colnames(obj_nonmal@meta.data))
+  extract_meta_aligned(obj_nonmal, "CytoTRACE") else NULL
+v_sl <- if ("slingshot_pseudotime" %in% colnames(obj_nonmal@meta.data))
+  extract_meta_aligned(obj_nonmal, "slingshot_pseudotime") else NULL
+v_m3 <- if ("monocle3_pseudotime" %in% colnames(obj_nonmal@meta.data))
+  extract_meta_aligned(obj_nonmal, "monocle3_pseudotime") else NULL
+
+# Build plots
+p_ct <- if (!is.null(v_ct)) build_umap_panel(umap_mat, v_ct, "CytoTRACE2") else NULL
+p_sl <- if (!is.null(v_sl)) build_umap_panel(umap_mat, v_sl, "Slingshot")  else NULL
+p_m3 <- if (!is.null(v_m3)) build_umap_panel(umap_mat, v_m3, "Monocle3")   else NULL
+
+plots <- Filter(Negate(is.null), list(p_ct, p_sl, p_m3))
+
+# Extra diagnostics in case something is still off
+diag_counts <- c(
+  CytoTRACE = if (is.null(v_ct)) 0 else sum(is.finite(v_ct)),
+  Slingshot = if (is.null(v_sl)) 0 else sum(is.finite(v_sl)),
+  Monocle3  = if (is.null(v_m3)) 0 else sum(is.finite(v_m3))
+)
+message(sprintf("[UMAP panel] finite counts — CT:%s  SL:%s  M3:%s",
+                diag_counts[1], diag_counts[2], diag_counts[3]))
+
+if (length(plots)) {
+  panel_pt <- patchwork::wrap_plots(plots, nrow = 1)
+  save_plot(panel_pt, "umap_pseudotime_panel", dir = PseudotimeFig, w = 4 * length(plots), h = 4)
+  print(panel_pt)
+} else {
+  message("No finite panels to plot after robust alignment. Check barcode compatibility across objects.")
+  message("Try: head(colnames(obj_nonmal)); head(colnames(cds)); colnames(slingPseudotime(sce)).")
+}
+
+
+```
+
+```{r}
+#| label: 04-saving-output-files
+#| echo: false
+#| message: true
+#| warning: true
+
+# saveRDS(obj_nonmal, file.path(MonocleDir, "04a_obj_nonmal.rds"))
+saveRDS(sce,        file.path(SlingshotDir, "sce_slingshot.rds"))
+saveRDS(cds,        file.path(MonocleDir, "cds_monocle3.rds"))
+saveRDS(obj_nonmal, file.path(PseudotimeDir, "final_obj_nonmal_with_pseudotime.rds"))
+
+message("Pipeline completed. | Results in ", normalizePath(data))
+
+```

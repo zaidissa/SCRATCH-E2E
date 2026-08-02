@@ -1,0 +1,234 @@
+---
+title: "Module - Merging and Normalizing"
+description: | 
+  Description
+execute:
+  freeze: auto
+  cache: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    df-print: paged
+    fig-align: center
+lightbox:
+    match: auto
+    effect: zoom
+    loop: true
+params:
+  project_name: 'Test'
+  input_qc_approved: '/Users/affaustino/Projects/SCRATCH-QC/work/d6/2dde3a01223a736a5c2ff7ddb087ab/SRX5128504_seurat_object.RDS;/Users/affaustino/Projects/SCRATCH-QC/work/d6/2dde3a01223a736a5c2ff7ddb087ab/SRX5128478_seurat_object.RDS'
+  input_exp_table: '/Users/affaustino/Projects/SCRATCH-QC/work/d6/2dde3a01223a736a5c2ff7ddb087ab/samplesheet.valid.csv'
+  n_threads: 8
+  n_memory: 4
+  work_directory: !expr here::here()
+  auto_save: TRUE
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+------------------------------------------------------------------------
+
+# Project Name: `r params$project_name`
+
+```{r setup, include = FALSE, message = FALSE, warning = FALSE, echo = TRUE}
+#| include: false
+
+# Project parameters 
+project_name <- params$project_name
+
+# Inputs and thresholds
+input_qc_approved <- strsplit(params$input_qc_approved, split = ';')[[1]]
+input_exp_table <- params$input_exp_table
+
+# Optional parameters
+
+# Dataflow/Computational parameters
+n_threads <- params$n_threads
+n_memory <- params$n_memory
+
+# Output parameters
+work_directory <- params$work_directory
+auto_save <- params$auto_save
+
+# Rmarkdown options
+knitr::opts_knit$set(
+  root.dir = work_directory
+  )
+
+
+```
+
+## Loading library
+
+```{r library}
+#| output: false
+
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(Seurat)
+
+```
+
+## Folder structure
+
+```{r project_directory}
+#| output: false
+
+if(!dir.exists(work_directory)) {
+  dir.create(work_directory, recursive = T)
+}
+
+for(sub_directory in c('data', 'figures')) {
+  dir.create(paste0(work_directory, '/', sub_directory))
+}
+
+```
+
+## Loading metadata
+
+```{r}
+#| warning: false
+
+metadata <- readr::read_csv(file = input_exp_table)
+metadata <- metadata %>%
+#   select(-c(sampleIndex, fastq_1, fastq_2)) %>%
+  select(-c(fastq_1, fastq_2)) %>%
+  distinct() %>%
+  as.data.frame()
+
+```
+
+## Merging Seurat objects
+
+```{r merge, message = FALSE, warning = FALSE, echo = TRUE}
+
+# Adjusting names
+sample_label <- sub(
+  '(\\S+)_seurat_object.RDS', '\\1', basename(input_qc_approved))
+
+sample_label <- setNames(
+  input_qc_approved,
+  sample_label
+)
+
+# Reading approved samples
+seurat_object_list <- list()
+
+for (label in names(sample_label)) {
+  
+  seurat_object_list[[label]] <- readRDS(file = sample_label[[label]])
+  seurat_object_list[[label]]$raw_cell_id <- Cells(seurat_object_list[[label]])
+  
+  seurat_object_list[[label]] <- RenameCells(
+    seurat_object_list[[label]], add.cell.id = label)
+
+}
+
+# Merge all the objects in the list
+seurat_object <- purrr::reduce(
+  seurat_object_list, project = project_name, merge, do.normalize = FALSE)
+
+```
+
+## Unifying sample layers
+
+```{r seurat_rejoin}
+#| code-fold: true
+
+if(length(seurat_object@assays$RNA@layers) > 1) {
+  
+  seurat_object <- JoinLayers(seurat_object) 
+
+}
+
+```
+
+## Adding metadata columns
+
+```{r adding_metadata}
+
+# Keeping cell idents
+priviosional <- seurat_object@meta.data
+priviosional$barcode <- row.names(priviosional)
+
+priviosional <- merge(
+  priviosional,
+  metadata,
+  by.x = "orig.ident",
+  by.y = "sample"
+)
+
+rownames(priviosional) <- priviosional$barcode
+priviosional$barcode <- NULL
+
+# Adding metadata
+
+seurat_object <- AddMetaData(
+  object = seurat_object,
+  metadata = priviosional
+)
+
+```
+
+```{r}
+#| code-fold: true
+#| column: screen-inset-shaded
+
+DT::datatable(seurat_object@meta.data, 
+    class = 'cell-border stripe',
+    rownames = FALSE,
+    filter = 'top',
+    width = '100%', 
+    options = list(scrollX = TRUE))
+
+```
+
+## Saving Seurat object
+
+```{r object_dump}
+
+if(auto_save) {
+  
+  saveRDS(seurat_object, file = paste0('data/', project_name, '_qc_merged_object.RDS'))
+  
+}
+
+```
+
+------------------------------------------------------------------------
+
+## Parameters log
+
+```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
+
+print(params)
+
+```
+
+## Session info
+
+```{r session_info, message = FALSE, warning = FALSE, echo = FALSE}
+
+sessionInfo()
+
+```

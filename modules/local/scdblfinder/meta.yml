@@ -1,0 +1,83 @@
+name: scdblfinder
+description: Uses the Seurat and scDblFinder libraries to detect and remove doublets from single-cell RNA-seq data, generating a comprehensive report and related figures.
+keywords:
+  - single-cell
+  - doublets detection
+  - scDblFinder
+tools:
+  - quarto:
+      description: Quarto is a scientific and technical publishing system built on Pandoc.
+      homepage: https://quarto.org/
+      documentation: https://quarto.org/docs/
+      tool_dev_url: https://github.com/quarto-dev/quarto-cli
+      licence: "GPL-3.0"
+  - seurat:
+      description: Seurat is an R package designed for QC, analysis, and exploration of single-cell RNA-seq data.
+      homepage: https://satijalab.org/seurat/
+      documentation: https://satijalab.org/seurat/articles/get_started.html
+      tool_dev_url: https://github.com/satijalab/seurat
+      licence: "GPL-3.0"
+  - scDblFinder:
+      description: scDblFinder is an R package for detection of doublets in single-cell RNA sequencing data.
+      homepage: https://bioconductor.org/packages/release/bioc/html/scDblFinder.html
+      documentation: https://bioconductor.org/packages/release/bioc/vignettes/scDblFinder/inst/doc/scDblFinder.html
+      tool_dev_url: https://github.com/plger/scDblFinder
+      licence: "Artistic-2.0"
+  - readr:
+      description: readr is an R package to read text data quickly and efficiently.
+      homepage: https://readr.tidyverse.org/
+      documentation: https://readr.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/readr
+  - dplyr:
+      description: dplyr is an R package for data manipulation operations.
+      homepage: https://dplyr.tidyverse.org/
+      documentation: https://dplyr.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/dplyr
+  - ggplot2:
+      description: ggplot2 is an R package for creating complex visualizations.
+      homepage: https://ggplot2.tidyverse.org/
+      documentation: https://ggplot2.tidyverse.org/
+      tool_dev_url: https://github.com/tidyverse/ggplot2
+  - DT:
+      description: DT is an R package that provides an interface to the DataTables library for interactive displays of data frames.
+      homepage: https://rstudio.github.io/DT/
+      documentation: https://rstudio.github.io/DT/
+      tool_dev_url: https://github.com/rstudio/DT
+  - SingleCellExperiment:
+      description: SingleCellExperiment is an S4 class for single-cell genomics data, designed to work seamlessly with the Bioconductor ecosystem.
+      homepage: https://bioconductor.org/packages/release/bioc/html/SingleCellExperiment.html
+      documentation: https://bioconductor.org/packages/release/bioc/vignettes/SingleCellExperiment/inst/doc/SingleCellExperiment.html
+      tool_dev_url: https://github.com/Bioconductor/SingleCellExperiment
+input:
+  - seurat_object:
+      type: file
+      description: Seurat object file that contains single-cell RNA-seq data for processing.
+      pattern: "*.RDS"
+  - notebook_scdblfinder:
+      type: file
+      description: Quarto notebook file (.qmd) that is used to perform doublets detection and generate the report, including parameters for analysis configuration.
+      pattern: "*.qmd"
+      parameters:
+        project_name: 'Project'
+        seurat_object: './data/Project_merged_object.RDS'
+  - page_config:
+      type: file
+      description: Configuration file that may contain additional settings or parameters for the notebook rendering.
+      pattern: "*.{yml,yaml,json}"
+output:
+  - seurat_rds:
+      type: file
+      description: Updated Seurat RDS files containing single-cell data after doublets removal, separated into samples and clusters.
+      pattern: "data/${params.project_name}_qc_*.RDS"
+  - html:
+      type: file
+      description: The rendered HTML report of the doublets detection process summarized in the Quarto notebook.
+      pattern: "report/${notebook_scdblfinder.baseName}.html"
+  - figures:
+      type: file
+      description: Figures generated during the doublets detection process, saved as PNG files.
+      pattern: "_freeze/**/figure-html/*.png"
+authors:
+  - Andre Fonseca (@oandrefonseca)
+maintainers:
+  - Andre Fonseca (@oandrefonseca)
