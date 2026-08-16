@@ -143,6 +143,7 @@ Three sources of improvement over running the eight pipelines by hand:
 
 ## Documentation
 
+- [docs/DESIGN-AND-ROADMAP.md](docs/DESIGN-AND-ROADMAP.md) — start here: what the pipeline is for, the design principles and why they exist, where each stage stands, and what to do next
 - [docs/pipeline-map.html](docs/pipeline-map.html) — the full DAG as a rendered page: stage graph, per-stage process chains, inter-stage artefact contracts, concurrency, gating rules and entry recipes
 - [docs/USAGE.md](docs/USAGE.md) — parameter reference and worked examples
 - [docs/NMF_ENGINES.md](docs/NMF_ENGINES.md) — the R and Python NMF engines
