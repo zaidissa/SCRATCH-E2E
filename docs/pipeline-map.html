@@ -1,0 +1,657 @@
+<title>SCRATCH-E2E — pipeline map</title>
+
+<style>
+  /* ---------------------------------------------------------------------
+     Palette is lifted from the pipeline's own design system:
+     assets/viz/scratch_viz.R → SCRATCH_PAL. The malignant arm carries the
+     same #eb6834 the reports use for malignant cells; the stromal arm the
+     same #2a78d6 for non-malignant. Neutrals are biased cool toward the
+     spine blue rather than left as flat grey.
+     --------------------------------------------------------------------- */
+  :root {
+    --ink:        #0f1417;
+    --ink-2:      #46535a;
+    --muted:      #7d8891;
+    --rule:       #e2e6e6;
+    --surface:    #ffffff;
+    --surface-2:  #f6f8f8;
+
+    --spine:      #0d366b;   /* linear backbone            */
+    --malignant:  #eb6834;   /* tumour arm                 */
+    --stromal:    #2a78d6;   /* non-malignant arm          */
+    --optin:      #b57f00;   /* off by default / opt-in    */
+    --report:     #0f8f63;   /* reporting layer            */
+
+    --plate:      #fbfaf7;   /* the schematic ground       */
+    --plate-rule: #d9dedd;
+    --plate-ink:  #1b2227;
+
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+    --measure: 68ch;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink:       #eef2f2;
+      --ink-2:     #b3bfc4;
+      --muted:     #8b979d;
+      --rule:      #27302f;
+      --surface:   #0e1313;
+      --surface-2: #151b1b;
+      --spine:     #7fb1ec;
+      --malignant: #f5895a;
+      --stromal:   #6fa9e8;
+      --optin:     #e0aa2e;
+      --report:    #3fc496;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink:       #eef2f2;
+    --ink-2:     #b3bfc4;
+    --muted:     #8b979d;
+    --rule:      #27302f;
+    --surface:   #0e1313;
+    --surface-2: #151b1b;
+    --spine:     #7fb1ec;
+    --malignant: #f5895a;
+    --stromal:   #6fa9e8;
+    --optin:     #e0aa2e;
+    --report:    #3fc496;
+  }
+  :root[data-theme="light"] {
+    --ink:       #0f1417;
+    --ink-2:     #46535a;
+    --muted:     #7d8891;
+    --rule:      #e2e6e6;
+    --surface:   #ffffff;
+    --surface-2: #f6f8f8;
+    --spine:     #0d366b;
+    --malignant: #eb6834;
+    --stromal:   #2a78d6;
+    --optin:     #b57f00;
+    --report:    #0f8f63;
+  }
+
+  body {
+    background: var(--surface);
+    color: var(--ink-2);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0 6vw 6rem;
+  }
+
+  .wrap { max-width: 1120px; margin: 0 auto; }
+
+  /* ---- masthead ---- */
+  header.masthead {
+    display: flex; flex-direction: column; gap: .6rem;
+    padding: 4rem 0 1.4rem;
+    border-bottom: 2px solid var(--ink);
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  h1 {
+    font-family: var(--mono);
+    font-size: clamp(1.9rem, 4.6vw, 3rem);
+    font-weight: 700; letter-spacing: -.02em; line-height: 1.05;
+    color: var(--ink); margin: 0; text-wrap: balance;
+  }
+  .standfirst { max-width: var(--measure); margin: .2rem 0 0; font-size: 1.03rem; }
+
+  /* ---- generic section ---- */
+  section { padding-top: 3.2rem; }
+  h2 {
+    font-family: var(--sans);
+    font-size: 1.32rem; font-weight: 650; letter-spacing: -.01em;
+    color: var(--ink); margin: 0 0 .3rem; text-wrap: balance;
+  }
+  h2 .num {
+    font-family: var(--mono); font-size: .78rem; font-weight: 500;
+    color: var(--muted); margin-right: .6rem; letter-spacing: .06em;
+  }
+  .lede { max-width: var(--measure); margin: 0 0 1.4rem; }
+  p { max-width: var(--measure); }
+
+  code, .k {
+    font-family: var(--mono); font-size: .88em;
+    background: var(--surface-2); color: var(--ink);
+    padding: .08em .34em; border-radius: 3px;
+    border: 1px solid var(--rule);
+  }
+
+  /* ---- the schematic plate ----------------------------------------------
+     Deliberately keeps a paper ground in BOTH themes. A pipeline diagram is a
+     technical plate; mermaid's node fills cannot be re-tinted per theme after
+     render, and a half-legible graph is worse than a consistent one.
+     ---------------------------------------------------------------------- */
+  .plate {
+    background: var(--plate);
+    border: 1px solid var(--plate-rule);
+    border-radius: 2px;
+    padding: 1.6rem 1rem;
+    overflow-x: auto;
+    color: var(--plate-ink);
+  }
+  .plate .mermaid { display: flex; justify-content: center; min-width: 680px; }
+  figcaption {
+    font-family: var(--mono); font-size: .76rem; color: var(--muted);
+    margin-top: .7rem; letter-spacing: .02em; max-width: var(--measure);
+    line-height: 1.5;
+  }
+  figure { margin: 0; }
+
+  /* ---- legend ---- */
+  .legend { display: flex; flex-wrap: wrap; gap: .5rem 1.4rem; margin: 1rem 0 0; padding: 0; list-style: none; }
+  .legend li { display: flex; align-items: center; gap: .5rem; font-family: var(--mono); font-size: .76rem; color: var(--ink-2); }
+  .swatch { width: 1.5rem; height: .42rem; border-radius: 1px; flex: none; }
+
+  /* ---- stage ledger ---- */
+  .ledger { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  @media (min-width: 900px) { .ledger { grid-template-columns: repeat(2, 1fr); } }
+
+  .stage { background: var(--surface); padding: 1.15rem 1.25rem; display: flex; flex-direction: column; gap: .55rem; }
+  .stage-head { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+  .stage-id {
+    font-family: var(--mono); font-size: .95rem; font-weight: 700;
+    letter-spacing: .01em; color: var(--ink);
+    border-left: 3px solid var(--arm, var(--spine)); padding-left: .55rem;
+  }
+  .stage-role { font-size: .78rem; color: var(--muted); font-family: var(--mono); }
+  .stage p { font-size: .9rem; margin: 0; max-width: none; }
+
+  .procs { display: flex; flex-wrap: wrap; gap: .3rem; margin: 0; padding: 0; list-style: none; }
+  .procs li {
+    font-family: var(--mono); font-size: .74rem; letter-spacing: .01em;
+    color: var(--ink-2); background: var(--surface-2);
+    border: 1px solid var(--rule); border-radius: 2px;
+    padding: .14rem .42rem;
+  }
+  .procs li.gated { border-style: dashed; color: var(--optin); }
+
+  .meta { display: flex; flex-wrap: wrap; gap: .35rem 1.1rem; font-family: var(--mono); font-size: .73rem; color: var(--muted); }
+  .meta b { font-weight: 500; color: var(--ink-2); }
+
+
+  /* ---- process chains: order and concurrency inside a stage ---- */
+  .chains { display: flex; flex-direction: column; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  .chain { background: var(--surface); padding: 1.05rem 1.2rem; display: flex; flex-direction: column; gap: .55rem; }
+  .chain-head { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .35rem; }
+  .flow .p {
+    font-family: var(--mono); font-size: .74rem; letter-spacing: .01em;
+    color: var(--ink); background: var(--surface-2);
+    border: 1px solid var(--rule); border-radius: 2px; padding: .16rem .44rem;
+  }
+  .flow .p.opt { border-style: dashed; color: var(--optin); }
+  .flow .ar { color: var(--muted); font-family: var(--mono); font-size: .8rem; }
+  .flow .cm { font-family: var(--mono); font-size: .68rem; color: var(--muted); }
+  .grp {
+    display: flex; flex-direction: column; gap: .28rem;
+    border-left: 2px solid var(--arm, var(--spine));
+    padding: .3rem 0 .3rem .55rem; margin: .1rem 0;
+  }
+  .grp-tag {
+    font-family: var(--mono); font-size: .64rem; text-transform: uppercase;
+    letter-spacing: .1em; color: var(--arm, var(--spine));
+  }
+  .ln { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .35rem; }
+
+  /* ---- entry recipes ---- */
+  pre.cmd {
+    font-family: var(--mono); font-size: .8rem; line-height: 1.65;
+    background: var(--surface-2); color: var(--ink);
+    border: 1px solid var(--rule); border-left: 3px solid var(--spine);
+    padding: .9rem 1rem; overflow-x: auto; margin: 0;
+  }
+  .recipes { display: flex; flex-direction: column; gap: 1.4rem; }
+  .recipe h3 { font-family: var(--mono); font-size: .84rem; font-weight: 700; color: var(--ink); margin: 0 0 .4rem; letter-spacing: .01em; }
+  .recipe p { font-size: .88rem; margin: 0 0 .5rem; }
+
+
+  /* ---- contract + concurrency tables ---- */
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--rule); }
+  table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: .84rem; }
+  thead th {
+    text-align: left; font-family: var(--mono); font-size: .68rem;
+    text-transform: uppercase; letter-spacing: .1em; font-weight: 500;
+    color: var(--muted); background: var(--surface-2);
+    padding: .55rem .8rem; border-bottom: 1px solid var(--rule); white-space: nowrap;
+  }
+  tbody td { padding: .5rem .8rem; border-bottom: 1px solid var(--rule); vertical-align: top; color: var(--ink-2); }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody td:first-child { font-family: var(--mono); font-size: .76rem; color: var(--ink); white-space: nowrap; }
+  td .art { font-family: var(--mono); font-size: .74rem; color: var(--ink); display: block; }
+  td .tag {
+    font-family: var(--mono); font-size: .64rem; text-transform: uppercase; letter-spacing: .09em;
+    padding: .1rem .35rem; border: 1px solid currentColor; border-radius: 2px; white-space: nowrap;
+  }
+  .t-par { color: var(--stromal); } .t-fan { color: var(--malignant); } .t-ser { color: var(--muted); }
+
+  /* ---- notes ---- */
+  .notes { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  @media (min-width: 760px) { .notes { grid-template-columns: repeat(3, 1fr); } }
+  .note { background: var(--surface); padding: 1rem 1.1rem; }
+  .note h4 { font-family: var(--mono); font-size: .76rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 .4rem; font-weight: 500; }
+  .note p { font-size: .87rem; margin: 0; max-width: none; }
+
+  footer { margin-top: 3.5rem; padding-top: 1.2rem; border-top: 1px solid var(--rule); font-family: var(--mono); font-size: .74rem; color: var(--muted); }
+
+  a { color: var(--stromal); }
+  a:focus-visible, :focus-visible { outline: 2px solid var(--stromal); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <div class="eyebrow">Nextflow DSL2 · 56 stub tasks · 16 stages</div>
+  <h1>SCRATCH-E2E</h1>
+  <p class="standfirst">
+    A single-cell RNA-seq pipeline that runs as one linear backbone, splits the cohort into
+    malignant and non-malignant compartments, then follows each compartment down its own arm.
+    Every stage is independently enterable, so you can start from FASTQs, from count matrices,
+    or from any intermediate Seurat object.
+  </p>
+</header>
+
+<section>
+  <h2><span class="num">01</span>The whole pipeline</h2>
+  <p class="lede">
+    Edges are labelled with what actually moves between stages — the object or the calls, not
+    just "next". The split at STRATIFY is the pivot: everything above it is one cohort,
+    everything below is two.
+  </p>
+
+  <figure>
+    <div class="plate">
+<pre class="mermaid">
+%%{init: {'theme':'base','themeVariables':{
+  'background':'#fbfaf7','primaryColor':'#ffffff','primaryTextColor':'#1b2227',
+  'primaryBorderColor':'#9aa4a8','lineColor':'#67757c','fontSize':'13px',
+  'fontFamily':'ui-monospace, SFMono-Regular, Menlo, monospace'}}}%%
+flowchart TD
+  FQ[["FASTQ"]]:::entry
+  GEX[["CellRanger matrices"]]:::entry
+  OBJ[["Seurat object"]]:::entry
+
+  ALIGN["ALIGN<br/>CellRanger"]:::spine
+  QC["QC<br/>filter · merge · doublets"]:::spine
+  CLU["CLUSTER<br/>normalize · PCA · UMAP"]:::spine
+  ANN["ANNOTATION<br/>3 annotators + concordance"]:::spine
+  CNV["CNV<br/>inferCNV · SCEVAN · CopyKAT"]:::spine
+  NUM["NUMBAT<br/>allele-aware"]:::optin
+  STR{{"STRATIFY<br/>malignant vs not"}}:::spine
+
+  MET["METAPROG<br/>NMF programmes"]:::mal
+  BC["BATCHCORRECT"]:::str
+  TRJ["TRAJECTORY"]:::str
+  CC["CELLCOMM"]:::str
+  TME["TME"]:::str
+  TCR["TCR<br/>repertoire"]:::optin
+
+  REP["STAGE_REPORTS<br/>11 stage reports"]:::rep
+  INT["INTEGRATION<br/>cross-analysis · master report"]:::rep
+
+  FQ --> ALIGN
+  GEX --> QC
+  OBJ -. "--from &lt;stage&gt;" .-> CLU
+  ALIGN -->|"filtered matrices"| QC
+  QC -->|"merged, doublet-filtered"| CLU
+  CLU -->|"cluster object"| ANN
+  ANN -->|"annotated object"| CNV
+  ANN -->|"annotated object"| STR
+  ANN -->|"counts + barcodes"| NUM
+  CNV -->|"per-cell CNV calls"| STR
+  NUM -->|"allele-aware calls<br/>(given priority)"| STR
+  STR -->|"malignant cells"| MET
+  STR -->|"non-malignant cells"| BC
+  BC --> TRJ
+  BC --> CC
+  BC --> TME
+  ANN -.->|"independent of split"| TCR
+
+  MET --> REP
+  TRJ --> REP
+  CC --> REP
+  TME --> REP
+  TCR --> REP
+  STR --> REP
+  REP --> INT
+
+  classDef entry fill:#f0efec,stroke:#9aa4a8,color:#46535a,stroke-dasharray:3 3
+  classDef spine fill:#eaf1fa,stroke:#0d366b,color:#0d366b,stroke-width:1.5px
+  classDef mal   fill:#fdeee7,stroke:#eb6834,color:#8a3a13,stroke-width:1.5px
+  classDef str   fill:#e9f2fd,stroke:#2a78d6,color:#14487f,stroke-width:1.5px
+  classDef optin fill:#fcf4e2,stroke:#b57f00,color:#7a5600,stroke-dasharray:4 3
+  classDef rep   fill:#e7f6f0,stroke:#0f8f63,color:#0a5c41,stroke-width:1.5px
+</pre>
+    </div>
+    <figcaption>
+      Every stage of SCRATCH-E2E and the object that passes between them. Dashed borders mark
+      components that are off by default. STRATIFY is the only node that fans out into two
+      biologically distinct populations.
+    </figcaption>
+  </figure>
+
+  <ul class="legend">
+    <li><span class="swatch" style="background:var(--spine)"></span>linear backbone</li>
+    <li><span class="swatch" style="background:var(--malignant)"></span>malignant arm</li>
+    <li><span class="swatch" style="background:var(--stromal)"></span>non-malignant arm</li>
+    <li><span class="swatch" style="background:var(--optin)"></span>opt-in / off by default</li>
+    <li><span class="swatch" style="background:var(--report)"></span>reporting</li>
+  </ul>
+</section>
+
+<section>
+  <h2><span class="num">02</span>Stage ledger</h2>
+  <p class="lede">
+    Each stage, the processes inside it, the container image it runs in, and the parameter that
+    turns it off. Dashed chips are individually skippable within their stage.
+  </p>
+
+  <div class="ledger">
+
+    <article class="stage" style="--arm: var(--spine)">
+      <div class="stage-head"><span class="stage-id">ALIGN</span><span class="stage-role">FASTQ → matrices</span></div>
+      <p>CellRanger. The only stage that touches raw reads, and the only one needing a genome reference.</p>
+      <ul class="procs">
+        <li>SAMPLESHEET_CHECK</li><li>AUTO_DEMUX</li><li>CELLRANGER_COUNT</li>
+        <li>CELLRANGER_VDJ</li><li>CELLRANGER_MULTI</li>
+      </ul>
+      <div class="meta"><span><b>image</b> scratch-cellranger8 · cellranger</span><span><b>gate</b> --from align</span></div>
+    </article>
+
+    <article class="stage" style="--arm: var(--spine)">
+      <div class="stage-head"><span class="stage-id">QC</span><span class="stage-role">per-sample → one cohort</span></div>
+      <p>Filters each sample, merges them, then removes doublets. The merge is where the cohort first exists as a single object.</p>
+      <ul class="procs">
+        <li>SEURAT_QUALITY</li><li>HELPER_SUMMARIZE</li><li>SEURAT_MERGE</li>
+        <li class="gated">SCDBLFINDER</li><li class="gated">CELLBENDER</li>
+      </ul>
+      <div class="meta"><span><b>image</b> scratch-qc</span><span><b>gate</b> skip_scdblfinder · skip_cellbender</span></div>
+    </article>
+
+    <article class="stage" style="--arm: var(--spine)">
+      <div class="stage-head"><span class="stage-id">CLUSTER</span><span class="stage-role">normalize → embed</span></div>
+      <p>Normalisation, PCA and UMAP, then graph clustering. Nothing downstream works without this — QC objects have no <code>data</code> layer.</p>
+      <ul class="procs"><li>SEURAT_NORMALIZE</li><li>SEURAT_CLUSTER</li></ul>
+      <div class="meta"><span><b>image</b> scratch-cluster</span><span><b>gate</b> --from cluster</span></div>
+    </article>
+
+    <article class="stage" style="--arm: var(--spine)">
+      <div class="stage-head"><span class="stage-id">ANNOTATION</span><span class="stage-role">3 annotators, in parallel</span></div>
+      <p>CellTypist, scType (major → state → aggregate) and Azimuth all run on the same input and never meet — so a fourth process compares them.</p>
+      <ul class="procs">
+        <li>SCEASY_CONVERTER_ONE</li><li class="gated">CELLTYPIST_ANNOTATION</li>
+        <li class="gated">SCYTPE_MAJOR_ANNOTATION</li><li class="gated">SCYTPE_STATE_ANNOTATION</li>
+        <li class="gated">SCYTPE_AGGREGATE_ANNOTATION</li><li class="gated">AZIMUTH_ANNOTATION</li>
+        <li class="gated">ANNOTATION_CONCORDANCE</li><li>SCEASY_CONVERTER_TWO</li>
+      </ul>
+      <div class="meta"><span><b>image</b> scratch-annotation</span><span><b>gate</b> skip_celltypist · skip_sctype · skip_azimuth · skip_annotation_concordance</span></div>
+    </article>
+
+    <article class="stage" style="--arm: var(--spine)">
+      <div class="stage-head"><span class="stage-id">CNV</span><span class="stage-role">expression-based calling</span></div>
+      <p>Three callers over the same cells. inferCNV returns a score against a reference lineage; SCEVAN and CopyKAT return their own verdicts.</p>
+      <ul class="procs"><li class="gated">INFERCNV</li><li class="gated">SCEVAN</li><li class="gated">COPYKAT_PROCESS</li></ul>
+      <div class="meta"><span><b>image</b> scratch-cnv</span><span><b>gate</b> skip_infercnv · skip_scevan · skip_copykat</span></div>
+    </article>
+
+    <article class="stage" style="--arm: var(--optin)">
+      <div class="stage-head"><span class="stage-id">NUMBAT</span><span class="stage-role">allele-aware · opt-in</span></div>
+      <p>The only caller that reads allele frequencies rather than expression alone, so it can separate a real copy-number event from a transcriptional programme. Needs a genome BAM.</p>
+      <ul class="procs"><li class="gated">NUMBAT_FETCH_REFS</li><li>NUMBAT_PREP</li><li>NUMBAT_PILEUP</li><li>NUMBAT_RUN</li></ul>
+      <div class="meta"><span><b>image</b> scratch-cnv · scratch-numbat</span><span><b>gate</b> run_numbat (default false)</span></div>
+    </article>
+
+    <article class="stage" style="--arm: var(--spine)">
+      <div class="stage-head"><span class="stage-id">STRATIFY</span><span class="stage-role">the split</span></div>
+      <p>Pools every caller's verdict into one evidence table and assigns each cell to a compartment. Numbat is given priority when present.</p>
+      <ul class="procs"><li>STRATIFY_COMPARTMENTS</li></ul>
+      <div class="meta"><span><b>image</b> scratch-cnv</span><span><b>gate</b> --to stratify</span></div>
+    </article>
+
+    <article class="stage" style="--arm: var(--malignant)">
+      <div class="stage-head"><span class="stage-id">METAPROG</span><span class="stage-role">malignant arm</span></div>
+      <p>Non-negative matrix factorisation to recover recurrent expression programmes across tumour cells. The NMF step can run in R or Python.</p>
+      <ul class="procs"><li>METAPROG_LEIDEN</li><li>METAPROG_NMF_PREP</li><li>METAPROG_EXPORT_MTX</li><li>METAPROG_NMF</li><li>METAPROG_NMF_PY</li><li>METAPROG_POST</li></ul>
+      <div class="meta"><span><b>image</b> scratch-tumorheterogenity · nmf-python</span><span><b>gate</b> run_metaprog</span></div>
+    </article>
+
+    <article class="stage" style="--arm: var(--stromal)">
+      <div class="stage-head"><span class="stage-id">BATCHCORRECT</span><span class="stage-role">gates the arm</span></div>
+      <p>Runs first in the non-malignant arm and gates the three that follow — trajectory, communication and TME all consume the corrected object.</p>
+      <ul class="procs"><li class="gated">BATCHCORRECTION</li></ul>
+      <div class="meta"><span><b>image</b> scratch-batchcor</span><span><b>gate</b> skip_batchcorrect</span></div>
+    </article>
+
+    <article class="stage" style="--arm: var(--stromal)">
+      <div class="stage-head"><span class="stage-id">TRAJECTORY</span><span class="stage-role">non-malignant arm</span></div>
+      <p>Slingshot, Monocle3 and CytoTRACE with a concordance check between them.</p>
+      <ul class="procs"><li>CELLTRAJECTORY</li></ul>
+      <div class="meta"><span><b>image</b> scratch-celltrajectory</span><span><b>gate</b> run_trajectory</span></div>
+    </article>
+
+    <article class="stage" style="--arm: var(--stromal)">
+      <div class="stage-head"><span class="stage-id">CELLCOMM</span><span class="stage-role">non-malignant arm</span></div>
+      <p>Ligand–receptor inference by two independent methods, plus NicheNet for regulatory potential.</p>
+      <ul class="procs"><li>CELLCOMM_LIANA</li><li>CELLCOMM_CELLCHAT</li><li class="gated">CELLCOMM_NICHENET</li></ul>
+      <div class="meta"><span><b>image</b> scratch-cellcommunication</span><span><b>gate</b> skip_nichenet</span></div>
+    </article>
+
+    <article class="stage" style="--arm: var(--stromal)">
+      <div class="stage-head"><span class="stage-id">TME</span><span class="stage-role">non-malignant arm</span></div>
+      <p>Microenvironment composition and differential abundance — cells counted, not genes measured. propeller by default; scCODA is opt-in because it pulls in TensorFlow.</p>
+      <ul class="procs"><li>TME_CHARACTERISATION</li></ul>
+      <div class="meta"><span><b>image</b> scratch-tme · scratch-tme-scoda</span><span><b>gate</b> run_tme · run_scoda</span></div>
+    </article>
+
+    <article class="stage" style="--arm: var(--optin)">
+      <div class="stage-head"><span class="stage-id">TCR</span><span class="stage-role">independent of the split</span></div>
+      <p>Repertoire analysis on VDJ contigs. Runs off the annotated object rather than either compartment, so it needs no stratification.</p>
+      <ul class="procs"><li>VDJ_QC</li><li>REPERTOIRE</li><li>TCRDIST3</li><li>GLIPH2</li><li>GIANA</li><li>CONGA</li><li>CONSENSUS_CLUSTERING</li><li>TCRI</li><li>TCELL_INTEGRATION</li></ul>
+      <div class="meta"><span><b>image</b> scratch-tcr · scratch-gliph2</span><span><b>gate</b> run_tcr</span></div>
+    </article>
+
+    <article class="stage" style="--arm: var(--report)">
+      <div class="stage-head"><span class="stage-id">REPORTING</span><span class="stage-role">spans every stage</span></div>
+      <p>One report per stage, then a layer that joins the stages back together: object integration, cross-stage analysis, a run manifest, and the master report.</p>
+      <ul class="procs"><li>STAGE_REPORT ×11</li><li>INTEGRATE_OBJECTS</li><li>CROSS_ANALYSIS</li><li>RUN_MANIFEST</li><li>MASTER_REPORT</li></ul>
+      <div class="meta"><span><b>image</b> scratch-cluster (integration)</span><span><b>gate</b> stage_reports · run_integration</span></div>
+    </article>
+
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">03</span>Inside each stage</h2>
+  <p class="lede">
+    Execution order within a stage: what runs in sequence, what runs concurrently, and where a
+    step fans out into one task per sample or per population. Dashed chips are individually
+    skippable.
+  </p>
+
+  <div class="chains">
+    <article class="chain" style="--arm: var(--spine)">
+      <div class="chain-head"><span class="stage-id">ALIGN</span><span class="stage-role">backbone · 1</span></div>
+      <p>One of three CellRanger modes, chosen by how the library was prepared.</p>
+      <div class="flow"><span class="p">SAMPLESHEET_CHECK</span><span class="ar">&rarr;</span><span class="grp"><span class="grp-tag">one of three modes</span><span class="ln"><span class="p">CELLRANGER_COUNT</span> + <span class="p">CELLRANGER_VDJ</span> <span class="cm">standard</span></span><span class="ln"><span class="p">AUTO_DEMUX</span><span class="ar">&rarr;</span><span class="p">CELLRANGER_COUNT</span> <span class="cm">--demux</span></span><span class="ln"><span class="p">CELLRANGER_MULTI</span> <span class="cm">--multi · hashtag</span></span></span></div>
+    </article>
+    <article class="chain" style="--arm: var(--spine)">
+      <div class="chain-head"><span class="stage-id">QC</span><span class="stage-role">backbone · 2</span></div>
+      <p>Per-sample filtering, then a gate: only samples flagged SUCCESS reach the merge.</p>
+      <div class="flow"><span class="p opt">CELLBENDER</span><span class="ar">&rarr;</span><span class="p">SEURAT_QUALITY</span> <span class="cm">per sample</span><span class="ar">&rarr;</span><span class="p">HELPER_SUMMARIZE</span> <span class="cm">keep SUCCESS only</span><span class="ar">&rarr;</span><span class="p">SEURAT_MERGE</span><span class="ar">&rarr;</span><span class="p opt">SCDBLFINDER</span></div>
+    </article>
+    <article class="chain" style="--arm: var(--spine)">
+      <div class="chain-head"><span class="stage-id">CLUSTER</span><span class="stage-role">backbone · 3</span></div>
+      <p>Normalisation and embedding. Everything downstream depends on the <code>data</code> layer this creates.</p>
+      <div class="flow"><span class="p">SEURAT_NORMALIZE</span><span class="ar">&rarr;</span><span class="p">SEURAT_CLUSTER</span></div>
+    </article>
+    <article class="chain" style="--arm: var(--spine)">
+      <div class="chain-head"><span class="stage-id">ANNOTATION</span><span class="stage-role">backbone · 4</span></div>
+      <p>Three annotators run concurrently on the same input; scType alone is hierarchical. The concordance step is the only place their labels ever meet.</p>
+      <div class="flow"><span class="p opt">HELPER_SEURAT_SUBSET</span><span class="ar">&rarr;</span><span class="grp"><span class="grp-tag">concurrent</span><span class="ln"><span class="p">SCEASY_CONVERTER_ONE</span><span class="ar">&rarr;</span><span class="p opt">CELLTYPIST_ANNOTATION</span></span><span class="ln"><span class="p opt">SCYTPE_MAJOR</span><span class="ar">&rarr;</span><span class="p opt">SCYTPE_STATE</span> <span class="cm">fan-out per population</span><span class="ar">&rarr;</span><span class="p opt">SCYTPE_AGGREGATE</span></span><span class="ln"><span class="p opt">AZIMUTH_ANNOTATION</span></span></span><span class="ar">&rarr;</span><span class="p opt">ANNOTATION_CONCORDANCE</span><span class="ar">&rarr;</span><span class="p">SCEASY_CONVERTER_TWO</span></div>
+    </article>
+    <article class="chain" style="--arm: var(--spine)">
+      <div class="chain-head"><span class="stage-id">CNV</span><span class="stage-role">backbone · 5</span></div>
+      <p>Expression-based callers run in parallel. Numbat is a separate, opt-in path that reads allele frequencies and needs a genome BAM.</p>
+      <div class="flow"><span class="grp"><span class="grp-tag">expression-based · parallel</span><span class="ln"><span class="p opt">INFERCNV</span> <span class="cm">continuous CNV load</span></span><span class="ln"><span class="p opt">SCEVAN</span> <span class="cm">tumour / normal class</span></span><span class="ln"><span class="p opt">COPYKAT_PROCESS</span> <span class="cm">aneuploid / diploid</span></span></span><span class="ar">+</span><span class="grp"><span class="grp-tag">allele-aware · opt-in</span><span class="ln"><span class="p opt">NUMBAT_FETCH_REFS</span> <span class="cm">skipped when the image ships refs</span></span><span class="ln"><span class="p">NUMBAT_PREP</span><span class="ar">&rarr;</span><span class="p">NUMBAT_PILEUP</span><span class="ar">&rarr;</span><span class="p">NUMBAT_RUN</span> <span class="cm">--run_numbat true · needs BAM</span></span></span></div>
+    </article>
+    <article class="chain" style="--arm: var(--spine)">
+      <div class="chain-head"><span class="stage-id">STRATIFY</span><span class="stage-role">backbone · 6</span></div>
+      <p>Pools whichever callers ran into one evidence table, then applies a lineage gate that can override the consensus.</p>
+      <div class="flow"><span class="p">STRATIFY_COMPARTMENTS</span><span class="ar">&rarr;</span><span class="cm">consensus over the callers that ran</span><span class="ar">&rarr;</span><span class="cm">lineage gate (override)</span><span class="ar">&rarr;</span><span class="grp"><span class="grp-tag">writes malignant_status</span><span class="ln"><span class="cm">malignant &rarr; tumour object</span></span><span class="ln"><span class="cm">non_malignant &rarr; microenvironment object</span></span><span class="ln"><span class="cm">ambiguous &rarr; neither, by default</span></span></span></div>
+    </article>
+    <article class="chain" style="--arm: var(--malignant)">
+      <div class="chain-head"><span class="stage-id">METAPROG</span><span class="stage-role">malignant arm</span></div>
+      <p>NMF over tumour cells, with the factorisation itself swappable between R and Python.</p>
+      <div class="flow"><span class="grp"><span class="grp-tag">independent</span><span class="ln"><span class="p">METAPROG_LEIDEN</span></span><span class="ln"><span class="p">METAPROG_NMF_PREP</span><span class="ar">&rarr;</span><span class="cm">fan-out: one task per sample</span></span></span><span class="ar">&rarr;</span><span class="grp"><span class="grp-tag">--metaprog_nmf_engine</span><span class="ln"><span class="p">METAPROG_EXPORT_MTX</span><span class="ar">&rarr;</span><span class="p">METAPROG_NMF_PY</span> <span class="cm">python · default</span></span><span class="ln"><span class="p">METAPROG_NMF</span> <span class="cm">r · NMF::nmf snmf/r</span></span></span><span class="ar">&rarr;</span><span class="p">METAPROG_POST</span></div>
+    </article>
+    <article class="chain" style="--arm: var(--stromal)">
+      <div class="chain-head"><span class="stage-id">BATCHCORRECT</span><span class="stage-role">non-malignant arm · head</span></div>
+      <p>Gates the three stages that follow it; they all consume the corrected object.</p>
+      <div class="flow"><span class="p opt">BATCHCORRECTION</span> <span class="cm">cca · rpca · harmony · mnn · all</span></div>
+    </article>
+    <article class="chain" style="--arm: var(--stromal)">
+      <div class="chain-head"><span class="stage-id">TRAJECTORY</span><span class="stage-role">non-malignant arm</span></div>
+      <p>Three inference methods plus a concordance check between them.</p>
+      <div class="flow"><span class="p">CELLTRAJECTORY</span> <span class="cm">CytoTRACE · Slingshot · Monocle3 · concordance</span></div>
+    </article>
+    <article class="chain" style="--arm: var(--stromal)">
+      <div class="chain-head"><span class="stage-id">CELLCOMM</span><span class="stage-role">non-malignant arm</span></div>
+      <p>Two independent ligand&ndash;receptor methods, then NicheNet for regulatory potential.</p>
+      <div class="flow"><span class="grp"><span class="grp-tag">parallel</span><span class="ln"><span class="p">CELLCOMM_LIANA</span></span><span class="ln"><span class="p">CELLCOMM_CELLCHAT</span></span></span><span class="ar">&rarr;</span><span class="p opt">CELLCOMM_NICHENET</span></div>
+    </article>
+    <article class="chain" style="--arm: var(--stromal)">
+      <div class="chain-head"><span class="stage-id">TME</span><span class="stage-role">non-malignant arm</span></div>
+      <p>Composition and differential abundance &mdash; cells counted, not genes measured.</p>
+      <div class="flow"><span class="p">TME_CHARACTERISATION</span><span class="ar">&rarr;</span><span class="grp"><span class="grp-tag">produces</span><span class="ln"><span class="cm">composition by sample and condition</span></span><span class="ln"><span class="cm">differential abundance, per-sample proportions</span></span><span class="ln"><span class="cm">8 functional programmes scored per cell</span></span><span class="ln"><span class="cm">Shannon diversity per sample</span></span></span></div>
+    </article>
+    <article class="chain" style="--arm: var(--optin)">
+      <div class="chain-head"><span class="stage-id">TCR</span><span class="stage-role">independent · 10 modules</span></div>
+      <p>Runs off the annotated object, so it needs no compartment split. Every clustering method is individually toggleable.</p>
+      <div class="flow"><span class="p">VDJ_QC</span><span class="ar">&rarr;</span><span class="p">TCELL_INTEGRATION</span><span class="ar">&rarr;</span><span class="grp"><span class="grp-tag">parallel · each toggleable</span><span class="ln"><span class="p opt">TCRI</span> <span class="p opt">CONGA</span> <span class="p opt">REPERTOIRE</span></span><span class="ln"><span class="p opt">GLIPH2</span> <span class="p opt">TCRDIST3</span> <span class="p opt">GIANA</span></span></span><span class="ar">&rarr;</span><span class="p">CONSENSUS_CLUSTERING</span><span class="ar">&rarr;</span><span class="p">MASTER_SUMMARY</span></div>
+    </article>
+    <article class="chain" style="--arm: var(--report)">
+      <div class="chain-head"><span class="stage-id">REPORTING</span><span class="stage-role">spans every stage</span></div>
+      <p>One report per stage, then the layer that joins them back together.</p>
+      <div class="flow"><span class="p">STAGE_REPORT</span> <span class="cm">&times;11</span><span class="ar">&rarr;</span><span class="p">INTEGRATE_OBJECTS</span><span class="ar">&rarr;</span><span class="p">CROSS_ANALYSIS</span><span class="ar">&rarr;</span><span class="p">RUN_MANIFEST</span><span class="ar">&rarr;</span><span class="p">MASTER_REPORT</span></div>
+    </article>
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">04</span>What moves between stages</h2>
+  <p class="lede">
+    Every stage publishes to <code>&lt;outdir&gt;/&lt;project&gt;/&lt;stage&gt;/{report,figures,data}/</code>.
+    That uniform layout is what lets the integration layer find artefacts by convention rather
+    than by a hardcoded path per stage.
+  </p>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>From</th><th>To</th><th>Artefact</th><th>Carries</th></tr></thead>
+      <tbody><tr><td>ALIGN</td><td>QC</td><td><span class='art'>filtered_feature_bc_matrix.h5<br>metrics_summary.csv</span></td><td>counts per sample</td></tr><tr><td>ALIGN</td><td>TCR</td><td><span class='art'>filtered_contig_annotations.csv</span></td><td>VDJ contigs</td></tr><tr><td>QC</td><td>CLUSTER</td><td><span class='art'>*_qc_dbl_sample_object.RDS</span></td><td>merged, filtered, de-doubleted</td></tr><tr><td>CLUSTER</td><td>ANNOTATION</td><td><span class='art'>*_cluster_object.RDS</span></td><td>PCA · UMAP · clusters</td></tr><tr><td>ANNOTATION</td><td>CNV · STRATIFY · TCR</td><td><span class='art'>*_Azimuth_annotation_object.RDS</span></td><td>cell-type labels</td></tr><tr><td>CNV</td><td>STRATIFY</td><td><span class='art'>*_infercnv_meta_object.RDS<br>*_scevan_meta_object.RDS</span></td><td>per-cell CNV evidence, expression-based</td></tr><tr><td>ALIGN</td><td>NUMBAT</td><td><span class='art'>possorted_genome_bam.bam</span></td><td>reads at heterozygous SNPs (opt-in)</td></tr><tr><td>ANNOTATION</td><td>NUMBAT</td><td><span class='art'>&lt;sample&gt;_counts.rds<br>&lt;sample&gt;_cellmap.tsv</span></td><td>post-QC counts + barcode&rarr;cell_id map</td></tr><tr><td>NUMBAT</td><td>STRATIFY</td><td><span class='art'>&lt;sample&gt;_numbat_calls.tsv</span></td><td>allele-aware calls, keyed by cell_id</td></tr><tr><td>STRATIFY</td><td>METAPROG</td><td><span class='art'>*_malignant_object.RDS</span></td><td>the tumour compartment</td></tr><tr><td>STRATIFY</td><td>BATCHCORRECT</td><td><span class='art'>*_nonmalignant_object.RDS</span></td><td>the microenvironment</td></tr><tr><td>STRATIFY</td><td>INTEGRATION</td><td><span class='art'>*_malignancy_assignment.csv</span></td><td>class + evidence per cell</td></tr><tr><td>BATCHCORRECT</td><td>TRAJECTORY · CELLCOMM · TME</td><td><span class='art'>*_&lt;step&gt;_batch_object.RDS</span></td><td>corrected embedding</td></tr><tr><td>METAPROG_NMF_PREP</td><td>both NMF engines</td><td><span class='art'>&lt;sample&gt;_preprocessed.rds</span></td><td>log-CPM/10, gene-centred, clipped at 0</td></tr><tr><td>NMF engines</td><td>METAPROG_POST</td><td><span class='art'>*_nmf_fit.rds<br>*_basis_matrix.csv</span></td><td>gene × program loadings</td></tr><tr><td>all stages</td><td>INTEGRATION</td><td><span class='art'>per-cell tables · figures · reports</span></td><td>joined on cell barcode</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2 style="margin-top:2.4rem"><span class="num">04b</span>What runs at the same time</h2>
+  <p class="lede">Where the DAG widens, and why it is allowed to.</p>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Shape</th><th>Runs together</th><th>Why it is safe</th></tr></thead>
+      <tbody><tr><td><span class='tag t-par'>parallel</span></td><td>METAPROG ‖ BATCHCORRECT</td><td>The two compartment arms are wholly independent once the split is made, so tumour and microenvironment analyses proceed at the same time.</td></tr><tr><td><span class='tag t-par'>parallel</span></td><td>TRAJECTORY · CELLCOMM · TME</td><td>All three read the corrected non-malignant object and none depends on another.</td></tr><tr><td><span class='tag t-par'>parallel</span></td><td>inferCNV · SCEVAN · CopyKAT · Numbat</td><td>Independent callers; STRATIFY waits for all of them. Numbat runs its own per-sample pileup alongside the expression callers.</td></tr><tr><td><span class='tag t-par'>parallel</span></td><td>LIANA · CellChat</td><td>Both must finish before NicheNet, which consumes their outputs.</td></tr><tr><td><span class='tag t-par'>parallel</span></td><td>TCR ‖ the compartment arms</td><td>TCR reads the annotated object, so it starts as soon as annotation finishes and never waits for the split.</td></tr><tr><td><span class='tag t-fan'>fan-out</span></td><td>SEURAT_QUALITY · SCYTPE_STATE · NMF</td><td>One task per sample, or per cell population.</td></tr><tr><td><span class='tag t-ser'>serial</span></td><td>the backbone, through STRATIFY</td><td>Each stage consumes the previous object; the split needs the CNV calls.</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">05</span>Entering the pipeline</h2>
+  <p class="lede">
+    <code>--from</code> and <code>--to</code> select a contiguous span of the backbone;
+    <code>--only</code> runs named stages alone. Any stage entered mid-chain takes its input
+    object from <code>--input_seurat_object</code>.
+  </p>
+
+  <div class="recipes">
+    <div class="recipe">
+      <h3>From raw counts, through annotation</h3>
+      <p>The most common entry. Runs QC → CLUSTER → ANNOTATION on CellRanger output.</p>
+      <pre class="cmd">nextflow run SCRATCH-E2E -profile docker,local \
+  --from qc --to annotation \
+  --input_gex_matrices_path 'TESTDATA/cellranger/*/outs/*' \
+  --input_exp_table TESTDATA/sample_metadata.csv \
+  --input_reference_object TESTDATA/ov_meta_reconstructed.rds \
+  --project_name hgsoc_raw --outdir results/annotation</pre>
+    </div>
+
+    <div class="recipe">
+      <h3>CNV calling on an annotated object</h3>
+      <p>Hand it the <b>scType aggregate</b> object: <code>celltype_col</code> defaults to
+      <code>sctype</code>, and the reference lineages inferCNV measures against are named in
+      that vocabulary. The Azimuth object matches only one of the six.</p>
+      <pre class="cmd">nextflow run SCRATCH-E2E -profile docker,local \
+  --from cnv --to stratify \
+  --input_seurat_object .../hgsoc_raw_sctype_agg_annotation_object.RDS \
+  --project_name hgsoc_raw --cnv_scevan_max_cells 5000 \
+  --outdir results/cnv</pre>
+    </div>
+
+    <div class="recipe">
+      <h3>Allele-aware calling with Numbat</h3>
+      <p>Needs a position-sorted genome BAM per sample. The sample key is the directory two
+      levels above the BAM, and must match the object's sample column.</p>
+      <pre class="cmd">nextflow run SCRATCH-E2E -profile docker,local \
+  --from cnv --to cnv --run_numbat true \
+  --input_seurat_object .../hgsoc_raw_sctype_agg_annotation_object.RDS \
+  --input_bam_path '.../CELLRANGER_COUNT/*/outs/possorted_genome_bam.bam' \
+  --project_name hgsoc_raw --outdir results/numbat</pre>
+    </div>
+
+    <div class="recipe">
+      <h3>One arm only, from a compartment object</h3>
+      <p><code>--input_tumor_object</code> and <code>--input_nonmalignant_object</code> enter an
+      arm directly, without re-running the split.</p>
+      <pre class="cmd">nextflow run SCRATCH-E2E -profile docker,local \
+  --from batchcorrect \
+  --input_nonmalignant_object .../hgsoc_nonmalignant_object.RDS \
+  --celltype_col sctype --sample_col sample_id --condition_col condition \
+  --project_name hgsoc_stromal --outdir results/stromal</pre>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">06</span>Things the diagram can't show</h2>
+  <div class="notes">
+    <div class="note">
+      <h4>The split is only as good as the callers</h4>
+      <p>STRATIFY pools whichever callers ran. With one caller there is no cross-check — the
+      compartment assignment rests on a single method and a threshold.</p>
+    </div>
+    <div class="note">
+      <h4>Annotators disagree</h4>
+      <p>The three annotators use different label vocabularies at different resolutions.
+      Downstream stages key on <code>sctype</code>, so that choice propagates into composition,
+      abundance and communication results.</p>
+    </div>
+    <div class="note">
+      <h4>Stub proves wiring, not behaviour</h4>
+      <p>The 56-task stub suite exercises the DAG without invoking a single notebook. A green
+      stub says the graph connects; it says nothing about whether a stage produces correct output.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Generated from main.nf, subworkflows/local/*.nf and conf/{containers,modules}.config ·
+  16 stages · 56 processes in the default DAG
+</footer>
+
+</div>

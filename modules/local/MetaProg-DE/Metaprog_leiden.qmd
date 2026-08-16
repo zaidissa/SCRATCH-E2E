@@ -314,7 +314,27 @@ jac_matord <- jac_mat[ord, ord, drop = FALSE]
 
 # cut into mp_num, then enforce group size caps
 hc2  <- hclust(as.dist(1 - jac_matord), method = "average")
-cut  <- cutree(hc2, k = params$mp_num)
+
+# cutree() errors outright if k exceeds the number of leaves, so a cohort that
+# yields fewer programs than mp_num kills the stage instead of returning the
+# programs it did find. Seen for real: 604 malignant cells produced 10 programs
+# against the default mp_num = 13. Clamping changes nothing when there are
+# enough programs; it only prevents the crash when there are not.
+# Clamping k to the NUMBER OF PROGRAMS is not enough: with 11 programs that
+# gives 11 groups of one member each, and every one is then discarded by the
+# min.size filter below -- the clamp guarantees the failure it was meant to
+# prevent. k must also leave each group able to REACH min.size, so cap it at
+# floor(n_programs / mp_min_size).
+n_prog  <- nrow(jac_matord)
+min_sz  <- max(1L, as.integer(params$mp_min_size))
+k_cap   <- max(1L, floor(n_prog / min_sz))
+k_use   <- min(as.integer(params$mp_num), n_prog, k_cap)
+if (k_use < as.integer(params$mp_num))
+  message(sprintf(paste0("Only %d programs available and mp_min_size=%d, so cutting ",
+                         "into %d metaprogram(s) instead of mp_num=%s. Treat this ",
+                         "cohort's metaprograms as under-powered."),
+                  n_prog, min_sz, k_use, params$mp_num))
+cut  <- cutree(hc2, k = k_use)
 groups0 <- split(names(cut), cut)
 
 enforce_group_sizes <- function(groups, sim, min.size = 4L, max.frac = 0.5) {
@@ -337,6 +357,18 @@ enforce_group_sizes <- function(groups, sim, min.size = 4L, max.frac = 0.5) {
     sp  <- split(g, lab)
     queue <- c(queue, sp)
   }
+  # paste0("G", integer(0)) returns "G", NOT character(0) -- so naming an empty
+  # `out` fails with "'names' attribute [1] must be the same length as the vector
+  # [0]", which says nothing about the actual cause. The real cause is that no
+  # group reached min.size, i.e. the cohort produced too few programs to build
+  # metaprograms from. Say that instead.
+  if (!length(out))
+    stop(sprintf(paste0("No metaprogram groups survived the size filter: %d program(s) ",
+                        "were cut into %d group(s), none reaching mp_min_size = %d. ",
+                        "This cohort has too few malignant cells / programs for ",
+                        "metaprogram discovery -- lower mp_min_size, lower mp_num, ",
+                        "or supply more malignant cells."),
+                 ncol(sim), length(groups), as.integer(min.size)), call. = FALSE)
   names(out) <- paste0("G", seq_along(out))
   out
 }
@@ -380,7 +412,7 @@ p_heat_only <- ggplot(long, aes(Var1, Var2, fill = value)) +
 ggsave(file.path("figures", "metaprog", "leiden_jaccard_heatmap.pdf"),
        p_heat_only, width = 9, height = 7)
 
-print(p_heat_only)
+p_heat_only
 # Annotated 3-panel (heatmap + MP bar + sample bar)
 jac_plot <- reshape2::melt(jac_matord)
 jac_plot$value[jac_plot$value >= 0.35] <- 0.35
@@ -439,7 +471,7 @@ saveRDS(barrier, file = out_rds)
 
 ```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
 
-print(params)
+params
 
 ```
 

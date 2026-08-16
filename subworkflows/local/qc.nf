@@ -104,7 +104,8 @@ workflow QC {
         // Propagate the doublet-filtered object, not the pre-filter merge.
         // Select exactly one of the two saved variants by filename.
         if (!params.skip_scdblfinder) {
-            SCDBLFINDER(ch_merged, ch_notebook_scdblfinder, ch_page_config)
+            SCDBLFINDER(ch_merged, SEURAT_MERGE.out.bpcells_store,
+                        ch_notebook_scdblfinder, ch_page_config)
 
             def wanted = params.qc_doublet_filter == 'cluster' ? '_qc_dbl_cluster_object.RDS'
                                                               : '_qc_dbl_sample_object.RDS'
@@ -112,12 +113,16 @@ workflow QC {
                 .flatten()
                 .filter { it.name.endsWith(wanted) }
                 .ifEmpty { error "SCDBLFINDER produced no object matching '${wanted}'. Check --qc_doublet_filter (sample|cluster)." }
+            ch_store = SCDBLFINDER.out.bpcells_store
         } else {
             ch_final = ch_merged
+            ch_store = SEURAT_MERGE.out.bpcells_store
         }
 
     emit:
         seurat_rds  = ch_final
+        // Downstream stages must stage this at data/bpcells_counts.
+        bpcells_store = ch_store
         merged_rds  = ch_merged
         qc_metrics  = SEURAT_QUALITY.out.metrics
 }

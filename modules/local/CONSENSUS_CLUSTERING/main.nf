@@ -13,6 +13,12 @@ process CONSENSUS_CLUSTERING {
       val  project_name
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figure_files, optional: true
       path "Clonotype_Clustering_Consensus_Report.html", emit: report_html
       path "Clonotype_Clustering_Consensus_Report/data/seurat_with_consensus_clonotype_clusters.rds", emit: seurat_with_consensus
       path "Clonotype_Clustering_Consensus_Report/tables/consensus_export_cells.tsv", emit: export_cells

@@ -338,7 +338,7 @@ p_ct <- FeaturePlot(
 panel_ct <- p_clusters | p_ct
 # save_plot(panel_ct, "01_CytoTRACE_overview")         # Step 01 figures
 save_plot(panel_ct, "CytoTRACE_overview", dir = CytotraceFig)         # Step 01 figures
-print(panel_ct)
+panel_ct
 
 # --- Root cells (top 2% CT) for downstream rooting ---
 root_cells_ct <- names(sort(obj_nonmal$CytoTRACE, decreasing = TRUE))[1:max(10, floor(0.02 * ncol(obj_nonmal)))]
@@ -589,7 +589,14 @@ panel_m3
 # ncores_m3 <- max(1, parallel::detectCores() - 1)
 
 # m3_gt <- monocle3::graph_test(cds, neighbor_graph = "principal_graph", cores = ncores_m3)
-ncores_m3 <- as.integer(Sys.getenv("M3_CORES", unset = "1"))
+# Default to the cores Nextflow actually allocated, not 1. The module exports
+# OMP_NUM_THREADS from task.cpus but never sets M3_CORES, so graph_test -- the
+# most expensive step in this stage by a wide margin -- ran single-threaded
+# while the other 11 allocated cores sat idle. safe_graph_test() below already
+# retries with cores=1 if a parallel run fails, so raising the default is safe.
+# M3_CORES still wins when set explicitly.
+ncores_m3 <- as.integer(Sys.getenv("M3_CORES",
+                                   unset = Sys.getenv("OMP_NUM_THREADS", unset = "1")))
 if (!is.finite(ncores_m3) || ncores_m3 < 1) ncores_m3 <- 1L
 
 max_cores <- as.integer(Sys.getenv("OMP_NUM_THREADS", unset = "8"))

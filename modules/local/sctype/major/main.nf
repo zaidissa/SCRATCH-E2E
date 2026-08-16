@@ -11,6 +11,12 @@ process SCYTPE_MAJOR_ANNOTATION {
         path(config)
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figure_files, optional: true
         path("_freeze/${notebook_major.baseName}")                       , emit: cache
         path("data/${params.project_name}_major_annotation_object.RDS")  , emit: seurat_rds
         path("data/${params.project_name}_major_annotation.csv")         , emit: annotation

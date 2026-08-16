@@ -13,6 +13,15 @@ process VDJ_QC {
 
 
     output:
+
+
+        // Figures were written by the notebook but never declared as an
+
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+
+        path("figures/**"), emit: figure_files, optional: true
         path("VDJ_QC_analysis.html"),               emit: report_html
         path("VDJ_QC/tables/contigs_after_qc.tsv"), emit: contigs_after_qc
         path("VDJ_QC/tables/*"),                    emit: tables

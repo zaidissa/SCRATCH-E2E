@@ -10,6 +10,12 @@ process QUARTO_RENDER_PROJECT {
         path(cache), stageAs: '_freeze/*'
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figures, optional: true
         path("report"), emit: project_folder
 
     shell:

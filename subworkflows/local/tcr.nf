@@ -25,6 +25,19 @@ include { CONSENSUS_SW         } from './consensus_clustering.nf'
 include { REPERTOIRE_SW        } from './repertoire.nf'
 include { MASTER_SUMMARY_SW    } from './master_summary.nf'
 
+// Each optional VDJ artefact gets its OWN NO_FILE placeholder. The standalone
+// pipeline shared one for all eight, which makes MASTER_SUMMARY fail with an
+// "input file name collision" whenever more than one is absent.
+def pickQcTable(ch, name, slot) {
+    ch.flatten().filter { it.getName() == name }
+      .ifEmpty(file("${projectDir}/assets/NO_FILE_${slot}"))
+}
+
+def pickQcFigure(ch, name, slot) {
+    ch.flatten().filter { it.getName() == name }
+      .ifEmpty(file("${projectDir}/assets/NO_FILE_${slot}"))
+}
+
 workflow TCR {
 
     take:
@@ -46,26 +59,18 @@ workflow TCR {
         // which makes MASTER_SUMMARY fail with "input file name collision"
         // whenever more than one of them is absent — i.e. on any run where VDJ
         // QC did not emit the full set.
-        def pick_table = { name, slot ->
-            vdj_qc_out.qc_tables.flatten()
-                .filter { it.getName() == name }
-                .ifEmpty(file("${projectDir}/assets/NO_FILE_${slot}"))
-        }
-        def pick_figure = { name, slot ->
-            vdj_qc_out.qc_figures.flatten()
-                .filter { it.getName() == name }
-                .ifEmpty(file("${projectDir}/assets/NO_FILE_${slot}"))
-        }
+        // Closure variables inside a workflow body are rejected by Nextflow
+        // 26.x ("`pick_table` is not defined"); top-level functions resolve.
 
-        ch_compact        = pick_table('vdj_qc_per_sample_compact.tsv',      'compact')
-        ch_before_after   = pick_table('qc_contigs_before_after_summary.tsv','before_after')
-        ch_sheet_resolved = pick_table('sample_sheet_resolved.tsv',          'sheet_resolved')
-        ch_rank_abundance = pick_table('clone_rank_abundance.tsv',           'rank_abundance')
+        ch_compact        = pickQcTable(vdj_qc_out.qc_tables, 'vdj_qc_per_sample_compact.tsv',      'compact')
+        ch_before_after   = pickQcTable(vdj_qc_out.qc_tables, 'qc_contigs_before_after_summary.tsv','before_after')
+        ch_sheet_resolved = pickQcTable(vdj_qc_out.qc_tables, 'sample_sheet_resolved.tsv',          'sheet_resolved')
+        ch_rank_abundance = pickQcTable(vdj_qc_out.qc_tables, 'clone_rank_abundance.tsv',           'rank_abundance')
 
-        ch_fig_retention  = pick_figure('qc_before_after_retention.png',     'fig_retention')
-        ch_fig_pairing    = pick_figure('pairing_bar_by_sample.png',         'fig_pairing')
-        ch_fig_rank       = pick_figure('clone_rank_abundance.png',          'fig_rank')
-        ch_fig_chains     = pick_figure('multiple_chains_by_sample.png',     'fig_chains')
+        ch_fig_retention  = pickQcFigure(vdj_qc_out.qc_figures, 'qc_before_after_retention.png',     'fig_retention')
+        ch_fig_pairing    = pickQcFigure(vdj_qc_out.qc_figures, 'pairing_bar_by_sample.png',         'fig_pairing')
+        ch_fig_rank       = pickQcFigure(vdj_qc_out.qc_figures, 'clone_rank_abundance.png',          'fig_rank')
+        ch_fig_chains     = pickQcFigure(vdj_qc_out.qc_figures, 'multiple_chains_by_sample.png',     'fig_chains')
 
         // ---- Step 2: T-cell integration (baseline for everything below) --
         tcell_out = TCELL_INTEGRATION_SW(

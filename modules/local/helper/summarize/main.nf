@@ -10,6 +10,12 @@ process HELPER_SUMMARIZE {
         path(page_config)
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figures, optional: true
         path("report/${notebook_summarize.baseName}.html")        , emit: html
 
     when:

@@ -13,6 +13,12 @@ process SCYTPE_STATE_ANNOTATION {
         path(config)
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figure_files, optional: true
         path("_freeze/notebook_${cell_population}")                                   , emit: cache
         path("data/${params.project_name}_${cell_population}_annotation_object.RDS")  , emit: seurat_rds
         path("data/${params.project_name}_${cell_population}_annotation.csv")         , emit: annotation

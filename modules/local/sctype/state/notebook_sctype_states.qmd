@@ -486,10 +486,17 @@ p <- SCP::CellDimPlot(
   show_stat = TRUE,
   theme_use = "theme_blank"
 ) +
+  # Legend on the right, not underneath. At the bottom the label block sat below
+  # the axis and pushed the embedding into the top half of the figure; beside it,
+  # the UMAP keeps its full height.
   theme(
-    legend.position = "bottom"
-  )
-print(p)
+    legend.position      = "right",
+    legend.direction     = "vertical",
+    legend.justification = "top"
+  ) +
+  guides(colour = guide_legend(ncol = 1, override.aes = list(size = 2.5)),
+         fill   = guide_legend(ncol = 1, override.aes = list(size = 2.5)))
+p
 ```
 
 :::{.callout-tip}
@@ -540,21 +547,40 @@ colnames(seurat_object@meta.data) <-
 
 ### Feature Plot
 
+```{r feature_plot_selector}
+#| label: fig-feat-markers-selector
+#| fig-cap: "Signature score on the UMAP — pick a signature from the dropdown on the right"
+
+# One embedding, one score at a time, chosen from a dropdown. The grid below
+# shows every signature at once for comparison; this is the readable view.
+scratch_feature_selector(
+  seurat_object,
+  features = names(non_malignant_markers),
+  reduction = "umap",
+  title = "Signature score"
+)
+```
+
 ```{r feature_plot}
 #| label: fig-feat-markers
-#| fig-width: 10
-#| fig-height: 12
+#| fig-width: 14
+#| fig-height: 16
 #| fig-align: center
 
+# `label = TRUE` drew the cluster numbers on EVERY panel. At this panel size the
+# labels from adjacent clusters overlapped into an unreadable smear, and they add
+# nothing here -- the question this figure answers is "where is this signature
+# expressed", not "which cluster is which". Panels also enlarged: the previous
+# 10x12 inches split across ~16 panels gave each one about two inches.
 fp <- FeaturePlot(
   object = seurat_object,
   features = names(non_malignant_markers),
-  label = TRUE,
+  label = FALSE,
   ncol = 2,
   min.cutoff = 'q1'
 )
 
-print (fp)
+fp
 ```
 
 :::{.callout-tip}
@@ -720,7 +746,7 @@ if(auto_save) {
 
 ```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
 
-print(params)
+params
 
 ```
 

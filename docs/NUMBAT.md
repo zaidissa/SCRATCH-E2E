@@ -35,12 +35,29 @@ consensus then has three or four independent opinions instead of two.
 | Phasing panel | 1000 Genomes reference panel, per-chromosome |
 | Container | R `numbat` package + Eagle2 + samtools |
 
-The three reference files are large external downloads and are **not** vendored
-here. The Numbat project documents where to obtain them; fetch them once to a
-shared location and point the three `--numbat_*` parameters at it. The pipeline
-checks all three before starting and fails immediately with a named parameter if
-one is missing — deliberately, because discovering a missing panel *after* a
-pileup has spent hours walking a BAM is the worst possible time.
+### Where the reference files come from
+
+Not vendored here — they are large external downloads. Fetch once to a shared
+location (on HPC put them somewhere group-readable) and point the three
+`--numbat_*` parameters at them. `bin/fetch_numbat_refs.sh` does all of this.
+
+| File | Source | Size |
+|---|---|---|
+| **SNP VCF** `genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf.gz` | `https://sourceforge.net/projects/cellsnp/files/SNPlist/` — the cellsnp-lite SNP lists Numbat's docs point to. Swap `hg38`→`hg19` for the other build. | ~200 MB |
+| **Phasing panel** `1000G_hg38/` | `http://pklab.med.harvard.edu/teng/data/1000G_hg38.zip` — the Kharchenko lab's prepared 1000G panel (`1000G_hg19.zip` for hg19). Unzip; point `--numbat_paneldir` at the resulting directory. | ~9 GB unzipped |
+| **Genetic map** `genetic_map_hg38_withX.txt.gz` | Ships **inside Eagle2**: `https://storage.googleapis.com/broad-alkesgroup-public/Eagle/downloads/Eagle_v2.4.1.tar.gz` → `Eagle_v2.4.1/tables/`. Also already present in the Numbat container at `/Eagle_v2.4.1/tables/`. | ~15 MB |
+| **BAM** `possorted_genome_bam.bam` | Produced by this pipeline's own `ALIGN` stage, or your existing CellRanger `outs/`. Must be the position-sorted BAM **with its `.bai`**. | per sample |
+
+All four URLs were checked and resolved at the time of writing; if one has moved,
+the canonical index is the Numbat repository: `https://github.com/kharchenkolab/numbat`.
+
+The genome build must be consistent across all of them and match `--numbat_genome`
+and `--genome`. Mixing an hg19 panel with hg38 BAMs will not error cleanly — it
+produces garbage calls, which is far worse.
+
+The pipeline checks all three paths before starting and fails immediately naming
+the missing parameter — deliberately, because discovering a missing panel *after*
+a pileup has spent hours walking a BAM is the worst possible time.
 
 `--container_numbat` defaults to `pkgs/numbat:latest`. **Verify that tag, or
 point it at your own build, before a production run** — it is the one image in

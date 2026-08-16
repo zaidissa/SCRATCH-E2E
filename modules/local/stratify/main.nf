@@ -35,6 +35,12 @@ process STRATIFY_COMPARTMENTS {
         path cnv_evidence, stageAs: 'cnv_evidence/*'
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figure_files, optional: true
         path "data/${params.project_name}_malignant_object.RDS",     emit: tumor_rds,      optional: true
         path "data/${params.project_name}_nonmalignant_object.RDS",  emit: nonmalignant_rds, optional: true
         path "data/${params.project_name}_malignancy_assignment.csv", emit: assignment

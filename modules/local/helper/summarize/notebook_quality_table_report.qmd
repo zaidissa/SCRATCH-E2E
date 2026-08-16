@@ -115,6 +115,173 @@ DT::datatable(metric_report_db,
 
 ```
 
+## Cohort QC summary {#cohort-summary}
+
+```{r cohort-compute, include = FALSE}
+# This report previously rendered one interactive table and drew no conclusion
+# from it. It is the ONLY place that sees every sample at once, so it is the
+# only place that can say which samples are outliers, whether sequencing was
+# deep enough, and which filter is actually removing cells.
+suppressPackageStartupMessages({library(data.table); library(ggplot2)})
+.m <- as.data.table(metric_report_db)
+.num <- function(x) suppressWarnings(as.numeric(x))
+for (cc in setdiff(names(.m), c("sample_id", "status_flag")))
+  if (!is.numeric(.m[[cc]])) .m[[cc]] <- .num(.m[[cc]])
+.has <- function(x) x %in% names(.m)
+.n_samp <- nrow(.m)
+
+# Outliers judged against the OTHER samples, not an absolute cutoff: what counts
+# as shallow depends on the assay and the cohort.
+.flag_outlier <- function(v) {
+  if (length(v) < 3 || all(is.na(v))) return(rep(FALSE, length(v)))
+  md <- median(v, na.rm = TRUE); dv <- mad(v, na.rm = TRUE)
+  if (!is.finite(dv) || dv == 0) return(rep(FALSE, length(v)))
+  abs(v - md) > 3 * dv
+}
+```
+
+```{r cohort-findings, results = 'asis'}
+.failed <- if (.has("status_flag")) .m[!grepl("SUCCESS", status_flag)]$sample_id else character(0)
+.tot <- if (.has("n_observed_cells")) sum(.m$n_observed_cells, na.rm = TRUE) else NA
+
+msg <- sprintf("**%d sample%s** processed%s.", .n_samp, ifelse(.n_samp == 1, "", "s"),
+               if (!is.na(.tot)) sprintf(", yielding **%s cells** after QC",
+                                         format(.tot, big.mark = ",")) else "")
+# Braced deliberately: at top level R terminates `if (cond) expr` at the
+# newline and then fails on a bare `else`. (Inside {} it would parse fine.)
+if (length(.failed)) {
+  msg <- paste(msg, sprintf(
+    "**Sample(s) %s did not pass** and are excluded from everything downstream.",
+    paste(.failed, collapse = ", ")))
+} else {
+  msg <- paste(msg, "All samples passed the QC gate.")
+}
+scratch_finding(msg, type = if (length(.failed)) "caution" else "note",
+                title = "Cohort status")
+
+# --- which filter is doing the work -----------------------------------------
+if (all(c("n_total_cells","n_thr_features_cells","n_observed_cells") %in% names(.m))) {
+  .lost_gene <- sum(.m$n_total_cells - .m$n_thr_features_cells, na.rm = TRUE)
+  .lost_mito <- sum(.m$n_thr_features_cells - .m$n_observed_cells, na.rm = TRUE)
+  .lost_all  <- .lost_gene + .lost_mito
+  .kept <- 100 * sum(.m$n_observed_cells, na.rm = TRUE) / max(1, sum(.m$n_total_cells, na.rm = TRUE))
+  m2 <- sprintf(paste("Across the cohort **%.1f%%** of barcodes were retained.",
+                      "Of the **%s** cells removed, **%s (%.0f%%)** went to the gene-count",
+                      "filter and **%s (%.0f%%)** to the mitochondrial filter."),
+                .kept, format(.lost_all, big.mark = ","),
+                format(.lost_gene, big.mark = ","), 100 * .lost_gene / max(1, .lost_all),
+                format(.lost_mito, big.mark = ","), 100 * .lost_mito / max(1, .lost_all))
+  if (.lost_gene == 0) m2 <- paste(m2,
+    "**The gene-count filter removed nothing**, so it is not currently constraining this",
+    "cohort -- every cell lost was lost to mitochondrial content. Tightening the gene",
+    "threshold would have no effect; the mitochondrial cutoff is the one that matters here.")
+  if (.lost_mito == 0) m2 <- paste(m2,
+    "**The mitochondrial filter removed nothing** -- worth confirming the `MT-` gene",
+    "prefix matches this reference, since a prefix mismatch produces exactly this result.")
+  scratch_finding(m2, type = "note", title = "Which filter is removing cells")
+}
+
+# --- sequencing depth / saturation ------------------------------------------
+if (.has("seq_saturation")) {
+  .st <- .m$seq_saturation[is.finite(.m$seq_saturation)]
+  if (length(.st)) {
+    .low <- .m[is.finite(seq_saturation) & seq_saturation < 50]$sample_id
+    m3 <- sprintf("Sequencing saturation ranges **%.1f%% to %.1f%%** (median %.1f%%).",
+                  min(.st), max(.st), median(.st))
+    if (length(.low)) m3 <- paste(m3, sprintf(paste(
+      "**Sample(s) %s are below 50%%**, meaning a substantial fraction of transcripts",
+      "remain unsampled -- deeper sequencing would still recover new genes, and these",
+      "samples will show artificially low gene counts relative to the rest."),
+      paste(.low, collapse = ", ")))
+    else m3 <- paste(m3, "All samples are adequately saturated, so gene-count differences",
+                     "between them reflect biology rather than sequencing depth.")
+    scratch_finding(m3, type = if (length(.low)) "caution" else "note",
+                    title = "Sequencing saturation")
+  }
+}
+
+# --- per-metric outliers -----------------------------------------------------
+.checkcols <- intersect(c("median_genes_per_cell","median_umi_per_cell",
+                          "mean_reads_per_cell","seq_saturation","n_observed_cells"),
+                        names(.m))
+if (.n_samp >= 3 && length(.checkcols)) {
+  .out <- rbindlist(lapply(.checkcols, function(cc) {
+    f <- .flag_outlier(.m[[cc]])
+    if (!any(f)) return(NULL)
+    data.table(metric = cc, sample = .m$sample_id[f], value = .m[[cc]][f],
+               cohort_median = median(.m[[cc]], na.rm = TRUE))
+  }))
+  if (length(.out) && nrow(.out)) {
+    scratch_finding(sprintf(paste("**%d sample-metric combination(s)** sit more than 3 MADs",
+                                  "from the cohort median (%s). These are the samples most",
+                                  "likely to drive batch effects downstream."),
+                            nrow(.out), paste(unique(.out$sample), collapse = ", ")),
+                    type = "caution", title = "Outlying samples")
+    scratch_table(.out, caption = "Metrics more than 3 MADs from the cohort median")
+  } else {
+    scratch_finding("No sample deviates more than 3 MADs from the cohort median on any QC metric.",
+                    type = "note", title = "Outlying samples")
+  }
+} else if (.n_samp < 3) {
+  scratch_finding(sprintf(paste("With only %d sample%s, outlier detection across samples is",
+                                "not meaningful -- a median and MAD need at least three points."),
+                          .n_samp, ifelse(.n_samp == 1, "", "s")),
+                  type = "note", title = "Outlying samples")
+}
+```
+
+```{r cohort-retention-figure, message = FALSE, warning = FALSE}
+#| fig-width: 9
+#| fig-height: 4
+if (all(c("n_total_cells","n_thr_features_cells","n_observed_cells") %in% names(.m))) {
+  .r <- rbindlist(list(
+    .m[, .(sample_id, stage = "removed: low gene count",
+           cells = n_total_cells - n_thr_features_cells)],
+    .m[, .(sample_id, stage = "removed: high mitochondrial",
+           cells = n_thr_features_cells - n_observed_cells)],
+    .m[, .(sample_id, stage = "retained", cells = n_observed_cells)]))
+  .r[, stage := factor(stage, levels = c("retained", "removed: low gene count",
+                                         "removed: high mitochondrial"))]
+  .r[, tip := sprintf("%s\n%s\n%s cells", sample_id, stage, format(cells, big.mark = ","))]
+  ggplot(.r, aes(sample_id, cells, fill = stage, text = tip)) +
+    geom_col(width = .7) +
+    scale_fill_manual(values = c("retained" = "#0d366b",
+                                 "removed: low gene count" = "#8fb4dd",
+                                 "removed: high mitochondrial" = "#8c1d18"), name = NULL) +
+    scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0, .08))) +
+    coord_flip() +
+    labs(title = "Barcode fate per sample",
+         subtitle = "a tall red segment means the mitochondrial cutoff is doing the filtering",
+         x = NULL, y = "barcodes") +
+    theme_scratch()
+}
+```
+
+```{r cohort-depth-figure, message = FALSE, warning = FALSE}
+#| fig-width: 8.5
+#| fig-height: 4.5
+if (all(c("mean_reads_per_cell","median_genes_per_cell") %in% names(.m))) {
+  .d <- copy(.m)
+  .d[, tip := sprintf("%s\n%s reads/cell\n%s genes/cell%s", sample_id,
+                      format(round(mean_reads_per_cell), big.mark = ","),
+                      format(round(median_genes_per_cell), big.mark = ","),
+                      if ("seq_saturation" %in% names(.d))
+                        sprintf("\n%.1f%% saturation", seq_saturation) else "")]
+  .aes <- if ("seq_saturation" %in% names(.d))
+    aes(mean_reads_per_cell, median_genes_per_cell, colour = seq_saturation, text = tip)
+  else aes(mean_reads_per_cell, median_genes_per_cell, text = tip)
+  ggplot(.d, .aes) +
+    geom_point(size = 3.2) +
+    { if ("seq_saturation" %in% names(.d))
+        scale_colour_gradient(low = "#8c1d18", high = "#0d366b", name = "saturation %") } +
+    scale_x_log10(labels = scales::comma) +
+    labs(title = "Sequencing depth against library complexity",
+         subtitle = "a sample low and left is undersequenced; low and right is genuinely low-complexity",
+         x = "mean reads per cell", y = "median genes per cell") +
+    theme_scratch()
+}
+```
+
 ## Parameters log
 
 ```{r params_log, message = FALSE, warning = FALSE, echo = TRUE}

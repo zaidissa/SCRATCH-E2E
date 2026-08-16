@@ -237,6 +237,7 @@ checkpoint(is.data.frame(md), "md <- seu[[]] is a data.frame")
 cat("Meta columns (first 20):", paste(head(colnames(md), 20), collapse=", "), "\n")
 
 CELLTYPE_CANDIDATES <- c(
+"sctype","sctype_agg",
 "celltype", "cell_type", "CellType", "celltype_final", "celltype_refined",
 "azimuth_labels", "azimuth_label", "predicted.celltype.l2", "predicted.celltype.l1",
 "annotation", "annot", "label", "labels", "final_annotation",
@@ -1084,7 +1085,7 @@ saveRDS(list(done=TRUE, timestamp=Sys.time()), file = out_rds)
 ```
 
 ```{r}
-print(params)
+params
 ```
 
 ```{r}

@@ -67,6 +67,21 @@ dir.create("figures", showWarnings = FALSE, recursive = TRUE)
 CAT <- c("#2a78d6", "#eb6834", "#1baf7a", "#eda100",
          "#e87ba4", "#008300", "#4a3aa7", "#e34948")
 
+
+# CAT is a fixed 8-slot vector but these plots are handed however many levels the
+# data has (top_n_celltypes defaults to 12, plus "Other"). scale_*_manual ERRORS
+# when levels exceed values -- "Insufficient values in manual scale" -- which
+# aborts the whole notebook. Use an adaptive palette instead: exact validated
+# colours while they last, interpolated beyond, never a crash.
+pal_scratch <- function(n) {
+  if (exists("scratch_colours")) return(scratch_colours(n))
+  if (n <= length(CAT)) CAT[seq_len(n)] else grDevices::colorRampPalette(CAT)(n)
+}
+scale_fill_scratch <- function(...)
+  ggplot2::discrete_scale("fill", palette = pal_scratch, ...)
+scale_colour_scratch <- function(...)
+  ggplot2::discrete_scale("colour", palette = pal_scratch, ...)
+
 SEQ_LOW  <- "#cde2fb"; SEQ_HIGH <- "#0d366b"           # one hue, light -> dark
 DIV_LOW  <- "#2a78d6"; DIV_MID  <- "#f0efec"; DIV_HIGH <- "#e34948"
 
@@ -178,7 +193,7 @@ if (length(mal_col) && !is.na(col_ct)) {
 
     p <- ggplot(comp, aes(x = ct, y = frac, fill = call)) +
       geom_col(width = 0.72, colour = SURFACE, linewidth = 1) +   # 2px surface gap
-      scale_fill_manual(values = CAT, name = "CNV call") +
+      scale_fill_scratch(name = "CNV call") +
       scale_y_continuous(labels = percent_format(accuracy = 1), expand = expansion(mult = c(0, .02))) +
       labs(title = "CNV call composition by annotated cell type",
            subtitle = paste("Column:", mc),
@@ -314,7 +329,7 @@ if (!is.na(col_ct) && !is.na(col_cond) && uniqueN(cells[[col_cond]]) > 1) {
 
   p <- ggplot(comp, aes(x = cond, y = frac, fill = ct)) +
     geom_col(width = 0.7, colour = SURFACE, linewidth = 1) +
-    scale_fill_manual(values = CAT, name = "cell type") +
+    scale_fill_scratch(name = "cell type") +
     scale_y_continuous(labels = percent_format(accuracy = 1), expand = expansion(mult = c(0, .02))) +
     labs(title = "Cell-type composition by condition", x = NULL, y = "share of cells") +
     theme_scratch()

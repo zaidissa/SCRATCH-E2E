@@ -143,7 +143,7 @@ Three sources of improvement over running the eight pipelines by hand:
 
 ## Documentation
 
-- [docs/flowchart.html](docs/flowchart.html) — the full DAG as a rendered page: stage graph, per-stage process flows, inter-stage contracts, gating rules
+- [docs/pipeline-map.html](docs/pipeline-map.html) — the full DAG as a rendered page: stage graph, per-stage process chains, inter-stage artefact contracts, concurrency, gating rules and entry recipes
 - [docs/USAGE.md](docs/USAGE.md) — parameter reference and worked examples
 - [docs/NMF_ENGINES.md](docs/NMF_ENGINES.md) — the R and Python NMF engines
 - [docs/NUMBAT.md](docs/NUMBAT.md) — the opt-in allele-aware CNV caller

@@ -409,13 +409,18 @@ DT::datatable(
 #| fig-width: 15
 #| fig-height: 10
 #| layout-ncol: 2
+# SCP builds its own scale_*_manual internally and ggplot2 4.0 emits "No shared
+# levels found between `names(values)` of the manual scale and the data's fill
+# values" for it. Harmless, but without this it printed three times INTO the
+# report, directly above the figure, where it reads as a broken plot.
+#| warning: false
 
 
 SCP::CellDimPlot(
-  srt = seurat_object, 
+  srt = seurat_object,
   group.by = "sctype",
   reduction = "umap",
-  label = TRUE, 
+  label = TRUE,
   label_repel = TRUE,
   show_stat = TRUE,
   theme_use = "theme_blank"
@@ -495,14 +500,31 @@ if(length(non_malignant_markers_valid) > 1) {
 #| fig-height: 10
 #| fig-align: center
 
+# `label = TRUE` stamped cluster numbers on every panel; at this panel size they
+# overlapped into an unreadable smear and answered a question this figure is not
+# asking. Same change as sctype/state.
 fp <- FeaturePlot(
   object = seurat_object,
   features = names(non_malignant_markers),
-  label = TRUE,
+  label = FALSE,
   min.cutoff = 'q1'
   )
 
-print (fp)
+fp
+```
+
+```{r feature_plot_selector}
+#| label: fig-feat-markers-selector
+#| fig-cap: "Signature score on the UMAP — pick a signature from the dropdown on the right"
+
+# The grid above compares all signatures at once; this shows one at a time at
+# full size, which is the only way to actually read an individual score.
+scratch_feature_selector(
+  seurat_object,
+  features = names(non_malignant_markers),
+  reduction = "umap",
+  title = "Signature score"
+)
 ```
 
 :::{.callout-tip}
@@ -513,17 +535,24 @@ The @fig-feat-markers represents a 'FeaturePlot' which allows coloring the cells
 
 ```{r violin_plot}
 #| label: fig-violin
-#| fig-cap: "ViolinPlot"
-#| fig-width: 15
-#| fig-height: 10
+#| fig-cap: "Signature score distribution per cluster"
+# Quarto scales a figure to the page width, so a WIDE figure shrinks everything
+# in it: at 18in each panel was squashed to a sliver once fitted to the page.
+# Narrower and taller renders each panel LARGER on screen. 7 panels, 2 columns,
+# 4 rows -> ~5.5 x 5in each.
+#| fig-width: 11
+#| fig-height: 20
 #| fig-align: center
+#| warning: false
 
 vp <- VlnPlot(
   object = seurat_object,
   features = names(non_malignant_markers),
+  ncol = 2,                 # 2 wide instead of 3: each panel gets ~50% more width
+  pt.size = 0               # 24k jittered points per panel hid the violins entirely
   )
 
-print (vp)
+vp
 ```
 
 :::{.callout-tip}
@@ -653,7 +682,7 @@ if(auto_save) {
 
 ```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
 
-print(params)
+params
 
 ```
 

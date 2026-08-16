@@ -12,6 +12,10 @@ process SEURAT_QUALITY {
         tuple val(sample_id), path("objects/*"), path("log/*.txt"), emit: status
         path("${sample_id}_metrics_upgrade.csv"),                   emit: metrics
         path("report/notebook_${sample_id}.html")
+        // This process never declared a figures output, so per-sample QC
+        // figures were computed and then discarded. Optional: a sample that
+        // fails QC early can legitimately produce none.
+        path("figures/**"), emit: figures, optional: true
 
     when:
         task.ext.when == null || task.ext.when

@@ -84,12 +84,21 @@ workflow INTEGRATION {
         // ---- 4. One navigable site over everything -------------------------
         ch_all_reports = INTEGRATE_OBJECTS.out.report
             .mix(CROSS_ANALYSIS.out.report)
+            .flatten()
+            .filter { !it.toString().contains('_figlibs') }
             .collect()
             .ifEmpty([])
 
+        // MASTER_REPORT stages these with `stageAs: 'inputs/figures/*'`, which
+        // FLATTENS the tree. The interactive figures write a `_figlibs/` beside
+        // every figure directory (plotly.js, crosstalk.js, jquery.js ...), and
+        // those collide on identical names. Same defect as INTEGRATE_OBJECTS --
+        // filtered there but not here, because this channel is built separately.
+        // The widget runtime is not an analysis figure; the report does not need it.
         ch_all_figures = INTEGRATE_OBJECTS.out.figures
             .mix(CROSS_ANALYSIS.out.figures)
             .flatten()
+            .filter { !it.toString().contains('_figlibs') }
             .collect()
             .ifEmpty([])
 

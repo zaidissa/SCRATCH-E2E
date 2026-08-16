@@ -114,20 +114,33 @@ seurat_object <- readRDS(file = seurat_object)
 ```
 
 ```{r filtering celltypes by tool type}
+# Reference = the normal baseline inferCNV measures against. EVERY other cell is
+# an observation. The previous version also carried a `cell_types_to_keep` list
+# and subset the object to it, which is where this stage died:
+#
+#   sctype branch kept c("B_Plasma_Cells", "Epithelial", "Fibroblast", "T_Cells")
+#   and scType assigns ZERO cells to "Epithelial" -- its labels are T_Cells,
+#   B_Plasma_Cells, Myeloid, Unknown, NK_Cells, Fibroblast, Endothelial_Cells.
+#
+# So all 12,871 surviving cells were reference cells, there were no observations,
+# and inferCNV crashed inside .plot_cnv_observations() with
+# `obs_dendrogram[[1]]: subscript out of bounds`. The tumour cells were in the
+# 4,308 "Unknown" that the keep-list discarded.
+#
+# Whitelisting observations is the wrong shape anyway: you cannot know in advance
+# what the malignant cells were labelled, and that is the entire question. Keep
+# every cell, name only the REFERENCE, and let everything else be observed.
 if ("azimuth_labels" %in% colnames(seurat_object@meta.data)) {
-  reference_label    <- "azimuth_labels"
-  cell_types_to_keep <- c("B cell", "Epithelial",
-                          "Fibroblast", "T cell")
-  reference_grp <- c("B cell", "T cell","Fibroblast")
+  reference_label <- "azimuth_labels"
+  reference_grp   <- c("B cell", "T cell", "Fibroblast")
 } else if ("sctype" %in% colnames(seurat_object@meta.data)) {
-  reference_label    <- "sctype"
-  cell_types_to_keep <- c("B_Plasma_Cells", "Epithelial", "Fibroblast", "T_Cells")
-  reference_grp <- c("B_Plasma_Cells", "T_Cells", "Fibroblast")
-} else if ("sctype" %in% colnames(seurat_object@meta.data)) {
-  reference_label    <- "cell_label"
-  cell_types_to_keep <- c("B cell", "Epithelial",
-                          "Fibroblast", "T cell")
-  reference_grp <- c("B cell", "T cell","Fibroblast")
+  reference_label <- "sctype"
+  reference_grp   <- c("B_Plasma_Cells", "T_Cells", "Fibroblast")
+} else if ("cell_label" %in% colnames(seurat_object@meta.data)) {
+  # Was `else if ("sctype" %in% ...)` -- a copy of the branch above, so this arm
+  # was unreachable and a cell_label-only object hit the stop() instead.
+  reference_label <- "cell_label"
+  reference_grp   <- c("B cell", "T cell", "Fibroblast")
 } else {
   stop("No supported annotation column found. The object must have one of the following columns: azimuth_labels, sctype, cell_label")
 }
@@ -151,12 +164,45 @@ if ("azimuth_labels" %in% colnames(seurat_object@meta.data)) {
 #   metadata = reference_table
 #   )
 
-# Subset Seurat object to retain only epithelial + reference groups
-# cell_types_to_keep <- c("Endothelial","Epithelial", "B cell", "T cell", "Fibroblast")
-seurat_object$reference_label <- seurat_object@meta.data[[reference_label]]
-seurat_object <- subset(seurat_object, subset = reference_label %in% cell_types_to_keep)
-# seurat_object$reference_label <- NULL
-# table(seurat_object@meta.data$azimuth_labels)
+seurat_object$reference_label <- as.character(seurat_object@meta.data[[reference_label]])
+
+# inferCNV needs a group label for every cell; NA is not a group.
+seurat_object$reference_label[is.na(seurat_object$reference_label) |
+                              !nzchar(seurat_object$reference_label)] <- "Unassigned"
+
+# No keep-list: every cell is retained. Reference cells form the baseline, all
+# others are observations.
+.present   <- unique(seurat_object$reference_label)
+.ref_found <- intersect(reference_grp, .present)
+.n_ref     <- sum(seurat_object$reference_label %in% .ref_found)
+.n_obs     <- sum(!seurat_object$reference_label %in% .ref_found)
+
+# Fail with the actual label vocabulary rather than deep inside inferCNV's
+# plotting code. Both of these produced `subscript out of bounds` before.
+if (!length(.ref_found)) {
+  stop("inferCNV: none of the reference groups (", paste(reference_grp, collapse = ", "),
+       ") occur in `", reference_label, "`. Labels present: ",
+       paste(sort(.present), collapse = ", "),
+       ". Without reference cells there is no baseline to call CNV against.")
+}
+if (.n_obs == 0L) {
+  stop("inferCNV: every cell falls in a reference group, so there is nothing to ",
+       "observe. Labels present: ", paste(sort(.present), collapse = ", "))
+}
+
+message(sprintf(paste("[inferCNV] reference: %s cells across %d group(s) [%s];",
+                      "observations: %s cells across %d group(s)"),
+                format(.n_ref, big.mark = ","), length(.ref_found),
+                paste(.ref_found, collapse = ", "),
+                format(.n_obs, big.mark = ","),
+                length(setdiff(.present, .ref_found))))
+
+# Reference groups named but absent are dropped silently by inferCNV otherwise.
+if (length(setdiff(reference_grp, .ref_found))) {
+  warning("inferCNV: reference group(s) not present and therefore unused: ",
+          paste(setdiff(reference_grp, .ref_found), collapse = ", "),
+          call. = FALSE)
+}
 
 ## yibo recommendations: add Endothelial  cells and smooth muscle  cellls and parasite to reference, p
 
@@ -236,7 +282,9 @@ infercnv_object <- infercnv::CreateInfercnvObject(
           annotations_file  = reference_table,
           delim             = "\t",
           gene_order_file   = infercnv_genes,
-          ref_group_names = reference_grp
+          # .ref_found, not reference_grp: naming a group with no cells makes
+          # inferCNV build an empty reference and fail obscurely later.
+          ref_group_names = .ref_found
           )
 # ref_group_names   = c("B cell", "T cell", "Fibroblast") -->
 # ref_group_names   = c("Fibroblast", "Endothelial", "B cell", "T cell")
@@ -319,7 +367,7 @@ if(auto_save) {
 
 ```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
 
-print(params)
+params
 
 ```
 

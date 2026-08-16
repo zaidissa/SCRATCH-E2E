@@ -86,6 +86,7 @@ library(readr)
 library(dplyr)
 library(ggplot2)
 library(Seurat)
+library(BPCells)
 
 ```
 
@@ -110,11 +111,22 @@ for(sub_directory in c('data', 'figures')) {
 #| warning: false
 
 metadata <- readr::read_csv(file = input_exp_table)
+
+# --input_exp_table is a per-sample METADATA table, not the alignment
+# samplesheet: the shipped example (assets/samplesheets/test_meta_data.csv) is
+# `sample,patient_id,timepoint,condition,batch` with no fastq columns at all.
+# `select(-c(fastq_1, fastq_2))` therefore aborted with "Column `fastq_1`
+# doesn't exist" for anyone following the documented format. Drop those columns
+# only when a samplesheet was passed instead.
 metadata <- metadata %>%
-#   select(-c(sampleIndex, fastq_1, fastq_2)) %>%
-  select(-c(fastq_1, fastq_2)) %>%
+  select(-dplyr::any_of(c("sampleIndex", "fastq_1", "fastq_2", "fastq_3",
+                          "modality", "run_id", "r1", "r2", "i1", "i2"))) %>%
   distinct() %>%
   as.data.frame()
+
+if (!"sample" %in% colnames(metadata))
+  stop("--input_exp_table must contain a `sample` column. Found: ",
+       paste(colnames(metadata), collapse = ", "))
 
 ```
 
@@ -131,22 +143,72 @@ sample_label <- setNames(
   sample_label
 )
 
-# Reading approved samples
-seurat_object_list <- list()
+# On-disk store for the per-sample BPCells matrices. Kept under data/ so it is
+# published with the merged object.
+bpcells_root <- file.path('data', 'bpcells')
+if (dir.exists(bpcells_root)) unlink(bpcells_root, recursive = TRUE)
+dir.create(bpcells_root, recursive = TRUE)
+
+# Read each QC-approved sample, prefix its barcodes, and persist its counts as
+# an on-disk BPCells matrix. BPCells uses 64-bit indexing, so the joined matrix
+# is NOT bound by the ~2.1 billion non-zero ceiling of an in-memory dgCMatrix
+# (which caused the 'vector::reserve' failure in JoinLayers at cohort scale).
+counts_list <- list()
+meta_list   <- list()
 
 for (label in names(sample_label)) {
-  
-  seurat_object_list[[label]] <- readRDS(file = sample_label[[label]])
-  seurat_object_list[[label]]$raw_cell_id <- Cells(seurat_object_list[[label]])
-  
-  seurat_object_list[[label]] <- RenameCells(
-    seurat_object_list[[label]], add.cell.id = label)
 
+  obj <- readRDS(file = sample_label[[label]])
+  obj$raw_cell_id <- Cells(obj)
+  obj <- RenameCells(obj, add.cell.id = label)
+
+  counts <- SeuratObject::LayerData(obj, assay = 'RNA', layer = 'counts')
+
+  mat_dir <- file.path(bpcells_root, label)
+  BPCells::write_matrix_dir(mat = counts, dir = mat_dir, overwrite = TRUE)
+
+  counts_list[[label]] <- BPCells::open_matrix_dir(dir = mat_dir)
+  meta_list[[label]]   <- obj@meta.data
+
+  rm(obj, counts); gc()
 }
 
-# Merge all the objects in the list
-seurat_object <- purrr::reduce(
-  seurat_object_list, project = project_name, merge, do.normalize = FALSE)
+# Align to a common gene set (identical when samples share a reference) and
+# column-bind the on-disk matrices into a single 64-bit-backed counts matrix.
+gene_sets    <- lapply(counts_list, rownames)
+common_genes <- Reduce(intersect, gene_sets)
+
+if (!all(vapply(gene_sets, function(g) identical(g, common_genes), logical(1)))) {
+  message(sprintf('Aligning samples to %d shared genes', length(common_genes)))
+  counts_list <- lapply(counts_list, function(m) m[common_genes, ])
+}
+
+combined_counts <- do.call(cbind, counts_list)
+
+# Consolidate the concatenated matrix into ONE on-disk store at a predictable
+# relative path (data/bpcells_counts). Downstream steps stage this directory at
+# the same relative location so the object's on-disk references resolve. Then
+# drop the now-redundant per-sample stores.
+counts_store <- file.path('data', 'bpcells_counts')
+if (dir.exists(counts_store)) unlink(counts_store, recursive = TRUE)
+BPCells::write_matrix_dir(mat = combined_counts, dir = counts_store)
+combined_counts <- BPCells::open_matrix_dir(dir = counts_store)
+unlink(bpcells_root, recursive = TRUE)
+
+# Combined per-cell metadata (common columns; barcodes already made unique).
+# Drop the auto-computed count columns so CreateSeuratObject regenerates them.
+common_cols   <- Reduce(intersect, lapply(meta_list, colnames))
+combined_meta <- do.call(rbind, lapply(meta_list, function(m) m[, common_cols, drop = FALSE]))
+combined_meta <- combined_meta[, setdiff(colnames(combined_meta),
+                                         c('nCount_RNA', 'nFeature_RNA')), drop = FALSE]
+
+# One object with a single BPCells-backed counts layer: no in-memory
+# JoinLayers/StitchMatrix is required, so the 32-bit ceiling never applies.
+seurat_object <- CreateSeuratObject(
+  counts    = combined_counts,
+  project   = project_name,
+  meta.data = combined_meta
+)
 
 ```
 
@@ -155,9 +217,12 @@ seurat_object <- purrr::reduce(
 ```{r seurat_rejoin}
 #| code-fold: true
 
-if(length(seurat_object@assays$RNA@layers) > 1) {
-  
-  seurat_object <- JoinLayers(seurat_object) 
+# The counts were column-bound into a single BPCells-backed layer above, so
+# there is normally only one layer here and nothing to join. The guard remains
+# so the notebook still behaves correctly if a multi-layer object is ever passed.
+if (length(SeuratObject::Layers(seurat_object, assay = 'RNA')) > 1) {
+
+  seurat_object <- JoinLayers(seurat_object)
 
 }
 
@@ -203,6 +268,213 @@ DT::datatable(seurat_object@meta.data,
 
 ```
 
+## Object summary {#object-summary}
+
+```{r object-summary, results = 'asis'}
+# What actually came out of the merge: dimensions, assays, layers, and which
+# metadata columns downstream stages can key on. Without this the report says a
+# merge happened but not what it produced, and a missing layer or a metadata
+# column that silently vanished only surfaces as a crash three stages later.
+suppressPackageStartupMessages({library(data.table)})
+.assay <- tryCatch(Seurat::DefaultAssay(seurat_object), error = function(e) NA_character_)
+.ncell <- ncol(seurat_object); .ngene <- nrow(seurat_object)
+.layers <- tryCatch(SeuratObject::Layers(seurat_object), error = function(e) character(0))
+.reds   <- tryCatch(names(seurat_object@reductions), error = function(e) character(0))
+
+.summary <- data.table(
+  property = c("cells", "features", "default assay", "assays", "layers", "reductions"),
+  value = c(format(.ncell, big.mark = ","), format(.ngene, big.mark = ","),
+            .assay,
+            paste(tryCatch(names(seurat_object@assays), error = function(e) NA), collapse = ", "),
+            if (length(.layers)) paste(.layers, collapse = ", ") else "none",
+            if (length(.reds)) paste(.reds, collapse = ", ") else "none (added at the cluster stage)"))
+scratch_table(.summary, caption = "Merged object")
+
+# Metadata columns are the contract with every downstream stage: they are what
+# --sample_col / --condition_col / --celltype_col resolve against.
+.md <- seurat_object@meta.data
+.mdt <- data.table(
+  column = names(.md),
+  type = vapply(.md, function(z) class(z)[1], ""),
+  distinct = vapply(.md, function(z) length(unique(z)), integer(1)),
+  missing = vapply(.md, function(z) sum(is.na(z)), integer(1)))
+.mdt[, example := vapply(names(.md), function(n) {
+  v <- .md[[n]][!is.na(.md[[n]])]
+  if (!length(v)) return("")
+  if (is.numeric(v)) sprintf("%.3g - %.3g", min(v), max(v))
+  else paste(head(unique(as.character(v)), 3), collapse = ", ")
+}, "")]
+scratch_table(.mdt, caption = "Metadata columns available to downstream stages")
+
+.empty <- .mdt[missing == nrow(.md)]$column
+if (length(.empty)) scratch_finding(
+  sprintf(paste("Metadata column(s) **%s** are entirely missing values. Any downstream",
+                "stage keyed on them will silently produce empty groups rather than fail."),
+          paste(.empty, collapse = ", ")),
+  type = "caution", title = "Empty metadata columns")
+```
+
+```{r design-compute, include = FALSE}
+# Nothing in this pipeline ever shows the experimental DESIGN, yet every
+# condition-level result downstream depends on it: propeller, scCODA and the
+# DE tests all need replicates within each group, and an unreplicated or
+# unbalanced design invalidates them before a single test is run. This is the
+# one report where that can be checked, because it is where samples first meet.
+.dm <- as.data.table(seurat_object@meta.data)
+.scol <- intersect(c("orig.ident","sample_id","sample","Samples"), names(.dm))[1]
+# Candidate design factors: low-cardinality categoricals that are not the
+# sample column itself and not per-cell measurements.
+.design_cols <- character(0)
+if (!is.na(.scol)) {
+  for (nm in setdiff(names(.dm), .scol)) {
+    v <- .dm[[nm]]
+    if (is.numeric(v)) next
+    k <- length(unique(v[!is.na(v)]))
+    if (k >= 2 && k <= 12) .design_cols <- c(.design_cols, nm)
+  }
+  # Keep only columns constant WITHIN a sample -- those describe the sample,
+  # not the cell (cluster or phase labels vary cell to cell and are not design).
+  .design_cols <- Filter(function(nm)
+    all(.dm[, .(k = length(unique(get(nm)))), by = .scol]$k == 1), .design_cols)
+}
+```
+
+```{r design-finding, results = 'asis'}
+if (is.na(.scol) || !length(.design_cols)) {
+  scratch_finding(
+    paste("No sample-level design factors were found in the metadata, so this cohort",
+          "cannot support condition-level comparison. Differential abundance and",
+          "differential expression need a grouping column that is constant within a",
+          "sample -- supply one via `--input_exp_table`."),
+    type = "caution", title = "Experimental design")
+} else {
+  .lvl <- unique(.dm[, c(.scol, .design_cols), with = FALSE])
+  for (f in .design_cols) {
+    .n <- .lvl[, .N, by = f]
+    .minrep <- min(.n$N)
+    msg <- sprintf("**%s**: %s (%s).", f,
+                   paste(sprintf("%s = %d sample%s", .n[[f]], .n$N,
+                                 ifelse(.n$N == 1, "", "s")), collapse = "; "),
+                   sprintf("%d group%s", nrow(.n), ifelse(nrow(.n) == 1, "", "s")))
+    if (nrow(.n) < 2) msg <- paste(msg,
+      "Only one level is present, so this factor cannot be tested.")
+    else if (.minrep < 2) msg <- paste(msg,
+      "**At least one group has a single sample.** With no biological replicate in a",
+      "group, differential abundance and differential expression cannot separate the",
+      "condition effect from that one sample's idiosyncrasies -- any p-value from",
+      "such a design is not interpretable.")
+    else if (.minrep < 3) msg <- paste(msg,
+      "Groups have as few as 2 samples; this is testable but underpowered, and",
+      "pseudobulk methods will be sensitive to a single outlying sample.")
+    scratch_finding(msg, type = if (nrow(.n) < 2 || .minrep < 2) "caution" else "note",
+                    title = paste("Design:", f))
+  }
+  scratch_table(.lvl, caption = "Sample-level design")
+}
+```
+
+```{r design-figure, message = FALSE, warning = FALSE}
+#| fig-width: 9
+#| fig-height: 4
+if (!is.na(.scol) && length(.design_cols)) {
+  .f <- .design_cols[1]
+  .dd <- .dm[, .(cells = .N), by = c(.scol, .f)]
+  setnames(.dd, c("sample", "grp", "cells"))
+  .dd[, tip := sprintf("%s\n%s: %s\n%s cells", sample, .f, grp,
+                       format(cells, big.mark = ","))]
+  ggplot(.dd, aes(reorder(sample, cells), cells, fill = grp, text = tip)) +
+    geom_col(width = .7) +
+    scale_y_continuous(labels = scales::comma, expand = expansion(mult = c(0, .12))) +
+    coord_flip() +
+    labs(title = sprintf("Cohort design: samples by %s", .f),
+         subtitle = "each bar is one biological sample; groups need >=2 samples to be testable",
+         x = NULL, y = "cells", fill = .f) +
+    theme_scratch()
+}
+```
+
+## Post-merge cohort QC {#cohort-qc}
+
+```{r cohort-qc-compute, message = FALSE, warning = FALSE, echo = FALSE, results = 'asis'}
+# Added because this notebook previously emitted ONE figure and no findings: it
+# merged samples and said nothing about the result. A merge report should answer
+# "did every sample survive, and is the cohort balanced?" before anything else.
+#
+# results='asis' is REQUIRED -- scratch_finding()/scratch_table() emit raw HTML,
+# and in a normal chunk cat() output is wrapped in a verbatim block, so the
+# callout markup renders as literal text.
+suppressPackageStartupMessages({library(ggplot2); library(data.table)})
+
+.md <- as.data.table(seurat_object@meta.data, keep.rownames = "cell_id")
+.smp <- intersect(c("orig.ident","sample_id","sample","Samples"), names(.md))[1]
+.summ <- NULL
+
+if (is.na(.smp)) {
+  cat("\n_No sample column found; cohort QC skipped._\n\n")
+} else {
+  .md[, .s := as.character(get(.smp))]
+  .pick <- function(p) intersect(p, names(.md))[1]
+  .cnt <- .pick(c("nCount_RNA","nCount")); .ftr <- .pick(c("nFeature_RNA","nFeature"))
+  .mt  <- .pick(c("percent.mt","percent_mito","percent.mito"))
+
+  # as.numeric() is load-bearing: median() on an integer column returns an
+  # integer for odd-n groups and a double for even-n groups, and data.table
+  # requires one type across groups -- otherwise this aborts on sample 2.
+  .summ <- .md[, .(cells = .N), by = .s]
+  if (!is.na(.cnt)) .summ <- merge(.summ, .md[, .(median_umi   = as.numeric(median(get(.cnt), na.rm=TRUE))), by=.s], by=".s")
+  if (!is.na(.ftr)) .summ <- merge(.summ, .md[, .(median_genes = as.numeric(median(get(.ftr), na.rm=TRUE))), by=.s], by=".s")
+  if (!is.na(.mt))  .summ <- merge(.summ, .md[, .(median_pct_mt = round(as.numeric(median(get(.mt), na.rm=TRUE)),2)), by=.s], by=".s")
+  setnames(.summ, ".s", "sample"); setorder(.summ, -cells)
+
+  # ---- computed verdict, not a caption -------------------------------------
+  n_s   <- nrow(.summ); tot <- sum(.summ$cells)
+  imbal <- max(.summ$cells) / max(1, min(.summ$cells))
+  msg <- sprintf("Merged **%s cells** from **%d samples** (%s to %s cells per sample; %.1fx imbalance).",
+                 format(tot, big.mark=","), n_s,
+                 format(min(.summ$cells), big.mark=","), format(max(.summ$cells), big.mark=","), imbal)
+  if (imbal >= 3) msg <- paste(msg,
+    "A greater-than-3x cell-count imbalance biases any unweighted cohort comparison --",
+    "prefer per-sample statistics, and check that clustering is not driven by sample identity.")
+  if (!is.na(.mt) && any(.summ$median_pct_mt > 15)) msg <- paste(msg,
+    sprintf("Sample(s) **%s** have median mitochondrial content above 15%%, indicating stressed or dying cells.",
+            paste(.summ$sample[.summ$median_pct_mt > 15], collapse=", ")))
+  if (!is.na(.ftr)) {
+    .lo <- .summ$sample[.summ$median_genes < 500]
+    if (length(.lo)) msg <- paste(msg,
+      sprintf("Sample(s) **%s** have a median below 500 detected genes, which is low for droplet scRNA-seq.",
+              paste(.lo, collapse=", ")))
+  }
+  scratch_finding(msg, type = if (imbal >= 3) "caution" else "note", title = "Cohort composition")
+  scratch_table(.summ, caption = "Per-sample post-merge summary")
+}
+```
+
+```{r cohort-qc-figure, message = FALSE, warning = FALSE, echo = FALSE}
+#| fig-width: 9
+#| fig-height: 4
+# NOTE: the ggplot must be this chunk's LAST VALUE, not wrapped in print().
+# ggplot2 4.0 dispatches print() through S7, so an explicit print(p) bypasses
+# knitr's knit_print hook and the figure renders as a static raster instead of
+# an interactive widget. `if` returning the plot keeps auto-printing intact.
+if (!is.null(.summ)) {
+  # `text` drives the plotly tooltip; without it ggplotly builds a hover string
+  # out of the raw aes expressions ("reorder(sample, cells): ...").
+  .summ[, tip := sprintf("%s\n%s cells (%.1f%% of cohort)",
+                         sample, format(cells, big.mark=","), 100*cells/sum(cells))]
+  ggplot(.summ, aes(reorder(sample, cells), cells, fill = cells, text = tip)) +
+    geom_col(width = .7) +
+    geom_text(aes(label = format(cells, big.mark=",")), hjust = -.15, size = 3.2) +
+    scale_fill_gradient(low = "#cde2fb", high = "#0d366b", guide = "none") +
+    scale_y_continuous(expand = expansion(mult = c(0, .18))) +
+    coord_flip() +
+    labs(title = "Cells retained per sample after QC",
+         subtitle = sprintf("%s cells across %d samples",
+                            format(sum(.summ$cells), big.mark=","), nrow(.summ)),
+         x = NULL, y = "cells") +
+    theme_scratch()
+}
+```
+
 ## Saving Seurat object
 
 ```{r object_dump}
@@ -221,7 +493,7 @@ if(auto_save) {
 
 ```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
 
-print(params)
+params
 
 ```
 

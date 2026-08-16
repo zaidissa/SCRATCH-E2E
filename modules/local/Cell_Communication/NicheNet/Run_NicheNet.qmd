@@ -394,6 +394,7 @@ hit
 }
 
 CELLTYPE_CANDIDATES <- c(
+"sctype","sctype_agg",
 "celltype","cell_type","CellType","celltype_final","celltype_refined",
 "azimuth_labels","azimuth_label","predicted.celltype.l2","predicted.celltype.l1",
 "annotation","annot","label","labels","final_annotation","seurat_clusters"

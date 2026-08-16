@@ -14,6 +14,12 @@ process BATCHCORRECTION {
     path config
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figure_files, optional: true
     path "report/${notebook.baseName}.html", emit: report,  optional: true
     path "figures/**",                     emit: figures, optional: true
     path "data/**",                        emit: data,    optional: true
@@ -31,25 +37,29 @@ process BATCHCORRECTION {
     */
     script:
 
-    // helper to single-quote values and escape any single quotes inside
-    def q = { v -> "'${v.toString().replace("'", "'\\''")}'" }
+    // Quoting applied inline. A `def q = { }` closure referenced further down
+    // fails on Nextflow 26.x with "`q` is not defined".
 
     // build flat "-P key:value" list with safe quoting for things containing commas/semicolons
     def parts = []
     parts << "-P seurat_object:${seurat_object}"
     parts << "-P project_name:${params.project_name}"
     parts << "-P input_integration_method:${params.bc_integration_method}"
-    parts << "-P input_target_variables:${params.bc_target_variables.replaceAll(',', ';')}"
+    // Quote every delimited value with q(). The helper was defined above but
+    // never applied: bc_exclude_labels defaults to '', which emitted a bare
+    // "-P exclude_labels:" with nothing after the colon. Quarto reads that as
+    // NULL, and the notebook's strsplit(NULL, ";") aborts the whole render with
+    // "non-character argument". Quoting makes an empty value arrive as ''.
+    parts << "-P input_target_variables:'${params.bc_target_variables.replaceAll(',', ';')}'"
     parts << "-P input_batch_step:${params.bc_batch_step}"
-    parts << "-P exclude_labels:${params.bc_exclude_labels.replaceAll(',', ';')}"
-    // for label_candidates, include quotes because of semicolons
+    parts << "-P exclude_labels:'${params.bc_exclude_labels.replaceAll(',', ';')}'"
     parts << "-P label_candidates:'${params.bc_label_candidates.replaceAll(',', ';')}'"
     parts << "-P n_hvgs:${params.bc_n_hvgs}"
     parts << "-P n_pcs:${params.bc_n_pcs}"
     parts << "-P n_threads:${task.cpus}"
     parts << "-P n_memory:${task.memory.toGiga()}G"
     // IMPORTANT: do NOT quote $PWD so the shell expands it
-    parts << "-P work_directory:$PWD"
+    parts << "-P work_directory:\$PWD"
 
     def param_file = parts.join(' ')
 

@@ -87,6 +87,7 @@ library(readr)
 library(dplyr)
 library(ggplot2)
 library(Seurat)
+library(BPCells)
 
 ```
 
@@ -100,8 +101,9 @@ if(!dir.exists(work_directory)) {
   dir.create(work_directory, recursive = T)
 }
 
+# showWarnings = FALSE: data/ already exists (the BPCells store is staged there).
 for(sub_directory in c('data', 'figures')) {
-  dir.create(paste0(work_directory, '/', sub_directory))
+  dir.create(paste0(work_directory, '/', sub_directory), showWarnings = FALSE)
 }
 
 ```
@@ -110,8 +112,25 @@ for(sub_directory in c('data', 'figures')) {
 
 ```{r loading_rds}
 
-# Reading seurat object
-seurat_object <- readRDS(file = seurat_object)
+# The merged object is BPCells-backed. Its counts live in the on-disk store
+# staged at data/bpcells_counts. Rebuild the object from that store plus the
+# saved per-cell metadata so we never depend on the (possibly stale) matrix
+# path baked into the RDS by the upstream task.
+loaded_object <- readRDS(file = seurat_object)
+
+disk_counts <- BPCells::open_matrix_dir(dir = file.path('data', 'bpcells_counts'))
+
+keep_meta <- loaded_object@meta.data
+keep_meta <- keep_meta[, setdiff(colnames(keep_meta),
+                                 c('nCount_RNA', 'nFeature_RNA')), drop = FALSE]
+
+seurat_object <- CreateSeuratObject(
+  counts    = disk_counts,
+  project   = project_name,
+  meta.data = keep_meta
+)
+
+rm(loaded_object); gc()
 
 # Setting random seed
 random_seed <- 2203
@@ -216,6 +235,148 @@ elbow_plot
 The @fig-elbow illustrates the elbow point of the variance explained by principal components. It helps in determining the optimal number of principal components to retain for downstream analysis, such as dimensionality reduction or clustering.
 :::
 
+## Reduction diagnostics {#reduction-diagnostics}
+
+```{r reduction-compute, include = FALSE}
+suppressPackageStartupMessages({library(ggplot2); library(data.table)})
+
+# --- variance explained, and where it actually plateaus ---------------------
+sdev <- tryCatch(Seurat::Stdev(seurat_object, reduction = "pca"),
+                 error = function(e) seurat_object[["pca"]]@stdev)
+varexp <- sdev^2 / sum(sdev^2)
+cumvar <- cumsum(varexp)
+
+# The "elbow" chosen by eye is not reproducible. Take the knee as the point of
+# maximum distance from the straight line joining the first and last PC of the
+# scree curve -- the standard geometric definition, so the number is defensible
+# and identical on a re-run.
+knee_of <- function(y) {
+  n <- length(y); if (n < 3) return(n)
+  x <- seq_len(n)
+  x1 <- 1; y1 <- y[1]; x2 <- n; y2 <- y[n]
+  d <- abs((y2 - y1) * x - (x2 - x1) * y + x2 * y1 - y2 * x1) /
+       sqrt((y2 - y1)^2 + (x2 - x1)^2)
+  which.max(d)
+}
+n_knee <- knee_of(varexp)
+n_used <- thr_n_dimensions
+
+# --- are the top PCs technical? --------------------------------------------
+# sc-best-practices asks for PCA coloured by QC metrics. A correlation table
+# answers the same question quantitatively and in one screen instead of a wall
+# of scatter panels: if PC1 tracks library size, the embedding is reporting
+# sequencing depth rather than biology.
+emb <- Seurat::Embeddings(seurat_object, reduction = "pca")
+md  <- seurat_object@meta.data
+qc_cols <- intersect(c("nCount_RNA", "nFeature_RNA", "percent_mito", "percent.mt"),
+                     names(md))
+npc_check <- min(15L, ncol(emb))
+cor_dt <- NULL
+if (length(qc_cols) && npc_check > 0) {
+  cor_dt <- rbindlist(lapply(qc_cols, function(q) {
+    v <- suppressWarnings(as.numeric(md[[q]]))
+    data.table(metric = q, pc = seq_len(npc_check),
+               r = vapply(seq_len(npc_check), function(i)
+                     suppressWarnings(cor(emb[, i], v, method = "spearman",
+                                          use = "complete.obs")), numeric(1)))
+  }))
+  cor_dt[is.na(r), r := 0]
+}
+```
+
+```{r reduction-finding, results = 'asis'}
+msg <- sprintf(paste("The first **%d** principal components capture **%.1f%%** of the",
+                     "variance; **%d** are used downstream, capturing **%.1f%%**.",
+                     "The scree curve's knee is at **PC%d**."),
+               n_knee, 100 * cumvar[n_knee], n_used,
+               100 * cumvar[min(n_used, length(cumvar))], n_knee)
+if (n_used > 3 * n_knee) msg <- paste(msg,
+  sprintf(paste("Using %d PCs is well past the knee. Extra components mostly add noise",
+                "to the neighbour graph, which tends to fragment clusters rather than",
+                "resolve them."), n_used))
+if (n_used < n_knee) msg <- paste(msg,
+  sprintf(paste("**Using %d PCs cuts below the knee at PC%d**, so structure the data",
+                "supports is being discarded before clustering."), n_used, n_knee))
+scratch_finding(msg, type = if (n_used < n_knee) "caution" else "note",
+                title = "Dimensionality")
+
+if (!is.null(cor_dt) && nrow(cor_dt)) {
+  worst <- cor_dt[which.max(abs(r))]
+  m2 <- sprintf(paste("The strongest association between a top-%d principal component",
+                      "and a technical covariate is **%s vs PC%d (Spearman r = %.2f)**."),
+                npc_check, worst$metric, worst$pc, worst$r)
+  if (abs(worst$r) >= 0.5) m2 <- paste(m2,
+    "**A correlation this strong means the embedding is partly reporting technical",
+    "variation, not biology.** Clusters split along this axis should be treated as",
+    "suspect until regression or integration removes it.")
+  else if (abs(worst$r) >= 0.3) m2 <- paste(m2,
+    "Moderate technical loading -- worth knowing, but not on its own a reason to act.")
+  else m2 <- paste(m2, "No top component is strongly driven by depth or",
+    "mitochondrial content, which is what you want to see here.")
+  scratch_finding(m2, type = if (abs(worst$r) >= 0.5) "caution" else "note",
+                  title = "Technical loading on the top PCs")
+}
+```
+
+```{r scree-figure, message = FALSE, warning = FALSE}
+#| fig-width: 8.5
+#| fig-height: 4
+sc <- data.table(pc = seq_along(varexp), var = 100 * varexp, cum = 100 * cumvar)
+sc <- sc[pc <= min(60, .N)]
+sc[, tip := sprintf("PC%d\n%.2f%% of variance\n%.1f%% cumulative", pc, var, cum)]
+ggplot(sc, aes(pc, var, text = tip)) +
+  geom_col(fill = "#3f6fa8", width = .8) +
+  geom_vline(xintercept = n_knee, linetype = "dotted", colour = "#0d366b") +
+  geom_vline(xintercept = n_used, linetype = "dashed", colour = "#8a5a00") +
+  labs(title = "Variance explained per principal component",
+       subtitle = sprintf("dotted = knee (PC%d); dashed = PCs used downstream (%d)",
+                          n_knee, n_used),
+       x = "principal component", y = "% of total variance") +
+  theme_scratch()
+```
+
+```{r pc-qc-figure, message = FALSE, warning = FALSE}
+#| fig-width: 9
+#| fig-height: 3.2
+if (!is.null(cor_dt) && nrow(cor_dt)) {
+  cd <- copy(cor_dt)
+  cd[, tip := sprintf("PC%d vs %s\nSpearman r = %.2f", pc, metric, r)]
+  ggplot(cd, aes(factor(pc), metric, fill = r, text = tip)) +
+    geom_tile(colour = "white", linewidth = .4) +
+    scale_fill_gradient2(low = "#8c1d18", mid = "#f4f4f4", high = "#0d366b",
+                         midpoint = 0, limits = c(-1, 1), name = "Spearman r") +
+    labs(title = "Correlation of each principal component with QC metrics",
+         subtitle = "strong colour = that component is tracking a technical covariate",
+         x = "principal component", y = NULL) +
+    theme_scratch()
+}
+```
+
+```{r norm-figure, message = FALSE, warning = FALSE}
+#| fig-width: 9
+#| fig-height: 3.6
+# Best practice asks for the raw and normalised distributions side by side --
+# the point of normalisation is to remove the depth-driven spread, and the only
+# way to see whether it did is to look at both.
+cnt <- suppressWarnings(as.numeric(seurat_object$nCount_RNA))
+lay <- tryCatch(SeuratObject::LayerData(seurat_object, layer = "data"),
+                error = function(e) NULL)
+cell_sum <- if (!is.null(lay)) Matrix::colSums(lay) else NULL
+if (!is.null(cell_sum)) {
+  nd <- rbind(
+    data.table(stage = "raw UMIs per cell (log10)",        value = log10(cnt + 1)),
+    data.table(stage = "log-normalised total per cell",    value = as.numeric(cell_sum)))
+  ggplot(nd, aes(value, fill = stage)) +
+    geom_histogram(bins = 60, show.legend = FALSE) +
+    facet_wrap(~ stage, scales = "free") +
+    scale_fill_manual(values = c("#8fb4dd", "#0d366b")) +
+    labs(title = "Count distribution before and after normalisation",
+         subtitle = "normalisation should compress the depth-driven spread on the left",
+         x = NULL, y = "cells") +
+    theme_scratch()
+}
+```
+
 ## Saving Seurat object
 
 ```{r object_dump}
@@ -232,7 +393,7 @@ if(auto_save) {
 
 ```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
 
-print(params)
+params
 
 ```
 

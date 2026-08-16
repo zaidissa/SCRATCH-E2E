@@ -24,6 +24,33 @@ include { CELLCOMM_LIANA    } from '../../modules/local/Cell_Communication/main.
 include { CELLCOMM_CELLCHAT } from '../../modules/local/Cell_Communication/main.nf'
 include { CELLCOMM_NICHENET } from '../../modules/local/Cell_Communication/main.nf'
 
+// Validate NicheNet's reference RDS files. A Git LFS pointer is a small text
+// file beginning "version https://git-lfs..."; a real RDS is binary.
+def nichenetAssets(dir) {
+    def d = file(dir, type: 'dir', checkIfExists: true)
+    def rds = d.listFiles().findAll { it.name.endsWith('.rds') }
+    if (!rds) error "NicheNet assets directory '${dir}' contains no .rds files."
+
+    def pointers = rds.findAll { f -> f.size() < 4096 && f.text.startsWith('version https://git-lfs') }
+    // A -stub run never reads these files, so refusing to start would make the
+    // stub suite depend on data it does not use. Same for an explicitly skipped
+    // NicheNet: `ext.when` is evaluated per task, AFTER the DAG is built, so
+    // this guard would otherwise block a run that never intended to use them.
+    if (pointers && (workflow.stubRun || params.skip_nichenet)) {
+        log.warn "NicheNet reference files are unresolved Git LFS pointers " +
+                 "(${pointers*.name.join(', ')}). Fine for -stub; a real run needs " +
+                 "bin/fetch_nichenet_refs.sh."
+    } else if (pointers) {
+        error "NicheNet reference files are unresolved Git LFS pointers, not real data:\n  " +
+              pointers.collect { it.name + ' (' + it.size() + ' bytes)' }.join('\n  ') +
+              "\n\nFetch them with `bin/fetch_nichenet_refs.sh <dest>` and pass " +
+              "--nichenet_assets_dir <dest>, or resolve LFS in the source repo with " +
+              "`git lfs pull`.\nOtherwise this fails later inside the notebook as " +
+              "\"readRDS(): unknown input format\", which does not indicate the cause."
+    }
+    return d
+}
+
 workflow CELL_COMMUNICATION {
 
     take:
@@ -53,7 +80,14 @@ workflow CELL_COMMUNICATION {
                     .combine(ch_liana_csv)
                     .combine(ch_cellchat_rds)
                     .map { seurat, nb, liana_csv, cellchat_rds -> tuple(seurat, nb, liana_csv, cellchat_rds) },
-                file(params.nichenet_assets_dir, type: 'dir', checkIfExists: true)
+                // `checkIfExists` only proves the directory is present, not
+                // that its contents are usable. The shipped .rds files are
+                // 130-byte Git LFS POINTERS that were never resolved, so the
+                // check passed and NicheNet died deep inside the notebook with
+                // "readRDS(): unknown input format" -- a message that says
+                // nothing about the real cause. Validate content here, before a
+                // container starts.
+                nichenetAssets(params.nichenet_assets_dir)
             )
 
             // NicheNet's `summary_csv` emit is commented out in the module, so

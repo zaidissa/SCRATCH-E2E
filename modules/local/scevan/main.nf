@@ -11,6 +11,12 @@ process SCEVAN {
         path(config)
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figures, optional: true
         path("data/scevan")                             , emit: results
         path("data/${params.project_name}_scevan_meta_object.RDS"), emit: meta_object, optional: true
         path("report/*")
@@ -21,7 +27,11 @@ process SCEVAN {
 
     script:
         def additional_args = task.ext.args ? task.ext.args.split(',').collect { "-P ${it.trim()}" }.join(' ') : ""
-        def param_file = "-P seurat_object='${seurat_object.toString()}' ${additional_args}"
+        // quarto -P takes `key:value`. This module used `key='value'`, which
+        // quarto does not parse as a parameter -- the notebook would render with
+        // seurat_object unset. The stub branch below always used the colon form,
+        // so the stub suite passed while the real path was broken.
+        def param_file = "-P seurat_object:${seurat_object} ${additional_args}"
         
         """
         quarto render ${notebook} ${param_file}

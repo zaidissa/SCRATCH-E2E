@@ -37,6 +37,7 @@ params:
   work_directory: null
   input_model: "human"
   n_threads: 8
+  max_cells_per_sample: 0   # 0 = all cells; >0 caps per sample
   n_memory: 16
   auto_save: true
 ---
@@ -131,8 +132,11 @@ DimPlot(
     seurat_object, 
     reduction = "umap",
     label = TRUE,
+    repel = TRUE,
     raster = FALSE,
-    label.size = 12
+    # was 12 (Seurat default is 4) -- rendered sample names larger than the
+    # clusters they annotated and overlapping into an unreadable block.
+    label.size = 3.6
   ) +
   theme(
     legend.position = 'top',
@@ -158,11 +162,23 @@ sample_prefixes <- unique(sub("_.*", "", barcodes))
 cat("Detected sample(s):", paste(sample_prefixes, collapse = ", "), "\n")
 
 # --- 6. Build seurat_list for SCEVAN ---
-# To limit to 1000 cells per sample, use head(..., 1000); remove 'head' to use all cells
+# Cells per sample handed to SCEVAN. This was HARDCODED to head(cols, 1000) --
+# a development limit that was never removed. On a 24,439-cell run it meant
+# SCEVAN only ever saw 2,000 cells (8%), so STRATIFY reported a "two-caller
+# consensus" while the second caller had no opinion on 92% of cells and 22.6%
+# of cells fell to `ambiguous`. 0 = use all cells.
+max_per_sample <- suppressWarnings(as.integer(params$max_cells_per_sample))
+if (is.na(max_per_sample) || max_per_sample < 0) max_per_sample <- 0L
+
 seurat_list <- setNames(
   lapply(sample_prefixes, function(prefix) {
     cols <- grep(paste0("^", prefix, "_"), barcodes, value = TRUE)
-    seurat_counts[, head(cols, 1000)]   # Remove 'head(..., 1000)' to use all cells
+    if (max_per_sample > 0 && length(cols) > max_per_sample) {
+      message(sprintf("[SCEVAN] %s: capping %d -> %d cells (max_cells_per_sample)",
+                      prefix, length(cols), max_per_sample))
+      cols <- head(cols, max_per_sample)
+    }
+    seurat_counts[, cols]
   }),
   sample_prefixes
 )
@@ -243,8 +259,72 @@ knitr::include_graphics(path = paste0("./data/scevan/", project_name, "_compareC
 
 ```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
 
-print(params)
+params
 
+```
+
+## Copy-number landscape (readable rendering)
+
+```{r oncoheat_readable, fig.width = 11, fig.height = 3.6, message = FALSE, warning = FALSE}
+# SCEVAN emits its own OncoHeat PNG, but it prints all ~108 cytoband names along
+# one axis, where they collide into an unreadable block, and it clips the sample
+# legend. The underlying matrix it plotted is saved alongside it, so redraw the
+# same data legibly: samples as rows, regions ordered along the genome, one tick
+# per CHROMOSOME rather than per band, and the full band name kept for hover.
+#
+# Purely additive -- SCEVAN's own figure is still written and nothing about the
+# analysis changes. Guarded so a missing file simply skips.
+local({
+  f <- list.files(".", pattern = "PlotOncoHeat\\.RData$", recursive = TRUE, full.names = TRUE)
+  if (!length(f)) { cat("No OncoHeat data found; skipping.\n"); return(invisible(NULL)) }
+  ok <- try({
+    e <- new.env(); load(f[1], envir = e)
+    oh <- as.data.frame(e$oncoHeat)
+    stopifnot(nrow(oh) > 0, ncol(oh) > 0)
+
+    regions <- colnames(oh)
+    chrom   <- sub("^\\s*([0-9XY]+)\\s*\\(.*$", "\\1", regions)
+    band    <- trimws(sub("^[^(]*\\(([^)]*)\\).*$", "\\1", regions))
+
+    d <- data.table::as.data.table(as.table(as.matrix(oh)))
+    data.table::setnames(d, c("sample", "region", "value"))
+    d[, idx   := match(region, regions)]
+    d[, chrom := chrom[idx]]
+    d[, band  := band[idx]]
+    d[, call  := factor(data.table::fcase(
+                   value <= -2, "DEL",  value == -1, "LOSS",
+                   value ==  1, "GAIN", value >=  2, "AMP", default = "neutral"),
+                 levels = c("DEL", "LOSS", "neutral", "GAIN", "AMP"))]
+    d[, hover := sprintf("%s\nchr%s %s\n%s", sample, chrom, band, call)]
+
+    ticks  <- d[, .(at = mean(idx)), by = chrom][order(at)]
+    bounds <- d[, .(edge = max(idx)), by = chrom][order(edge)]
+    bounds <- bounds[-nrow(bounds)]
+
+    cols <- c(DEL = "#2a4b8d", LOSS = "#8fb3e0", neutral = "#f0efec",
+              GAIN = "#f0a58f", AMP = "#c0392b")
+
+    p <- ggplot2::ggplot(d, ggplot2::aes(x = idx, y = sample, fill = call, text = hover)) +
+      ggplot2::geom_tile() +
+      ggplot2::geom_vline(xintercept = bounds$edge + 0.5, colour = "#ffffff", linewidth = .35) +
+      ggplot2::scale_fill_manual(values = cols, name = NULL, drop = FALSE) +
+      ggplot2::scale_x_continuous(breaks = ticks$at, labels = ticks$chrom, expand = c(0, 0)) +
+      ggplot2::labs(title = "Clonal copy-number landscape by sample",
+           subtitle = sprintf("%d cytoband regions across %d samples; ticks mark chromosomes",
+                              length(regions), nrow(oh)),
+           x = "chromosome", y = NULL) +
+      (if (exists("theme_scratch")) theme_scratch() else ggplot2::theme_minimal()) +
+      ggplot2::theme(panel.grid = ggplot2::element_blank(),
+                     axis.text.x = ggplot2::element_text(size = ggplot2::rel(.8)))
+
+    dir.create("figures", showWarnings = FALSE, recursive = TRUE)
+    ggsave("figures/cnv_oncoheat.png", p, width = 11, height = 3.6)
+    print(p)
+    TRUE
+  }, silent = TRUE)
+  if (inherits(ok, "try-error"))
+    cat("OncoHeat redraw skipped:", sub("\n.*", "", as.character(ok)), "\n")
+})
 ```
 
 ## Session info

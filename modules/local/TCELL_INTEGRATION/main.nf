@@ -15,6 +15,12 @@ process TCELL_INTEGRATION {
       val  (project_name)
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figure_files, optional: true
       path "TCell_Integration_Report.html", emit: report_html
       path "TCell_Integration_Report/data/seurat_tcells_with_TCR.rds", emit: seurat_tcells_with_tcr
       path "TCell_Integration_Report/tables/tcr_export_cells_with_embedding.tsv", emit: export_cells

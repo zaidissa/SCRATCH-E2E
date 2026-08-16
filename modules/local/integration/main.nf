@@ -33,6 +33,12 @@ process INTEGRATE_OBJECTS {
         path compartment,   stageAs: 'stage_inputs/compartment/*'
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figure_files, optional: true
         path "data/${params.project_name}_master_object.RDS", emit: master_rds, optional: true
         path "data/${params.project_name}_cell_table.csv",    emit: cell_table, optional: true
         path "data/**",                                       emit: data,    optional: true
@@ -196,7 +202,12 @@ process MASTER_REPORT {
         path cross_data,   stageAs: 'inputs/cross/*'
 
     output:
+        // quarto renders the site into report/; master_report/ holds the
+        // assembled figures and per-stage pages. Only the latter was declared,
+        // so `master_report/index.html` -- the path the completion banner sends
+        // users to -- was never published and the run still reported success.
         path "master_report/**", emit: report, optional: true
+        path "report/**",        emit: site,   optional: true
 
     when:
         task.ext.when == null || task.ext.when

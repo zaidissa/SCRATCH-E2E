@@ -12,6 +12,12 @@ process AZIMUTH_ANNOTATION {
         path(config)
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figure_files, optional: true
         path("_freeze/${notebook.baseName}")                          , emit: cache
         path("data/${params.project_name}_Azimuth_annotation_object.RDS")   , emit: seurat_rds
         path("report/${notebook.baseName}.html")                      , emit: html

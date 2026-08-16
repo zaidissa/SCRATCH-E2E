@@ -180,18 +180,29 @@ seurat_object$predicted_labels <- seurat_object$scytpe_subset
 #| fig-align: center
 #| layout-nrow: 2
 
+# Legend on the RIGHT, in ONE column. On top it took the upper third of the
+# figure; in two columns beside it, it took roughly a third of the WIDTH, because
+# these labels run to ~45 characters and two of them side by side is a very wide
+# block. One column halves that and hands the space back to the embedding. 29
+# entries at 8pt is about 4.5 inches tall, so it still fits the figure height.
 SCP::CellDimPlot(
-  srt = seurat_object, 
+  srt = seurat_object,
   group.by = "scytpe_subset",
   reduction = "umap",
-  label = TRUE, 
+  label = TRUE,
   label_repel = TRUE,
   show_stat = TRUE,
   theme_use = "theme_blank"
 ) +
   theme(
-    legend.position = "top"
-  )
+    legend.position  = "right",
+    legend.direction = "vertical",
+    legend.justification = "top",
+    legend.text      = element_text(size = 8),
+    legend.key.size  = unit(8, "pt")
+  ) +
+  guides(colour = guide_legend(ncol = 1, override.aes = list(size = 2.5)),
+         fill   = guide_legend(ncol = 1, override.aes = list(size = 2.5)))
 
 ```
 
@@ -255,18 +266,31 @@ plot(cell_hierarchical, main = "Dendrogram", xlab = "Index", ylab = "Height")
 
 ```{r barplot_composition}
 #| label: fig-bar-composition
-#| fig-cap: 'Barplot'
-#| fig-width: 18
-#| fig-height: 10
+#| fig-cap: 'Cluster composition of each annotated population'
+# Flipped bars need HEIGHT (one row per label), not width. 29 labels at ~0.45in.
+#| fig-width: 12
+#| fig-height: 15
 #| fig-align: center
 
-# Boxplot
+# Composition of each annotated population by cluster.
+#
+# `scytpe_subset` labels run to ~45 characters ("CD4_and_CD8_T_cells@Interferon_
+# Response") and there are 29 of them. Rotated 45 degrees on the x axis they
+# collided into a solid wedge of text taller than the plot itself. Flipping the
+# bars puts every label on its own horizontal line, where label length costs
+# width instead of stacking into an unreadable wedge.
 SCP::CellStatPlot(
   seurat_object,
-  stat.by = "seurat_clusters", 
-  group.by = "scytpe_subset", 
+  stat.by = "seurat_clusters",
+  group.by = "scytpe_subset",
   label = TRUE
-)
+) +
+  coord_flip() +
+  theme(
+    axis.text.y = element_text(size = 8, hjust = 1),
+    axis.text.x = element_text(size = 9, angle = 0, hjust = .5),
+    legend.position = "right"
+  )
 
 ```
 
@@ -291,7 +315,7 @@ if(auto_save) {
 
 ```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
 
-print(params)
+params
 
 ```
 

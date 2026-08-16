@@ -494,7 +494,7 @@ write.csv(MP_list,    file = file.path(fit_dir, "MP_list_final.csv"))
 
 ```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
 
-print(params)
+params
 
 ```
 

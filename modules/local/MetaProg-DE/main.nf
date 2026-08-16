@@ -26,6 +26,12 @@ process METAPROG_LEIDEN {
     tuple path(seurat_object), path(notebook)
 
   output:
+
+      // Figures were written by the notebook but never declared as an
+
+      // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+      path("figures/**"), emit: figure_files, optional: true
     // path "_freeze/${notebook.baseName}"             , emit: cache,      optional: true
     path "report/${notebook.baseName}.html"         , emit: report,     optional: true
     path "figures/metaprog/**"                      , emit: figures,    optional: true

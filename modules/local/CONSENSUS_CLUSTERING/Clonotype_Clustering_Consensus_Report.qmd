@@ -423,11 +423,9 @@ if (!(reduction_to_use %in% names(seu@reductions))) {
 }
 ```
 
-# Build Export table
-```{r}
-# Build Export table
 ```{r}
 #| label: build-export
+# Build Export table
 embed_df <- as.data.frame(Embeddings(seu, reduction_to_use)) %>%
   tibble::rownames_to_column("cell_id")
 

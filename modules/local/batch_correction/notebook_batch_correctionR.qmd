@@ -99,9 +99,18 @@ TARGET_RDS               <- params$target_rds
 input_integration_method <- tolower(params$input_integration_method)
 
 # split semicolon-delimited fields
-input_target_variables <- trimws(unlist(strsplit(params$input_target_variables, ";", fixed = TRUE)))
-exclude_labels         <- trimws(unlist(strsplit(params$exclude_labels, ";", fixed = TRUE)))
-label_candidates       <- trimws(unlist(strsplit(params$label_candidates, ";", fixed = TRUE)))
+# strsplit() errors on NULL, and an unset or empty -P value arrives as NULL, so
+# an optional parameter left blank would abort the render rather than simply
+# being empty. Coerce first; an empty field must mean "nothing", not "crash".
+split_semi <- function(x) {
+  if (is.null(x) || length(x) == 0) return(character(0))
+  x <- as.character(x)
+  if (!nzchar(x)) return(character(0))
+  trimws(unlist(strsplit(x, ";", fixed = TRUE)))
+}
+input_target_variables <- split_semi(params$input_target_variables)
+exclude_labels         <- split_semi(params$exclude_labels)
+label_candidates       <- split_semi(params$label_candidates)
 
 input_batch_step <- params$input_batch_step
 N_HVGS           <- as.integer(params$n_hvgs)
@@ -1763,6 +1772,6 @@ if (auto_save) {
 
 ```{r Parameters, error=TRUE}
 #| echo: false
-print(params)
+params
 sessionInfo()
 ```

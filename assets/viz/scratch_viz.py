@@ -21,7 +21,30 @@ import csv
 import warnings
 
 import matplotlib
-matplotlib.use("Agg")                       # headless: notebooks render in containers
+
+# Backend selection decides whether ANY figure appears in a jupyter-engine
+# notebook. Forcing "Agg" unconditionally -- which this did -- replaces the
+# IPython inline backend, and the inline backend is the thing that captures a
+# figure into the rendered document. With Agg, plt.show() is a silent no-op:
+# CellTypist declared six figures and emitted ONE, with the rest showing up as
+# the repr of the Axes object. Setting sc.settings.autoshow = True was necessary
+# but useless on its own, because there was nothing downstream to catch the draw.
+#
+# So: inside an IPython kernel, ask for inline; everywhere else (plain Rscript /
+# python in a container, no display) fall back to Agg as before.
+def _activate_backend():
+    try:
+        from IPython import get_ipython
+        ip = get_ipython()
+        if ip is not None and type(ip).__name__ == "ZMQInteractiveShell":
+            ip.run_line_magic("matplotlib", "inline")
+            return
+    except Exception:
+        pass
+    matplotlib.use("Agg")
+
+
+_activate_backend()
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, to_hex
 from cycler import cycler
@@ -84,14 +107,17 @@ def apply_defaults():
 
         "font.family":     "sans-serif",
         "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
-        "font.size":       9,
-        "axes.titlesize":  10,
+        # Kept in step with theme_scratch(base_size = 12) on the R side, so a
+        # scanpy figure and a ggplot figure in the same report read at the same
+        # size. Ratios below are the originals scaled from a base of 9.
+        "font.size":       12,
+        "axes.titlesize":  13,
         "axes.titleweight": "bold",
         "axes.titlelocation": "left",
-        "axes.labelsize":  9,
-        "xtick.labelsize": 8,
-        "ytick.labelsize": 8,
-        "legend.fontsize": 8,
+        "axes.labelsize":  12,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
+        "legend.fontsize": 11,
 
         "axes.edgecolor":  AXIS,
         "axes.linewidth":  0.6,
@@ -127,7 +153,13 @@ def apply_defaults():
         import scanpy as sc
         sc.set_figure_params(dpi=120, dpi_save=400, frameon=False,
                              vector_friendly=True, format="png")
-        sc.settings.autoshow = False
+        # MUST stay True. With autoshow=False every `sc.pl.*` call returns its
+        # Axes instead of calling plt.show(), so quarto's jupyter engine captured
+        # only the repr -- `<Axes: xlabel='% of total counts'>` as literal text --
+        # and FIVE of the six CellTypist figures silently vanished from the
+        # report. Nothing here needs the return value: `save()` below is never
+        # called by a notebook, so suppressing the draw bought nothing at all.
+        sc.settings.autoshow = True
         # scanpy reads this for categorical obs colouring.
         sc.settings.categorical_palette = CATEGORICAL
     except ImportError:
@@ -142,7 +174,18 @@ def apply_defaults():
         "pdf.fonttype":    42,
         "ps.fonttype":     42,
         "svg.fonttype":    "none",
-        "font.size":       9,
+        # This block runs AFTER scanpy's set_figure_params, which rewrites
+        # rcParams -- and scanpy sets the type sizes RELATIVELY ('medium',
+        # 'large'), which then resolve against whatever font.size ends up being.
+        # Setting them in the block above is therefore useless: scanpy clobbers
+        # it, and ticks came out the same size as axis labels. Every explicit
+        # size has to be re-asserted here, after scanpy, to stick.
+        "font.size":       12,
+        "axes.titlesize":  13,
+        "axes.labelsize":  12,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
+        "legend.fontsize": 11,
         "axes.titlelocation": "left",
         "axes.titleweight":   "bold",
         "figure.facecolor":  SURFACE,
@@ -266,3 +309,88 @@ def style_axes(ax, title=None, xlabel=None, ylabel=None, grid="y"):
 
 
 print("[scratch_viz] publication figure system active — rcParams, palette, vector export")
+
+
+def umap(adata, color, figsize=(9, 9), legend_ncol=1, legend_fontsize=7, **kw):
+    """sc.pl.umap with a legend that does not eat the plot.
+
+    scanpy picks the legend column count itself -- 2 columns above 14 categories,
+    3 above 30 -- and draws it at the ambient font size. With 25 CellTypist
+    labels that produced a two-column block of large text occupying two thirds of
+    the figure, leaving the embedding squeezed into the left third and unreadable.
+
+    There is no scanpy argument for this, so the legend has to be rebuilt after
+    the fact: draw with show=False, replace the legend with a single narrow
+    column at a smaller size, then show. Continuous colourings get a colorbar
+    rather than a legend and are passed through untouched.
+    """
+    import scanpy as sc
+
+    kw.setdefault("frameon", False)
+    kw.setdefault("sort_order", False)
+    with plt.rc_context({"figure.figsize": figsize}):
+        axes = sc.pl.umap(adata, color=color, show=False, **kw)
+        for ax in (axes if isinstance(axes, (list, tuple)) else [axes]):
+            if ax is None or ax.get_legend() is None:
+                continue
+            handles, labels = ax.get_legend_handles_labels()
+            if not handles:
+                continue
+            ax.legend(handles, labels, loc="center left",
+                      bbox_to_anchor=(1.01, 0.5), ncol=legend_ncol,
+                      fontsize=legend_fontsize, frameon=False,
+                      markerscale=0.7, handletextpad=0.3,
+                      labelspacing=0.25, borderaxespad=0.0)
+        plt.show()
+
+
+def violin_selector(adata, keys, groupby, title="Signature score",
+                    height=520, points=False):
+    """One violin panel with a dropdown, instead of N stacked static panels.
+
+    The CellTypist notebook looped `sc.pl.violin` over ~16 signatures, emitting a
+    separate full-size figure for each. They share an x axis and a purpose, so
+    the reader is really choosing between them -- which is a dropdown, not a
+    stack. One plotly trace per signature; the menu toggles which is visible.
+
+    Returns a plotly Figure (display it as the cell's value), or None if plotly
+    or the requested columns are unavailable -- callers should fall back to
+    sc.pl.violin in that case rather than fail.
+    """
+    try:
+        import plotly.graph_objects as go
+    except Exception:
+        return None
+    if groupby not in adata.obs.columns:
+        return None
+    keys = [k for k in keys if k in adata.obs.columns]
+    if not keys:
+        return None
+
+    grp = adata.obs[groupby].astype(str).values
+    order = sorted(set(grp), key=lambda v: (len(v), v))
+
+    fig = go.Figure()
+    for i, k in enumerate(keys):
+        fig.add_trace(go.Violin(
+            x=grp, y=adata.obs[k].astype(float).values,
+            name=k, visible=(i == 0), points="outliers" if points else False,
+            box_visible=True, meanline_visible=False,
+            line=dict(width=1), marker=dict(size=2),
+            hovertemplate=f"{groupby}: %{{x}}<br>{k}: %{{y:.3f}}<extra></extra>"))
+
+    fig.update_layout(
+        title=dict(text=f"<b>{title}</b><br><sup>{keys[0]}</sup>",
+                   x=0, xanchor="left"),
+        xaxis=dict(title=groupby, categoryorder="array", categoryarray=order),
+        yaxis=dict(title="score"), showlegend=False, height=height,
+        margin=dict(t=90, r=10),
+        updatemenus=[dict(
+            type="dropdown", direction="down", showactive=True,
+            x=1.02, xanchor="left", y=1, yanchor="top",
+            buttons=[dict(method="update", label=k,
+                          args=[{"visible": [j == i for j in range(len(keys))]},
+                                {"title": {"text": f"<b>{title}</b><br><sup>{k}</sup>",
+                                           "x": 0, "xanchor": "left"}}])
+                     for i, k in enumerate(keys)])])
+    return fig

@@ -31,22 +31,6 @@ params:
   auto_save: TRUE
 ---
 
-```{r scratch-viz-setup, include=FALSE}
-# Publication figure system: house theme, validated colour-vision-safe palette,
-# and vector (PDF) output alongside every raster figure. Applied globally, so
-# the plotting code below needs no changes. Guarded: if the library is not
-# staged, the notebook renders exactly as it did before.
-local({
-  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
-  for (lib in c("scratch_viz.R", "scratch_report.R")) {
-    for (r in roots) {
-      p <- file.path(r, lib)
-      if (file.exists(p)) { source(p, local = FALSE); break }
-    }
-  }
-})
-```
-
 # Project Name: `r params$project_name`
 
 ```{r setup, include = FALSE, message = FALSE, warning = FALSE, echo = FALSE}
@@ -76,6 +60,23 @@ knitr::opts_knit$set(
 
 ```
 
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Applied globally, so
+# the plotting code below needs no changes. Guarded: if the library is not
+# staged, the notebook renders exactly as it did before.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+
 ## Loading library
 
 ```{r library}
@@ -85,6 +86,7 @@ library(readr)
 library(dplyr)
 library(ggplot2)
 library(Seurat)
+library(BPCells)
 library(DT)
 library(SingleCellExperiment)
 library(scDblFinder)
@@ -103,8 +105,9 @@ if(!dir.exists(work_directory)) {
   dir.create(work_directory, recursive = T)
 }
 
+# showWarnings = FALSE: data/ already exists (the BPCells store is staged there).
 for(sub_directory in c('data', 'figures', 'figures/doublet')) {
-  dir.create(paste0(work_directory, '/', sub_directory))
+  dir.create(paste0(work_directory, '/', sub_directory), showWarnings = FALSE)
 }
 
 ```
@@ -113,8 +116,25 @@ for(sub_directory in c('data', 'figures', 'figures/doublet')) {
 
 ```{r loading_rds}
 
-# Reading seurat object
-seurat_object <- readRDS(file = seurat_object)
+# The merged object is BPCells-backed. Its counts live in the on-disk store
+# staged at data/bpcells_counts. Rebuild the object from that store plus the
+# saved per-cell metadata so we never depend on the (possibly stale) matrix
+# path baked into the RDS by the upstream merge task.
+loaded_object <- readRDS(file = seurat_object)
+
+disk_counts <- BPCells::open_matrix_dir(dir = file.path('data', 'bpcells_counts'))
+
+keep_meta <- loaded_object@meta.data
+keep_meta <- keep_meta[, setdiff(colnames(keep_meta),
+                                 c('nCount_RNA', 'nFeature_RNA')), drop = FALSE]
+
+seurat_object <- CreateSeuratObject(
+  counts    = disk_counts,
+  project   = project_name,
+  meta.data = keep_meta
+)
+
+rm(loaded_object); gc()
 
 # Setting random seed
 random_seed <- 2203
@@ -122,64 +142,77 @@ set.seed(random_seed)
 
 ```
 
-```{r}
+## Per-sample doublet detection
+
+Doublets form **within a single 10x capture**, so scDblFinder is run
+independently on each sample (`orig.ident`) — the same partitioning
+`scDblFinder(..., samples=)` performs internally, but done explicitly so the
+full matrix is never realized at once. The merged object is BPCells-backed, so
+each sample's columns are subset lazily and only that one small sample is
+materialized in memory at a time. This never approaches the 2.1B non-zero
+`dgCMatrix` ceiling a full-cohort realization would hit, so it scales to
+arbitrarily large cohorts.
+
+Results are reproducible: a fixed RNG seed is used, samples are processed in
+sorted order, and `bplapply` returns results in input order regardless of
+execution order.
+
+```{r scdblfinder_per_sample}
 #| warning: false
 
-seurat_temporary <- NormalizeData(object = seurat_object)
-seurat_temporary <- FindVariableFeatures(object = seurat_temporary)
-seurat_temporary <- ScaleData(object = seurat_temporary)
-seurat_temporary <- RunPCA(object = seurat_temporary)
-seurat_temporary <- RunUMAP(object = seurat_temporary, dims = 1:20)
+# BPCells-backed counts for the whole merged object (lazy; nothing realized yet).
+counts_mat <- SeuratObject::LayerData(seurat_object, assay = 'RNA', layer = 'counts')
 
-seurat_temporary <- FindNeighbors(seurat_temporary, dims = 1:10)
-seurat_temporary <- FindClusters(seurat_temporary, resolution = 0.5)
+# Map every cell to its sample and iterate samples in a fixed (sorted) order.
+cell_sample <- as.character(seurat_object$orig.ident)
+names(cell_sample) <- colnames(seurat_object)
+sample_ids  <- sort(unique(cell_sample))
 
-```
+detect_one <- function(s) {
+  cells <- names(cell_sample)[cell_sample == s]
 
-## Converting object
+  # Realize ONLY this sample's counts (a small dgCMatrix, never near the ceiling
+  # that realizing the full cohort at once would hit).
+  sub <- methods::as(counts_mat[, cells, drop = FALSE], 'dgCMatrix')
 
-```{r scdblfinder}
+  tryCatch({
+    tbl <- as.data.frame(scDblFinder(sub, returnType = 'table'))
+    # returnType='table' includes the artificial doublets used internally; keep
+    # only the real cells so rownames line up with the object's barcodes.
+    tbl <- tbl[tbl$type == 'real', , drop = FALSE]
+    data.frame(
+      row.names        = rownames(tbl),
+      class            = as.character(tbl$class),
+      scdbl_score      = tbl$score,
+      stringsAsFactors = FALSE
+    )
+  }, error = function(e) {
+    # Degenerate/too-few-cells sample: keep every cell (conservative) instead of
+    # dropping the sample, and record why.
+    message(sprintf("scDblFinder failed for '%s' (%s); keeping all its cells as singlet",
+                    s, conditionMessage(e)))
+    data.frame(
+      row.names        = cells,
+      class            = 'singlet',
+      scdbl_score      = NA_real_,
+      stringsAsFactors = FALSE
+    )
+  })
+}
 
-# Converting to SingleCellExperiment object
-sce <- as.SingleCellExperiment(seurat_temporary)
+# Parallel across samples but reproducible: BiocParallel seeds each worker's RNG
+# stream from RNGseed. (Serial + set.seed per sample would be equally
+# reproducible; this is just faster for large cohorts.)
+bp <- BiocParallel::MulticoreParam(workers = max(1L, as.integer(n_threads)),
+                                   RNGseed = random_seed)
+calls_list <- BiocParallel::bplapply(sample_ids, detect_one, BPPARAM = bp)
 
-# Find sample-based doublets
-dbl_sample <- scDblFinder(
-  sce, 
-  samples = 'orig.ident', 
-  returnType = "table"
-  )
+dbl_sample <- do.call(rbind, calls_list)
+# Align to the object's cell order (barcodes are already unique across samples).
+dbl_sample <- dbl_sample[colnames(seurat_object), , drop = FALSE]
 
-# BPPARAM = BiocParallel::MulticoreParam(n_threads, RNGseed = random_seed)
-
-dbl_sample <- dbl_sample %>%
-  as.data.frame()
-
-```
-
-```{r}
-
-# Find cluster-based doublets
-dbl_cluster <- scDblFinder(
-  sce, 
-  clusters = 'seurat_clusters',
-  returnType = "table"
-  )
-
-dbl_cluster <- dbl_cluster %>%
-  as.data.frame()
-
-```
-
-```{r}
-
-# Sample-sampled prediction
-dbl_sample <- dbl_sample[,c("class", "type")]
-
-# Cluster-based prediction
-dbl_cluster <- dbl_cluster[,c("cluster", "class", "type")]
-colnames(dbl_cluster) <- 
-  c("cluster", "cluster_class", "cluster_type")
+# Per-sample singlet/doublet tally.
+print(table(sample = cell_sample, class = dbl_sample$class))
 
 ```
 
@@ -192,23 +225,25 @@ seurat_object <- AddMetaData(
   seurat_object,
   metadata = dbl_sample
 )
-print(dbl_sample)
-
-seurat_object <- AddMetaData(
-  seurat_object,
-  metadata = dbl_cluster
-)
 
 ```
 
 ```{r meta_inspection}
 #| column: screen-inset-shaded
 
-datatable(seurat_object@meta.data, 
+# Cap the interactive table: embedding every cell would bloat the HTML for
+# large cohorts. Show a reproducible random sample when the object is big.
+meta_preview <- seurat_object@meta.data
+if (nrow(meta_preview) > 2000) {
+  set.seed(random_seed)
+  meta_preview <- meta_preview[sample(nrow(meta_preview), 2000), , drop = FALSE]
+}
+
+datatable(meta_preview,
     class = 'cell-border stripe',
     rownames = FALSE,
     filter = 'top',
-    width = '100%', 
+    width = '100%',
     options = list(scrollX = TRUE)
     )
 
@@ -225,44 +260,57 @@ datatable(seurat_object@meta.data,
 #| column: screen-inset-shaded
 #| layout-nrow: 1
 
-SCP::CellStatPlot(
-    seurat_object,
-    stat.by = "class",
-    group.by = "patient_id",
-    legend.position = "bottom",
-    legend.direction = "horizontal",
-    label = TRUE
-)
+meta_cols <- colnames(seurat_object@meta.data)
 
-SCP::CellStatPlot(
-    seurat_object,
-    stat.by = "cluster_class",
-    group.by = "patient_id",
-    legend.position = "bottom",
-    legend.direction = "horizontal",
-    label = TRUE
-)
-# Prepare data from Seurat object metadata
-df <- seurat_object@meta.data %>%
-  dplyr::mutate(
-    SubCellType = as.character(SubCellType),
-    Phase = as.character(Phase)
-  ) %>%
-  dplyr::filter(!is.na(SubCellType), !is.na(Phase)) %>% 
-  dplyr::count(SubCellType, Phase) %>%
-  dplyr::group_by(SubCellType) %>%
-  dplyr::mutate(percent = 100 * n / sum(n))
+# Group by patient_id when the metadata carries it; otherwise fall back to the
+# sample id (orig.ident, always present) so the composition still renders.
+group_col <- if ("patient_id" %in% meta_cols) "patient_id" else "orig.ident"
 
-# Generate stacked bar plot
-ggplot(df, aes(x = SubCellType, y = percent, fill = Phase)) +
-  geom_col() +
-  geom_text(aes(label = paste0(round(percent, 1), "%")),  
-            position = position_stack(vjust = 0.5), size = 3, color = "white") +
-  scale_y_continuous(labels = scales::percent_format(scale = 1), expand = c(0, 0)) +  
-  labs(x = "SubCellType", y = "Percentage", fill = "Phase") +
-  theme_minimal() +
-  theme(legend.position = "right", legend.title = element_text(face = "bold")) +
-  scale_fill_manual(values = c("G1" = "#A6CEE3", "S" = "#1F78B4", "G2M" = "#B2DF8A"))
+if ("class" %in% meta_cols) {
+  print(SCP::CellStatPlot(
+      seurat_object,
+      stat.by = "class",
+      group.by = group_col,
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      label = TRUE
+  ))
+}
+
+if ("cluster_class" %in% meta_cols) {
+  print(SCP::CellStatPlot(
+      seurat_object,
+      stat.by = "cluster_class",
+      group.by = group_col,
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      label = TRUE
+  ))
+}
+
+# SubCellType / Phase are produced by downstream annotation + cell-cycle scoring
+# and are not present at the QC/doublet stage; only draw this when they exist.
+if (all(c("SubCellType", "Phase") %in% meta_cols)) {
+  df <- seurat_object@meta.data %>%
+    dplyr::mutate(
+      SubCellType = as.character(SubCellType),
+      Phase = as.character(Phase)
+    ) %>%
+    dplyr::filter(!is.na(SubCellType), !is.na(Phase)) %>%
+    dplyr::count(SubCellType, Phase) %>%
+    dplyr::group_by(SubCellType) %>%
+    dplyr::mutate(percent = 100 * n / sum(n))
+
+  print(ggplot(df, aes(x = SubCellType, y = percent, fill = Phase)) +
+    geom_col() +
+    geom_text(aes(label = paste0(round(percent, 1), "%")),
+              position = position_stack(vjust = 0.5), size = 3, color = "white") +
+    scale_y_continuous(labels = scales::percent_format(scale = 1), expand = c(0, 0)) +
+    labs(x = "SubCellType", y = "Percentage", fill = "Phase") +
+    theme_minimal() +
+    theme(legend.position = "right", legend.title = element_text(face = "bold")) +
+    scale_fill_manual(values = c("G1" = "#A6CEE3", "S" = "#1F78B4", "G2M" = "#B2DF8A")))
+}
 
 
 
@@ -271,24 +319,171 @@ ggplot(df, aes(x = SubCellType, y = percent, fill = Phase)) +
 The @fig-doublet-composition provides doublets/singlets distribution across all cells and clusters per patient.
 :::
 
+## Doublet call validation {#doublet-validation}
+
+```{r dbl-validate-compute, include = FALSE}
+suppressPackageStartupMessages({library(ggplot2); library(data.table)})
+.dm <- as.data.table(seurat_object@meta.data, keep.rownames = "cell_id")
+.has_cls <- "class" %in% names(.dm)
+.cnt <- intersect(c("nCount_RNA","nCount"), names(.dm))[1]
+.ftr <- intersect(c("nFeature_RNA","nFeature"), names(.dm))[1]
+
+if (.has_cls) {
+  .dm[, class := as.character(class)]
+  .n_dbl  <- sum(.dm$class == "doublet", na.rm = TRUE)
+  .rate   <- 100 * .n_dbl / nrow(.dm)
+  # A doublet is two cells in one droplet, so it should carry MORE RNA than a
+  # singlet. If it does not, the caller is flagging something else and the
+  # filtering is removing real cells. This is the check that makes the call
+  # believable rather than merely reported.
+  .ratio <- NA_real_; .pval <- NA_real_
+  if (!is.na(.cnt) && .n_dbl > 2) {
+    .md_d <- median(.dm[class == "doublet"][[.cnt]], na.rm = TRUE)
+    .md_s <- median(.dm[class == "singlet"][[.cnt]], na.rm = TRUE)
+    .ratio <- .md_d / max(1, .md_s)
+    .pval <- tryCatch(suppressWarnings(
+      wilcox.test(.dm[class == "doublet"][[.cnt]],
+                  .dm[class == "singlet"][[.cnt]])$p.value),
+      error = function(e) NA_real_)
+  }
+}
+```
+
+
+```{r dbl-validate-finding, results = 'asis'}
+if (.has_cls) {
+  msg <- sprintf("scDblFinder flagged **%s of %s cells (%.1f%%)** as doublets.",
+                 format(.n_dbl, big.mark = ","), format(nrow(.dm), big.mark = ","), .rate)
+  if (!is.na(.ratio)) {
+    msg <- paste(msg, sprintf(
+      "Median library size is **%.2fx higher** in flagged doublets than singlets%s.",
+      .ratio, if (!is.na(.pval)) sprintf(" (Wilcoxon p = %s)",
+                format.pval(.pval, digits = 2, eps = 1e-300)) else ""))
+    if (.ratio < 1.15) msg <- paste(msg,
+      "**A ratio near 1 means the flagged cells are not obviously double-loaded.**",
+      "Two cells in one droplet should carry visibly more RNA; without that",
+      "signal the caller may be removing real cells, so check the figure below",
+      "before trusting the filtered object.")
+  }
+  # 10x doublet rate is ~0.8% per 1,000 cells recovered.
+  # 10x multiplet rate is ~0.8% per 1,000 cells recovered -> a PERCENTAGE.
+  .expected <- 0.8 * nrow(.dm) / 1000
+  if (.rate > 2 * .expected) msg <- paste(msg, sprintf(
+    "The observed rate is well above the ~%.1f%% expected for %s cells at 10x loading densities.",
+    .expected, format(nrow(.dm), big.mark = ",")))
+  scratch_finding(msg, type = if (!is.na(.ratio) && .ratio < 1.15) "caution" else "note",
+                  title = "Doublet detection")
+
+  # --- the two callers are never compared anywhere else -----------------
+  if ("cluster_class" %in% names(.dm)) {
+    .cc <- .dm[!is.na(class) & !is.na(cluster_class)]
+    if (nrow(.cc)) {
+      .agree <- sum(.cc$class == as.character(.cc$cluster_class))
+      .pct <- 100 * .agree / nrow(.cc)
+      m2 <- sprintf(paste("The sample-based and cluster-based callers agree on",
+                          "**%.1f%%** of cells (%s of %s); they disagree on **%s**."),
+                    .pct, format(.agree, big.mark = ","),
+                    format(nrow(.cc), big.mark = ","),
+                    format(nrow(.cc) - .agree, big.mark = ","))
+      m2 <- paste(m2, sprintf("Only the **%s** mode is applied downstream (--qc_doublet_filter).",
+                              if (is.null(params$doublet_filter)) "sample" else params$doublet_filter))
+      scratch_finding(m2, type = if (.pct < 90) "caution" else "note",
+                      title = "Caller agreement")
+      scratch_table(dcast(.cc[, .N, by = .(class, cluster_class)],
+                          class ~ cluster_class, value.var = "N", fill = 0),
+                    caption = "sample-based (rows) vs cluster-based (columns) calls")
+    }
+  }
+}
+```
+
+
+```{r dbl-validate-figure, message = FALSE, warning = FALSE}
+#| fig-width: 8.5
+#| fig-height: 4
+if (.has_cls && !is.na(.cnt)) {
+  .pl <- rbindlist(list(
+    data.table(class = .dm$class, metric = "UMIs per cell",  value = as.numeric(.dm[[.cnt]])),
+    if (!is.na(.ftr)) data.table(class = .dm$class, metric = "genes per cell",
+                                 value = as.numeric(.dm[[.ftr]]))), use.names = TRUE)
+  .pl <- .pl[is.finite(value) & value > 0 & !is.na(class)]
+  # Violin, not violin+jitter: overlaying 18,000 points reproduces exactly the
+  # overplotting the density plots exist to avoid. The quartile lines carry the
+  # same information the jitter was there to suggest.
+  # Quartiles come from a narrow boxplot inside the violin rather than
+  # geom_violin's quantile argument: that argument was renamed in ggplot2 4.0,
+  # so either spelling warns or errors depending on the installed version.
+  # This idiom is stable across versions and reads more clearly anyway.
+  ggplot(.pl, aes(class, value, fill = class)) +
+    geom_violin(scale = "width", linewidth = .3, colour = "grey25") +
+    geom_boxplot(width = .12, outlier.shape = NA, linewidth = .3,
+                 colour = "grey20", fill = "white", alpha = .9) +
+    facet_wrap(~ metric, scales = "free_y") +
+    scale_y_log10(labels = scales::comma) +
+    scale_fill_manual(values = c(singlet = "#8fb4dd", doublet = "#8c1d18"), guide = "none") +
+    labs(title = "Library size by doublet call",
+         subtitle = "doublets should sit visibly higher; quartiles drawn",
+         x = NULL, y = NULL) +
+    theme_scratch()
+}
+```
+
+
 ## Removing doublets
 
-```{r}
+```{r remove_doublets}
 
-seurat_sample_object <- subset(
+n_before <- ncol(seurat_object)
+
+singlet_object <- subset(
   seurat_object,
   subset = class == "singlet"
 )
 
-seurat_cluster_object <- subset(
-  seurat_object,
-  subset = cluster_class == "singlet"
+n_after <- ncol(singlet_object)
+
+```
+
+The singlet subset is still a lazy BPCells view over the full merged store. So
+that downstream steps (which rebuild the object from `data/bpcells_counts`)
+never see the removed doublets, we write a fresh store containing **only** the
+singlet counts and point the saved object at it.
+
+```{r write_singlet_store}
+
+store_dir <- file.path('data', 'bpcells_counts')
+tmp_store <- file.path('data', '.bpcells_counts_singlets')
+
+# Lazy singlet counts (still reference the staged full store).
+singlet_counts <- SeuratObject::LayerData(singlet_object, assay = 'RNA', layer = 'counts')
+
+# Write the singlet-only store to a temp dir FIRST — this reads from the staged
+# full store, so it must exist until the write completes.
+if (dir.exists(tmp_store)) unlink(tmp_store, recursive = TRUE, force = TRUE)
+BPCells::write_matrix_dir(mat = singlet_counts, dir = tmp_store)
+
+# Now replace the staged store (a symlink to the merge task's output) with the
+# singlet store at the path downstream steps expect.
+unlink(store_dir, recursive = TRUE, force = TRUE)
+file.rename(tmp_store, store_dir)
+singlet_counts <- BPCells::open_matrix_dir(dir = store_dir)
+
+# Rebuild the object from the singlet store so its counts layer references the
+# new on-disk store (drop auto-computed count columns; they are regenerated).
+keep_meta <- singlet_object@meta.data
+keep_meta <- keep_meta[, setdiff(colnames(keep_meta),
+                                 c('nCount_RNA', 'nFeature_RNA')), drop = FALSE]
+
+singlet_object <- CreateSeuratObject(
+  counts    = singlet_counts,
+  project   = project_name,
+  meta.data = keep_meta
 )
 
 ```
 
 ::: {.callout-warning}
-Total cells after doublets removal **`r dim(seurat_object)[2]`**.
+Total cells after doublet removal **`r n_after`** (removed **`r n_before - n_after`** of **`r n_before`**).
 :::
 
 ## Saving Seurat object
@@ -296,10 +491,8 @@ Total cells after doublets removal **`r dim(seurat_object)[2]`**.
 ```{r object_dump}
 
 if(auto_save) {
-  
-  saveRDS(seurat_sample_object, file = paste0('data/', project_name, '_qc_dbl_sample_object.RDS'))
 
-  saveRDS(seurat_cluster_object, file = paste0('data/', project_name, '_qc_dbl_cluster_object.RDS'))
+  saveRDS(singlet_object, file = paste0('data/', project_name, '_qc_dbl_singlet_object.RDS'))
 
 }
 

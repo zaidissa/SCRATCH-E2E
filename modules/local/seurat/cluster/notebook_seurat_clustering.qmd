@@ -96,6 +96,7 @@ library(dplyr)
 library(ggplot2)
 library(patchwork)
 library(Seurat)
+library(BPCells)
 library(ROGUE)
 library(SCP)
 
@@ -109,8 +110,9 @@ if(!dir.exists(work_directory)) {
   dir.create(work_directory, recursive = T)
 }
 
+# showWarnings = FALSE: data/ already exists (the BPCells store is staged there).
 for(sub_directory in c('data', 'figures')) {
-  dir.create(paste0(work_directory, '/', sub_directory))
+  dir.create(paste0(work_directory, '/', sub_directory), showWarnings = FALSE)
 }
 
 ```
@@ -120,7 +122,9 @@ for(sub_directory in c('data', 'figures')) {
 ```{r loading_rds}
 #| code-fold: true
 
-# Reading seurat object
+# Reading the reduction object. It is BPCells-backed: its counts/data layers are
+# lazy transforms over the on-disk store staged at data/bpcells_counts, so
+# BPCells must be loaded (above) for the object to deserialize and resolve.
 seurat_object <- readRDS(file = seurat_object)
 
 # Cell number
@@ -261,6 +265,84 @@ seurat_cluster_composition <- seurat_cluster_composition %>%
     percentage = round((n_cell / total_cell) * 100, digits = 2)
   )
 
+```
+
+```{r cluster-purity-compute, include = FALSE}
+# seurat_cluster_composition (computed above) already holds the per-cluster,
+# per-sample percentages. Nothing in this notebook ever drew a conclusion from
+# them, so a cluster that is 96% one sample -- i.e. a batch artefact rather
+# than a cell type -- rendered as an unremarkable bar in the stacked plot.
+suppressPackageStartupMessages({library(ggplot2); library(data.table)})
+.cc <- as.data.table(seurat_cluster_composition)
+.thr <- 90   # % of a cluster coming from one sample before it looks sample-driven
+
+.n_samples <- length(unique(.cc$orig.ident))
+.purity <- .cc[, .(top_sample = orig.ident[which.max(percentage)],
+                   top_pct    = max(percentage),
+                   cells      = total_cell[1]), by = seurat_clusters][order(-top_pct)]
+
+# A cluster being mostly one sample is only suspicious relative to how big that
+# sample is overall: if a sample contributes 80% of all cells, an 80% cluster is
+# exactly what you would expect. Enrichment corrects for that.
+.cohort <- .cc[, .(cohort_pct = 100 * sum(n_cell) / sum(.cc$n_cell)), by = orig.ident]
+.purity <- merge(.purity, .cohort, by.x = "top_sample", by.y = "orig.ident", all.x = TRUE)
+.purity[, enrichment := round(top_pct / pmax(1e-9, cohort_pct), 2)]
+setorder(.purity, -top_pct)
+.skewed <- .purity[top_pct >= .thr & enrichment >= 1.25]
+```
+
+```{r cluster-purity-finding, results = 'asis'}
+if (.n_samples < 2) {
+  scratch_finding(
+    "Only one sample is present, so cluster composition cannot distinguish biology from batch.",
+    type = "note", title = "Cluster composition")
+} else {
+  msg <- sprintf(paste("Across **%d clusters** from **%d samples**, the most",
+                       "sample-dominated cluster is **cluster %s** at **%.1f%%** from",
+                       "`%s` (%.2fx that sample's cohort-wide share)."),
+                 nrow(.purity), .n_samples, as.character(.purity$seurat_clusters[1]),
+                 .purity$top_pct[1], .purity$top_sample[1], .purity$enrichment[1])
+  if (nrow(.skewed)) {
+    msg <- paste(msg, sprintf(
+      paste("**%d cluster(s) (%s) are at least %d%% single-sample and enriched above",
+            "their share of the cohort.** Clusters like these usually reflect batch or",
+            "donor identity rather than a distinct cell state, and any downstream",
+            "result keyed on cluster identity -- markers, composition, cell-cell",
+            "communication -- will inherit that. Check them against the batch-corrected",
+            "embedding before interpreting them biologically."),
+      nrow(.skewed), paste(.skewed$seurat_clusters, collapse = ", "), .thr))
+  } else {
+    msg <- paste(msg, sprintf(
+      "No cluster exceeds %d%% single-sample membership with enrichment, so clustering does not appear to be driven by sample identity.",
+      .thr))
+  }
+  scratch_finding(msg, type = if (nrow(.skewed)) "caution" else "note",
+                  title = "Is clustering driven by sample identity?")
+  scratch_table(.purity[, .(cluster = seurat_clusters, cells,
+                            `top sample` = top_sample,
+                            `% from top sample` = round(top_pct, 1),
+                            `sample's cohort share %` = round(cohort_pct, 1),
+                            enrichment)],
+                caption = "Cluster composition, most sample-dominated first")
+}
+```
+
+```{r cluster-purity-figure, message = FALSE, warning = FALSE}
+#| fig-width: 9
+#| fig-height: 5
+if (.n_samples >= 2) {
+  .hm <- copy(.cc)
+  .hm[, tip := sprintf("cluster %s / %s\n%.1f%% of the cluster (%s cells)",
+                       seurat_clusters, orig.ident, percentage, format(n_cell, big.mark = ","))]
+  ggplot(.hm, aes(factor(seurat_clusters), orig.ident, fill = percentage, text = tip)) +
+    geom_tile(colour = "white", linewidth = .4) +
+    scale_fill_gradient(low = "#eef4fd", high = "#0d366b", limits = c(0, 100),
+                        name = "% of\ncluster") +
+    labs(title = "Sample composition of each cluster",
+         subtitle = sprintf("a column dominated by one row is a cluster made of one sample (flagged at %d%%)", .thr),
+         x = "cluster", y = NULL) +
+    theme_scratch()
+}
 ```
 
 ```{r barplot_composition}
@@ -516,7 +598,7 @@ if(auto_save) {
 
 ```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
 
-print(params)
+params
 
 ```
 

@@ -10,6 +10,12 @@ process GIANA {
     val  project_name
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figure_files, optional: true
     path "GIANA_Report.html", emit: report_html
     path "GIANA_Report/data/seurat_with_GIANA.rds", emit: seurat_with_giana
     path "GIANA_Report/tables/giana_export_cells.tsv", emit: export_cells

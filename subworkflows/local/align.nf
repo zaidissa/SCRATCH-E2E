@@ -24,6 +24,15 @@ include { CELLRANGER_COUNT  } from '../../modules/local/cellranger/count/main.nf
 include { CELLRANGER_VDJ    } from '../../modules/local/cellranger/vdj/main.nf'
 include { CELLRANGER_MULTI  } from '../../modules/local/cellranger/multi/main.nf'
 
+// Absolute paths and URIs pass through; a relative path is resolved against the
+// SAMPLESHEET's own directory, so a sheet works regardless of where the run was
+// launched from.
+def resolveSheetPath(p, sheetDir) {
+    if (!p) return p
+    def t = p.toString()
+    return (t.startsWith('/') || t =~ /^[a-zA-Z0-9]+:\/\//) ? t : sheetDir.resolve(t).toString()
+}
+
 workflow ALIGN {
 
     take:
@@ -133,12 +142,14 @@ workflow ALIGN {
             def sheetDir = file(params.input_samplesheet).parent
             ch_rows = ch_validated_csv
                 .splitCsv(header: true, sep: ',')
+                // Inlined rather than a `def resolve = { }` closure: Nextflow
+                // 26.x's strict parser reports "`resolve` is not defined" for a
+                // closure variable referenced later in the same block.
                 .map { row ->
-                    def resolve = { p ->
-                        !p ? p : (p.startsWith('/') || p =~ /^[a-zA-Z0-9]+:\/\//
-                                    ? p : sheetDir.resolve(p).toString())
-                    }
-                    tuple(row.sample, resolve(row.fastq_1), resolve(row.fastq_2), row.modality)
+                    tuple(row.sample,
+                          resolveSheetPath(row.fastq_1, sheetDir),
+                          resolveSheetPath(row.fastq_2, sheetDir),
+                          row.modality)
                 }
 
             ch_branches = ch_rows.branch {

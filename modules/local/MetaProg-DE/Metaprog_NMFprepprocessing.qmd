@@ -232,7 +232,7 @@ list.files(out_dir, pattern = "_preprocessed\\.rds$", full.names = TRUE)
 
 ```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
 
-print(params)
+params
 
 ```
 

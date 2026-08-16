@@ -41,6 +41,7 @@ params:
   # Cell type defines the compartment; CNV adjudicates only within the
   # compartment that could plausibly be malignant.
   gate_by_lineage: true
+  numbat_priority: true
 
   # exclude | malignant | non_malignant
   ambiguous: "exclude"
@@ -149,7 +150,11 @@ col_ct <- ct_candidates[ct_candidates %in% names(meta)][1]
 if (is.na(col_ct)) {
   msg <- paste0("No annotation column found. Tried: ", paste(ct_candidates, collapse=", "),
                 "\n  Object has: ", paste(head(names(meta), 40), collapse=", "),
-                "\n  Set --stratify_celltype_col to the right column.")
+                # Name the parameter that actually exists. STRATIFY reads the
+                # TME-prefixed column params, and --celltype_col is the global
+                # fallback; --stratify_celltype_col was never a real parameter,
+                # so the old message sent people to a flag Nextflow ignores.
+                "\n  Set --celltype_col (global) or --tme_celltype_col to the right column.")
   # Under `consensus` the label drives BOTH the lineage gate and the tie-break,
   # so continuing without it silently changes the algorithm. Fail loudly.
   if (params$method == "consensus" || isTRUE(as.logical(params$gate_by_lineage))) {
@@ -181,6 +186,41 @@ ev_files <- if (dir.exists(ev_dir)) {
 
 cat("Staged CNV artefacts:", length(ev_files), "\n")
 if (length(ev_files)) cat(paste(" -", basename(ev_files)), sep = "\n")
+
+# Cell-id reconciliation, shared by every caller.
+#
+# Callers key their output differently: SCEVAN runs per sample and prepends a
+# doubled sample prefix ("S1.S1_AACGT-1"), CopyKAT emits raw cellranger barcodes,
+# Numbat joins through an explicit barcode map. A merge that matches NOTHING is
+# the dangerous case, because it fails silently -- all-NA columns, no error, and
+# a "consensus" quietly computed from fewer callers than it reports. That is
+# exactly what happened with SCEVAN: 0 of 3000 cells matched.
+#
+# Try the ids as given, then progressively normalised, and keep whichever
+# actually matches. A total miss is reported loudly rather than absorbed.
+scratch_match_cell_ids <- function(ids, target, caller) {
+  variants <- list(
+    `as-is`             = ids,
+    `strip <prefix>.`   = sub("^[^.]+\\.", "", ids),
+    `strip to barcode`  = sub("^.*[._]", "", ids),
+    `drop -1 suffix`    = sub("-\\d+$", "", ids)
+  )
+  hits <- vapply(variants, function(v) length(intersect(v, target)), integer(1))
+  best <- names(hits)[which.max(hits)]
+  if (max(hits) == 0L) {
+    warning(sprintf(paste0("%s cell ids match NONE of the object's cells (tried: %s). ",
+                           "%s evidence is being DISCARDED -- the consensus will run ",
+                           "without it."),
+                    caller, paste(names(hits), collapse = ", "), caller), immediate. = TRUE)
+    cat(sprintf("%s id examples: %s\n", caller, paste(utils::head(ids, 2), collapse = " | ")))
+    cat(sprintf("object id examples: %s\n", paste(utils::head(target, 2), collapse = " | ")))
+    return(NULL)
+  }
+  if (best != "as-is")
+    cat(sprintf("%s cell ids normalised via '%s' (%d/%d matched).\n",
+                caller, best, max(hits), length(target)))
+  variants[[best]]
+}
 
 evidence <- data.table(cell_id = meta$cell_id)
 callers  <- character(0)
@@ -264,11 +304,41 @@ if (length(f)) {
 
   if (!is.null(sv_meta) && !is.na(cls)) {
     sv_meta[, cell_id := as.character(cell_id)]
-    sc <- sv_meta[, .(cell_id, raw = tolower(as.character(get(cls))))]
-    sc[, scevan_call := fifelse(grepl("tumou?r|malig|aneupl", raw), "malignant",
-                         fifelse(grepl("normal|diplo", raw), "non_malignant", NA_character_))]
-    evidence <- merge(evidence, sc[, .(cell_id, scevan_call)], by = "cell_id", all.x = TRUE, sort = FALSE)
-    callers <- c(callers, "scevan")
+
+    # SCEVAN runs per sample and its combined output carries a doubled sample
+    # prefix: "HRS371760.HRS371760_AAACCTG-1" against the object's
+    # "HRS371760_AAACCTG-1". Merging raw gave a ZERO-row match on real data, so
+    # every SCEVAN call was silently dropped and the "consensus" ran on inferCNV
+    # alone -- no error, no warning, just half the evidence missing.
+    # Try the ids as-is, then progressively normalised, and keep whichever
+    # actually matches the object.
+    variants <- list(
+      `as-is`            = sv_meta$cell_id,
+      `strip <prefix>.`  = sub("^[^.]+\\.", "", sv_meta$cell_id),
+      `basename after _` = sub("^.*?\\.", "", sv_meta$cell_id)
+    )
+    hits <- vapply(variants, function(v) length(intersect(v, evidence$cell_id)), integer(1))
+    best <- names(hits)[which.max(hits)]
+
+    if (max(hits) == 0L) {
+      # Loud, because a silent zero-match is exactly the failure this guards.
+      warning("SCEVAN cell ids match NONE of the object's cells (tried: ",
+              paste(names(hits), collapse = ", "), "). SCEVAN evidence is being ",
+              "DISCARDED -- the consensus will run without it.", immediate. = TRUE)
+      cat("SCEVAN id examples:", paste(head(sv_meta$cell_id, 2), collapse = " | "), "\n")
+      cat("object id examples:", paste(head(evidence$cell_id, 2), collapse = " | "), "\n")
+    } else {
+      sv_meta[, cell_id := variants[[best]]]
+      if (best != "as-is")
+        cat(sprintf("SCEVAN cell ids normalised via '%s' (%d/%d matched).\n",
+                    best, max(hits), nrow(evidence)))
+
+      sc <- sv_meta[, .(cell_id, raw = tolower(as.character(get(cls))))]
+      sc[, scevan_call := fifelse(grepl("tumou?r|malig|aneupl", raw), "malignant",
+                           fifelse(grepl("normal|diplo", raw), "non_malignant", NA_character_))]
+      evidence <- merge(evidence, sc[, .(cell_id, scevan_call)], by = "cell_id", all.x = TRUE, sort = FALSE)
+      callers <- c(callers, "scevan")
+    }
   }
 } else cat("No SCEVAN evidence.\n")
 
@@ -284,10 +354,14 @@ if (length(f)) {
     if (!is.na(idc) && !is.na(prd)) {
       setnames(ck, c(idc, prd), c("cell_id", "raw"))
       ck[, cell_id := as.character(cell_id)]
-      ck[, copykat_call := fifelse(grepl("aneuploid", tolower(raw)), "malignant",
-                            fifelse(grepl("diploid", tolower(raw)), "non_malignant", NA_character_))]
-      evidence <- merge(evidence, ck[, .(cell_id, copykat_call)], by = "cell_id", all.x = TRUE, sort = FALSE)
-      callers <- c(callers, "copykat")
+      matched <- scratch_match_cell_ids(ck$cell_id, evidence$cell_id, "CopyKAT")
+      if (!is.null(matched)) {
+        ck[, cell_id := matched]
+        ck[, copykat_call := fifelse(grepl("aneuploid", tolower(raw)), "malignant",
+                              fifelse(grepl("diploid", tolower(raw)), "non_malignant", NA_character_))]
+        evidence <- merge(evidence, ck[, .(cell_id, copykat_call)], by = "cell_id", all.x = TRUE, sort = FALSE)
+        callers <- c(callers, "copykat")
+      }
     }
   }
 } else cat("No CopyKAT evidence.\n")
@@ -365,6 +439,38 @@ if (method == "annotation" || !length(call_cols)) {
       n_malignant >= min_callers & n_malignant > n_non_malignant, "cnv",
       fifelse(n_non_malignant >= min_callers & n_non_malignant > n_malignant, "cnv",
       fifelse(!is.na(annotation_call), "annotation", "none")))]
+}
+
+# ---- Numbat takes precedence where it has a verdict -----------------------
+# inferCNV, SCEVAN and CopyKAT all infer copy number from EXPRESSION smoothed
+# along the genome, so they are structurally blind to copy-neutral LOH. Numbat
+# reads phased heterozygous SNPs and measures the allelic channel directly — it
+# is not a better-tuned expression caller, it observes something they cannot.
+# Counting it as one vote among equals understates that, so where Numbat has an
+# opinion it decides.
+#
+# This runs BEFORE the lineage gate, which still overrides everything: an immune
+# or stromal cell stays non-malignant even if Numbat calls it aneuploid.
+if ("numbat_call" %in% names(evidence) &&
+    isTRUE(as.logical(params$numbat_priority))) {
+
+  overridden <- evidence[!is.na(numbat_call) & malignant_status != numbat_call, .N]
+  covered    <- evidence[!is.na(numbat_call), .N]
+
+  evidence[!is.na(numbat_call), `:=`(malignant_status = numbat_call,
+                                     evidence_basis   = "numbat")]
+
+  cat(sprintf("Numbat priority: verdict for %d/%d cells (%.1f%%); %d disagreed with the tally and were overridden.\n",
+              covered, nrow(evidence), 100 * covered / nrow(evidence), overridden))
+  # A high override rate is worth knowing about rather than burying: it means the
+  # expression-only callers and the allelic channel are telling different stories.
+  if (covered > 0 && overridden / covered > 0.2)
+    warning(sprintf(paste0("Numbat overrode %.1f%% of the cells it called. That is a large ",
+                           "disagreement with the expression-based callers — check ",
+                           "data/cnv_caller_agreement.csv before trusting either."),
+                    100 * overridden / covered), immediate. = TRUE)
+} else if ("numbat_call" %in% names(evidence)) {
+  cat("Numbat evidence present but numbat_priority is false; it votes as an equal caller.\n")
 }
 
 cat("Method:", method, "| min_callers:", min_callers, "\n\n")
@@ -553,7 +659,7 @@ fwrite(data.table(compartment = c("malignant", "non_malignant", "ambiguous"),
 ## Parameters
 
 ```{r params_log, echo = FALSE}
-print(params)
+params
 ```
 
 ## Session info

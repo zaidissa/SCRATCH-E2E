@@ -1,0 +1,162 @@
+name: Build TME images
+
+# Builds the two TME images on a NATIVE x86_64 runner.
+#
+# This exists because the scCODA image cannot be verified on an Apple-silicon
+# workstation: it is linux/amd64, and TensorFlow executes AVX instructions QEMU
+# does not emulate, so the import check dies with SIGILL (132) or hangs. The
+# Dockerfile tolerates those two exit codes so a laptop build still succeeds --
+# which means the laptop build proves nothing. This workflow is where the check
+# actually has teeth.
+#
+# ubuntu-latest runners are native x86_64, so there is no emulation escape here:
+# every verification step below is a hard gate.
+
+on:
+  push:
+    paths:
+      - 'containers/tme/**'
+      - 'assets/env/scoda-requirements.txt'
+      - 'bin/scratch_scoda.py'
+      - '.github/workflows/build-tme-images.yml'
+  workflow_dispatch:
+    inputs:
+      push_images:
+        description: 'Push to Docker Hub (requires DOCKERHUB_* secrets)'
+        type: boolean
+        default: false
+
+env:
+  SLIM_IMAGE: syedsazaidi/scratch-tme
+  SCODA_IMAGE: syedsazaidi/scratch-tme-scoda
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Confirm the runner really is native amd64
+        run: |
+          set -eux
+          arch="$(uname -m)"
+          test "$arch" = "x86_64" || { echo "::error::runner is $arch, not x86_64 -- verification would be meaningless"; exit 1; }
+
+      # The base image is ~2.3 GB and TensorFlow adds ~2 GB; default runners are
+      # tight enough that a build can fail on disk rather than on merit.
+      - name: Reclaim disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Build slim TME image (propeller / speckle)
+        run: |
+          docker build --platform linux/amd64 \
+            -f containers/tme/Dockerfile -t "$SLIM_IMAGE:latest" .
+
+      - name: Verify speckle and propeller actually run
+        run: |
+          docker run --rm "$SLIM_IMAGE:latest" Rscript -e '
+            suppressPackageStartupMessages(library(speckle))
+            set.seed(1)
+            # Two groups, six samples each, three cell types -- enough for
+            # propeller to return a real result rather than just importing.
+            smp <- rep(paste0("s", 1:12), each = 300)
+            grp <- ifelse(as.integer(sub("s", "", smp)) <= 6, "A", "B")
+            ct  <- unlist(lapply(1:12, function(i)
+                     sample(c("T","B","Mono"), 300, replace = TRUE,
+                            prob = if (i <= 6) c(.6,.2,.2) else c(.3,.2,.5))))
+            r <- propeller(clusters = ct, sample = smp, group = grp, transform = "logit")
+            stopifnot(is.data.frame(r), nrow(r) == 3, "FDR" %in% colnames(r))
+            stopifnot(any(r$FDR < 0.05))   # the planted shift must be detected
+            cat("VERIFIED propeller returned", nrow(r), "rows;",
+                sum(r$FDR < 0.05), "significant\n")'
+
+      - name: Build scCODA image (TensorFlow)
+        run: |
+          docker build --platform linux/amd64 \
+            -f containers/tme/Dockerfile.scoda -t "$SCODA_IMAGE:latest" .
+
+      # The Dockerfile's own check tolerates SIGILL/timeout so laptop builds
+      # survive. On a native runner nothing should trap, so re-run it here with
+      # no tolerance at all -- any non-zero exit fails the workflow.
+      - name: Verify scCODA imports (hard gate, no emulation tolerance)
+        run: |
+          docker run --rm -e TF_CPP_MIN_LOG_LEVEL=3 "$SCODA_IMAGE:latest" \
+            /opt/scoda/bin/python -c "
+          import sccoda, tensorflow, arviz, scipy
+          from sccoda.util import comp_ana, cell_composition_data
+          print('VERIFIED sccoda', sccoda.__version__, '| tf', tensorflow.__version__,
+                '| scipy', scipy.__version__, '| arviz', arviz.__version__)"
+
+      # An import check does not prove the sampler runs. Fit a model with a
+      # planted compositional shift and require scCODA to find it.
+      - name: Verify scCODA fits a model end to end
+        run: |
+          set -eux
+          mkdir -p /tmp/sc
+          python3 - <<'PY'
+          import csv, random
+          random.seed(1)
+          types = ["T", "B", "Mono", "Endo"]
+          rows, cov = [], []
+          for i in range(12):
+              grp = "A" if i < 6 else "B"
+              # Mono is strongly shifted between groups; the others are stable.
+              base = [600, 200, 150, 50] if grp == "A" else [600, 200, 600, 50]
+              rows.append([f"s{i}"] + [max(1, int(random.gauss(b, b * 0.12))) for b in base])
+              cov.append([f"s{i}", grp])
+          with open("/tmp/sc/counts.csv", "w", newline="") as f:
+              w = csv.writer(f); w.writerow(["sample"] + types); w.writerows(rows)
+          with open("/tmp/sc/cov.csv", "w", newline="") as f:
+              w = csv.writer(f); w.writerow(["sample", "condition"]); w.writerows(cov)
+          PY
+          # Mount the repo's bin/ rather than relying on a copy inside the image.
+          # Nextflow stages bin/ into every task and puts it on PATH, so this is
+          # the production arrangement: repo script, image interpreter. Baking a
+          # copy into the image would risk running a stale script silently.
+          docker run --rm -v /tmp/sc:/data -v "$PWD/bin:/repo/bin:ro" \
+            -e TF_CPP_MIN_LOG_LEVEL=3 \
+            "$SCODA_IMAGE:latest" /opt/scoda/bin/python /repo/bin/scratch_scoda.py \
+              --counts /data/counts.csv --covariates /data/cov.csv \
+              --formula condition --reference automatic --fdr 0.05 \
+              --num-results 4000 --out /data/effects.csv
+          python3 - <<'PY'
+          import csv, sys
+          rows = list(csv.DictReader(open("/tmp/sc/effects.csv")))
+          assert rows, "scCODA produced no effects"
+          ref = rows[0]["reference_cell_type"]
+          assert ref != "automatic", "reference cell type was not resolved to a real type"
+          cred = [r for r in rows if r["credible"] == "True" and r["cell_type"] != ref]
+          print(f"reference={ref}  credible={[r['cell_type'] for r in cred]}")
+          assert any(r["cell_type"] == "Mono" for r in cred), \
+              "scCODA missed the planted Mono shift -- the sampler is not working"
+          print("VERIFIED scCODA recovered the planted compositional shift")
+          PY
+
+      - name: Log in to Docker Hub
+        if: ${{ inputs.push_images }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push
+        if: ${{ inputs.push_images }}
+        run: |
+          docker push "$SLIM_IMAGE:latest"
+          docker push "$SCODA_IMAGE:latest"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## TME image build"
+            echo ""
+            echo "| image | built | verified natively |"
+            echo "|---|---|---|"
+            echo "| \`$SLIM_IMAGE\` | yes | propeller fit on planted data |"
+            echo "| \`$SCODA_IMAGE\` | yes | scCODA import + recovered planted shift |"
+            echo ""
+            echo "Runner: \`$(uname -m)\` — native, so no emulation tolerance applied."
+          } >> "$GITHUB_STEP_SUMMARY"

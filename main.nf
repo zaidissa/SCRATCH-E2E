@@ -105,7 +105,7 @@ def resolveStages() {
         all.each { picked[it] = (it in wanted) }
         // An explicit --run_<stage> still wins, so --only cnv --run_integration true works.
         all.each { name ->
-            def ov = params."run_${name}"
+            def ov = params["run_${name}"]
             if (ov != null) picked[name] = (ov.toString().toLowerCase() in ['true','yes','1'])
         }
         return picked
@@ -141,6 +141,34 @@ def resolveStages() {
                                            : ((to == 'end') || (to == name))
     }
 
+    // TCR is "independent of the split", but it is NOT independent of having any
+    // VDJ data. Fanning out from a backbone stage used to switch it on
+    // unconditionally, so a GEX-only run reached VDJ_QC with the NO_FILE
+    // placeholder as its sample sheet and died on "missing required columns".
+    // A stage with no possible input should not be scheduled at all.
+    if (enabled['tcr']) {
+        def has_contigs = params.input_vdj_contigs
+        def sheet       = params.input_tcr_sample_sheet?.toString()
+        def has_sheet   = sheet && !sheet.endsWith('NO_FILE')
+        // ALIGN can produce VDJ itself from a samplesheet carrying TCR rows.
+        def align_makes_vdj = enabled['align']
+        if (!(has_contigs || has_sheet || align_makes_vdj)) {
+            enabled['tcr'] = false
+            log.info "Stage 'tcr' skipped: no VDJ input " +
+                     "(--input_vdj_contigs / --input_tcr_sample_sheet unset and ALIGN not running). " +
+                     "Pass --run_tcr true to force it."
+        }
+    }
+
+    // ...and the mirror case. Entering AT batchcorrect with --to end means
+    // "batch-correct, then everything that consumes the corrected object". The
+    // rule above only handled the opposite direction, so `--from batchcorrect`
+    // ran batch correction and then stopped, silently skipping the three stages
+    // it exists to feed.
+    if (entering_at_branch && from == 'batchcorrect' && to == 'end') {
+        ['trajectory', 'cellcomm', 'tme'].each { enabled[it] = true }
+    }
+
     // The three stages on the non-malignant arm read the corrected object, so
     // entering at one of them still needs batch correction — unless that object
     // is supplied directly.
@@ -155,7 +183,7 @@ def resolveStages() {
 
     // Explicit overrides always win.
     all.each { name ->
-        def override = params."run_${name}"
+        def override = params["run_${name}"]
         if (override != null)
             enabled[name] = (override.toString().toLowerCase() in ['true', 'yes', '1'])
     }
@@ -169,6 +197,17 @@ def resolveStages() {
     Main workflow
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
+
+// Declared as a top-level FUNCTION, not a closure variable inside the workflow
+// body: Nextflow 26.x's strict parser reports "`stagePack` is not defined" for
+// the latter. Functions are declarations and resolve normally.
+def stagePack(ch, id, title) {
+            ch.collect().ifEmpty([]).map { f ->
+                def files = (f instanceof List) ? f : [f]
+                files = files.findAll { !(it.toString().contains('_figlibs')) }
+                tuple(id, title, files.unique { it.name })
+            }
+}
 
 workflow {
 
@@ -229,6 +268,10 @@ workflow {
                   "to enter one arm directly."
         // Also becomes the base object the integration layer annotates.
         ch_seurat = Channel.value(file(entry_object, checkIfExists: true))
+        // Entering at/after cluster: no BPCells store travels with a plain RDS.
+        // The notebooks fall back to the object's own layers when the staged
+        // store is the placeholder.
+        ch_bpcells_store = Channel.value(file("${projectDir}/assets/NO_FILE_bpcells"))
     }
 
     // ---- ALIGN -----------------------------------------------------------
@@ -260,12 +303,13 @@ workflow {
             error "Stage 'qc' requires --input_exp_table <PATH/TO/metadata.csv>."
         QC(ch_gex, Channel.fromPath(params.input_exp_table, checkIfExists: true), ch_page_config)
         ch_seurat = QC.out.seurat_rds
+        ch_bpcells_store = QC.out.bpcells_store
         rep_qc = QC.out.qc_metrics.mix(QC.out.seurat_rds)
     }
 
     // ---- CLUSTER ---------------------------------------------------------
     if (run['cluster']) {
-        CLUSTER(ch_seurat, ch_page_config)
+        CLUSTER(ch_seurat, ch_bpcells_store, ch_page_config)
         ch_seurat = CLUSTER.out.seurat_rds
         rep_cluster = CLUSTER.out.figures.flatten()
     }
@@ -314,8 +358,18 @@ workflow {
     if (params.run_numbat) {
         ch_numbat_bam = ch_bam
         if (params.input_bam_path) {
+            // Carry the .bai alongside the BAM. Without it the pileup re-indexes an
+            // 80 GB file on every attempt, which costs more than the pileup.
             ch_numbat_bam = Channel.fromPath(params.input_bam_path, checkIfExists: true)
-                .map { f -> tuple(f.parent.parent.name, f) }
+                .map { f ->
+                    def idx = file("${f}.bai")
+                    if (!idx.exists()) idx = file("${f.toString().replaceAll(/\.bam$/, '.bai')}")
+                    tuple(f.parent.parent.name, f,
+                          idx.exists() ? idx : file("${projectDir}/assets/NO_FILE_bai"))
+                    // A DEDICATED placeholder: reusing NO_FILE_gmap here would put two
+                    // inputs with the same basename in the task dir and recreate the
+                    // "input file name collision" failure.
+                }
         }
 
         NUMBAT(ch_annotated, ch_numbat_bam)
@@ -423,12 +477,17 @@ workflow {
         // Stages emit the same file on more than one channel (STRATIFY publishes
         // the assignment table via both `assignment` and `data`), which would be
         // staged twice and collide. Deduplicate by basename before packing.
-        def stagePack = { ch, id, title ->
-            ch.collect().ifEmpty([]).map { f ->
-                def files = (f instanceof List) ? f : [f]
-                tuple(id, title, files.unique { it.name })
-            }
-        }
+        // Also drop the interactive figures' JavaScript payload. Each figure
+        // directory carries a `_figlibs/` holding plotly.js, crosstalk.js,
+        // jquery.js and friends; staging several of those into one flat
+        // directory collides on every filename, and `unique { it.name }` cannot
+        // resolve it because they are genuinely different files that merely
+        // share a name. The integration stage reads analysis outputs, not the
+        // widget runtime, so these have no business being staged at all.
+        //
+        // Inlined deliberately: a separate `def` closure referenced from inside
+        // this one does not resolve reliably here — the same trap that broke
+        // publishStage() and the container helper.
 
         ch_stage_outputs = stagePack(rep_qc,      'qc',             'Quality control')
             .mix( stagePack(rep_cluster, 'cluster',        'Clustering') )
@@ -450,45 +509,30 @@ workflow {
     // point at which both compartments are present in one place. The two arms'
     // per-cell results are joined back onto it.
     if (run['integration']) {
+        // INTEGRATE_OBJECTS stages each of these with `stageAs:
+        // 'stage_inputs/<stage>/*'`, which FLATTENS the directory tree. The
+        // interactive figures write a `_figlibs/` beside every figure directory
+        // (plotly.js, crosstalk.js, jquery.js ...), and trajectory alone has
+        // four of them under data/ — 64 files that all flatten onto the same
+        // handful of names and abort the task with a filename collision.
+        //
+        // These are the widget runtime, not analysis outputs, so drop them
+        // before staging. Applied to every stage channel, not just trajectory,
+        // because any stage that saves a figure now carries the same payload.
+        // Inlined rather than factored into a `def` closure: a helper closure
+        // referenced from inside another closure does not resolve reliably here.
         INTEGRATION(
             ch_annotated,
             ch_annotated,
-            ch_cnv_infercnv.collect().ifEmpty([]),
-            ch_cnv_scevan.collect().ifEmpty([]),
-            ch_metaprog.collect().ifEmpty([]),
-            ch_trajectory.collect().ifEmpty([]),
-            ch_liana.collect().ifEmpty([]),
-            ch_cellchat.collect().ifEmpty([]),
-            ch_tcr_summary.collect().ifEmpty([]),
-            ch_assignment.mix(ch_tme).collect().ifEmpty([]),
+            ch_cnv_infercnv.filter { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_cnv_scevan.filter   { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_metaprog.filter     { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_trajectory.filter   { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_liana.filter        { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_cellchat.filter     { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_tcr_summary.filter  { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_assignment.mix(ch_tme).filter { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
             ch_page_config
         )
     }
-}
-
-
-workflow.onComplete {
-    def line = '=' * 74
-    log.info(
-        workflow.success
-            ? """
-            ${line}
-             SCRATCH-E2E completed
-            ${line}
-             Duration : ${workflow.duration}
-             Results  : ${params.outdir}/${params.project_name}
-             Report   : ${params.outdir}/${params.project_name}/master_report/index.html
-             Run info : ${params.outdir}/pipeline_info
-            ${line}
-            """.stripIndent()
-            : """
-            ${line}
-             SCRATCH-E2E failed
-            ${line}
-             Exit status : ${workflow.exitStatus}
-             Error       : ${workflow.errorMessage}
-             Resume      : nextflow run . -resume
-            ${line}
-            """.stripIndent()
-    )
 }

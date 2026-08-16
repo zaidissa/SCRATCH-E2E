@@ -30,3 +30,8 @@ scoda_env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Numbat reference cache (~10 GB, fetched by storeDir) and its stub-run twin.
+# These are DATA, not source; committing either would be a disaster.
+assets/numbat_refs/
+.test_numbat_refs/

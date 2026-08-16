@@ -11,6 +11,12 @@ process TCRI {
         val  project_name
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figure_files, optional: true
         path "TCRi_Report.html", emit: report_html
         path "TCRi_Report/data/seurat_with_TCRi.rds", emit: seurat_with_tcri
         path "TCRi_Report/data/*", emit: data

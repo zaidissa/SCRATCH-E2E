@@ -71,9 +71,12 @@ scratch_tiles <- function(items, title = NULL) {
 # figure beside it.
 # -----------------------------------------------------------------------------
 
-scratch_finding <- function(text, type = c("note", "tip", "important", "warning", "caution"),
+scratch_finding <- function(text, type = c("note", "tip", "important", "warning", "caution", "info"),
                             title = NULL, collapse = FALSE) {
   type <- match.arg(type)
+  # "info" reads more naturally at a call site than "note"; quarto has no
+  # callout-info, so alias it rather than emitting an unstyled callout.
+  if (type == "info") type <- "note"
   hdr <- sprintf('::: {.callout-%s%s%s}', type,
                  if (!is.null(title)) sprintf(' title="%s"', title) else "",
                  if (collapse) ' collapse="true"' else "")
@@ -177,8 +180,15 @@ scratch_interact <- function(p, tooltip = "all", height = NULL, static_ok = TRUE
 scratch_table <- function(df, caption = NULL, page = 10, searchable = TRUE,
                           max_static = 25, digits = 3) {
   if (is.null(df) || !nrow(df)) { cat("\n_No rows._\n"); return(invisible(NULL)) }
+
+  # `df[num]` with a logical is data.frame idiom for COLUMN selection. On a
+  # data.table the same expression selects ROWS, and errors outright when the
+  # logical length does not match nrow -- which is exactly what happened when a
+  # 7-row propeller result was handed a 9-element column mask. Normalise to a
+  # plain data.frame first so the rounding below means the same thing for both.
+  df <- as.data.frame(df)
   num <- vapply(df, is.numeric, logical(1))
-  df[num] <- lapply(df[num], function(x) round(x, digits))
+  if (any(num)) df[num] <- lapply(df[num], function(x) round(x, digits))
 
   if (.have("DT")) {
     w <- DT::datatable(

@@ -13,6 +13,15 @@ process INFERCNV {
 
 
     output:
+
+
+        // Figures were written by the notebook but never declared as an
+
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+
+        path("figures/**"), emit: figures, optional: true
         path("data/infercnv")                             , emit: results
         path("data/${params.project_name}_infercnv_meta_object.RDS"), emit: meta_object, optional: true
         path("report/*")

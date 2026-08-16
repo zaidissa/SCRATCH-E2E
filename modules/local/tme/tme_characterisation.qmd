@@ -90,6 +90,20 @@ theme_scratch <- function(base = 12) {
           strip.text = element_text(colour = INK2, face = "bold"))
 }
 
+# CAT is a fixed 8-slot vector but these plots are handed however many levels the
+# data has (top_n_celltypes defaults to 12, plus "Other"). scale_*_manual ERRORS
+# when levels exceed values -- "Insufficient values in manual scale" -- which
+# aborts the whole notebook. Use an adaptive palette instead: exact validated
+# colours while they last, interpolated beyond, never a crash.
+pal_scratch <- function(n) {
+  if (exists("scratch_colours")) return(scratch_colours(n))
+  if (n <= length(CAT)) CAT[seq_len(n)] else grDevices::colorRampPalette(CAT)(n)
+}
+scale_fill_scratch <- function(...)
+  ggplot2::discrete_scale("fill", palette = pal_scratch, ...)
+scale_colour_scratch <- function(...)
+  ggplot2::discrete_scale("colour", palette = pal_scratch, ...)
+
 fold_other <- function(x, k) {
   x <- as.character(x)
   keep <- names(sort(table(x), decreasing = TRUE))[seq_len(min(k, length(unique(x))))]
@@ -134,18 +148,57 @@ meta[, ct := fold_other(get(col_ct), as.integer(params$top_n_celltypes))]
 ## Composition
 
 ```{r composition-sample, fig.width = 10, fig.height = 5.5}
+#| warning: false
 if (!is.na(col_smp)) {
   comp <- meta[, .N, by = .(smp = get(col_smp), ct)][, frac := N / sum(N), by = smp]
   fwrite(comp, "data/tme_composition_by_sample.csv")
 
+  # A static figure is still written, because the report is not the only
+  # consumer -- the CSV and the PNG/PDF are what goes into a manuscript.
   p <- ggplot(comp, aes(x = smp, y = frac, fill = ct)) +
     geom_col(width = .74, colour = SURFACE, linewidth = 1) +
-    scale_fill_manual(values = CAT, name = "cell type") +
+    scale_fill_scratch(name = "cell type") +
     scale_y_continuous(labels = percent_format(accuracy = 1), expand = expansion(mult = c(0, .02))) +
     labs(title = "Microenvironment composition by sample",
          subtitle = "Non-malignant cells only", x = NULL, y = "share of cells") +
     theme_scratch() + theme(axis.text.x = element_text(angle = 40, hjust = 1))
-  print(save_fig(p, "tme_composition_by_sample", 10, 5.5))
+  invisible(save_fig(p, "tme_composition_by_sample", 10, 5.5))
+
+  # ...but 39 samples lined up along an axis is unreadable however well it is
+  # scaled. In the REPORT, drive one plot from a sample dropdown instead: one
+  # control at any cohort size, multi-select, and one copy of the data in the
+  # page. Falls back to the static figure when crosstalk/plotly are absent.
+  shown <- if (exists("scratch_shared") && exists("scratch_filter")) {
+    comp_df <- as.data.frame(comp)
+    comp_df$sample <- as.character(comp_df$smp)
+    comp_df$hover  <- sprintf("%s<br>%s: %.1f%% (%d cells)",
+                              comp_df$sample, as.character(comp_df$ct),
+                              100 * comp_df$frac, comp_df$N)
+    sd <- scratch_shared(comp_df, key = "sample", group = "tme_comp")
+    if (inherits(sd, "SharedData") && requireNamespace("plotly", quietly = TRUE)) {
+      # plot_ly rather than ggplot + ggplotly: current ggplot2's fortify()
+      # rejects a crosstalk SharedData outright ("dim(data) must return an
+      # integer of length 2"), so the ggplot route cannot carry the linkage.
+      # plot_ly consumes SharedData natively.
+      lv <- levels(factor(comp_df$ct))
+      pp <- plotly::layout(
+        plotly::plot_ly(sd, x = ~sample, y = ~frac, color = ~ct,
+                        colors = pal_scratch(length(lv)),
+                        type = "bar", text = ~hover, hoverinfo = "text"),
+        barmode = "stack",
+        yaxis  = list(tickformat = ".0%", title = "share of cells"),
+        xaxis  = list(title = ""),
+        legend = list(title = list(text = "cell type")))
+      htmltools::tagList(
+        scratch_filter(sd, "sample", label = "Sample", type = "select"), pp)
+    } else NULL
+  } else NULL
+
+  if (is.null(shown)) {
+    cat("\n_Interactive view unavailable (crosstalk/plotly not installed); ",
+        "showing the static figure._\n\n", sep = "")
+    print(p)
+  } else shown
 } else note("No sample column; per-sample composition skipped.")
 ```
 
@@ -156,7 +209,7 @@ if (!is.na(col_cond) && uniqueN(meta[[col_cond]]) > 1) {
 
   p <- ggplot(comp, aes(x = cond, y = frac, fill = ct)) +
     geom_col(width = .6, colour = SURFACE, linewidth = 1) +
-    scale_fill_manual(values = CAT, name = "cell type") +
+    scale_fill_scratch(name = "cell type") +
     scale_y_continuous(labels = percent_format(accuracy = 1), expand = expansion(mult = c(0, .02))) +
     labs(title = "Microenvironment composition by condition", x = NULL, y = "share of cells") +
     theme_scratch()
@@ -399,7 +452,7 @@ if (is.null(prop_res)) {
                      "here -- consistent with those proportions moving because ",
                      "other populations moved. "),
               paste(only_screen, collapse = ", ")) else ""),
-    type = if (length(only_screen)) "caution" else "info",
+    type = if (length(only_screen)) "caution" else "note",
     title = "Compositional verdict")
 }
 ```
@@ -501,7 +554,7 @@ if (is.null(scoda_res)) {
     "therefore cannot itself be tested -- its absence from the credible list is a ",
     "structural property, not evidence that it is unchanged. ",
     if (nrow(cred)) paste0("Credible: ", paste(cred$cell_type, collapse = ", "), ".") else ""),
-    type = "info", title = "scCODA verdict")
+    type = "note", title = "scCODA verdict")
 }
 ```
 
@@ -576,7 +629,7 @@ if (exists("sc") && !is.na(col_cond) && uniqueN(meta[[col_cond]]) > 1) {
   p <- ggplot(summ2, aes(x = signature, y = score, fill = cond)) +
     geom_col(position = position_dodge(width = .72), width = .64,
              colour = SURFACE, linewidth = .8) +
-    scale_fill_manual(values = CAT, name = "condition") +
+    scale_fill_scratch(name = "condition") +
     geom_hline(yintercept = 0, colour = MUTED, linewidth = .4) +
     labs(title = "Programme activity by condition",
          x = NULL, y = "mean module score") +

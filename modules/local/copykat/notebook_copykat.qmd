@@ -146,7 +146,7 @@ ggsave("barplot_copykat.png", plot = p_bar, width = 5, height = 4, dpi = 300)
 
 ```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
 
-print(params)
+params
 
 ```
 

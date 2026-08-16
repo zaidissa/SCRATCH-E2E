@@ -60,15 +60,32 @@ SCRATCH_PAL <- list(
   grid  = "#e4e6e3", axis = "#b9bfc2", surface = "#ffffff"
 )
 
+# Tracks which level-counts have already produced the palette advisory, so it is
+# emitted once per session instead of once per plot.
+.scratch_pal_warned <- new.env(parent = emptyenv())
+
 scratch_colours <- function(n = NULL) {
   p <- SCRATCH_PAL$categorical
   if (is.null(n)) return(p)
   if (n <= length(p)) return(p[seq_len(n)])
-  # Never fabricate hues. Recycling is visibly wrong, which is the point:
-  # it signals that the data needs folding or facetting instead.
-  warning(sprintf("%d levels requested but only %d validated slots exist; fold excess levels to 'Other' or facet.",
-                  n, length(p)))
-  rep_len(p, n)
+  # Past the validated slots there is no good answer, only less-bad ones.
+  # Recycling produces two levels with the SAME colour, which silently misreads
+  # as "these are the same group" -- worse than an unvalidated hue. Interpolating
+  # keeps every level distinguishable and the warning makes the loss of the
+  # colour-vision guarantee explicit.
+  # Once per level-count per session, NOT once per plot. A 7-panel VlnPlot fired
+  # it seven times and knitr printed all seven INTO the report, above the figure
+  # -- an advisory about colour-vision safety became the largest block of text on
+  # the page. The advice is worth giving; it is not worth giving seven times.
+  .key <- paste0("n", n)
+  if (is.null(.scratch_pal_warned[[.key]])) {
+    assign(.key, TRUE, envir = .scratch_pal_warned)
+    warning(sprintf(paste0("%d levels requested but only %d colour-vision-validated slots exist. ",
+                           "Extra hues are interpolated and NOT CVD-validated -- fold excess ",
+                           "levels to 'Other' or facet for a publication figure."),
+                    n, length(p)), call. = FALSE)
+  }
+  grDevices::colorRampPalette(p)(n)
 }
 
 # -----------------------------------------------------------------------------
@@ -79,7 +96,12 @@ scratch_colours <- function(n = NULL) {
 # recessive grid, no chartjunk, text in ink tokens rather than series colours.
 # -----------------------------------------------------------------------------
 
-theme_scratch <- function(base_size = 9, base_family = "", grid = "y",
+# base_size 9 was too small to read at full report width. Everything else in the
+# theme is expressed with rel(), so raising this one number lifts titles, axis
+# text and legend text together -- except the two absolute `unit(..., "pt")`
+# values below, which are now tied to base_size so legend keys and tick marks
+# scale with the type instead of shrinking against it.
+theme_scratch <- function(base_size = 12, base_family = "", grid = "y",
                           legend = "right") {
   gx <- grepl("x", grid); gy <- grepl("y", grid)
 
@@ -95,7 +117,7 @@ theme_scratch <- function(base_size = 9, base_family = "", grid = "y",
 
       axis.line  = element_line(colour = SCRATCH_PAL$axis, linewidth = 0.3),
       axis.ticks = element_line(colour = SCRATCH_PAL$axis, linewidth = 0.3),
-      axis.ticks.length = unit(2, "pt"),
+      axis.ticks.length = unit(base_size / 4.5, "pt"),
       axis.text  = element_text(colour = SCRATCH_PAL$muted, size = rel(0.92)),
       axis.title = element_text(colour = SCRATCH_PAL$ink2, size = rel(1.0)),
 
@@ -112,7 +134,7 @@ theme_scratch <- function(base_size = 9, base_family = "", grid = "y",
       legend.position   = legend,
       legend.title      = element_text(colour = SCRATCH_PAL$ink2, size = rel(0.92)),
       legend.text       = element_text(colour = SCRATCH_PAL$ink2, size = rel(0.88)),
-      legend.key.size   = unit(9, "pt"),
+      legend.key.size   = unit(base_size, "pt"),
       legend.background = element_blank(),
       legend.margin     = margin(0, 0, 0, 4),
 
@@ -153,10 +175,26 @@ theme_set(theme_scratch())
 }
 
 options(
-  ggplot2.discrete.fill = .scratch_scale_factory(
-    scale_fill_manual,   list(values = SCRATCH_PAL$categorical, na.value = "#c9cdc9")),
-  ggplot2.discrete.colour = .scratch_scale_factory(
-    scale_colour_manual, list(values = SCRATCH_PAL$categorical, na.value = "#c9cdc9")),
+  # A palette FUNCTION, so the scale adapts to however many levels the data has.
+  # Using scale_*_manual(values = <fixed 8>) here made every plot with 9+ levels
+  # fail outright with "Insufficient values in manual scale".
+  # ggplot2 supplies na.value (and `call`) through `...`, so these must be set
+  # only when absent -- passing them positionally as well gives
+  # "formal argument na.value matched by multiple actual arguments".
+  # quote = TRUE for the same reason as the factory above: `call` arrives as a
+  # language object and must not be evaluated.
+  ggplot2.discrete.fill = function(...) {
+    a <- list(...)
+    if (is.null(a$na.value)) a$na.value <- "#c9cdc9"
+    a$aesthetics <- "fill"; a$palette <- scratch_colours
+    do.call(ggplot2::discrete_scale, a, quote = TRUE)
+  },
+  ggplot2.discrete.colour = function(...) {
+    a <- list(...)
+    if (is.null(a$na.value)) a$na.value <- "#c9cdc9"
+    a$aesthetics <- "colour"; a$palette <- scratch_colours
+    do.call(ggplot2::discrete_scale, a, quote = TRUE)
+  },
   ggplot2.continuous.fill = .scratch_scale_factory(
     scale_fill_gradientn,   list(colours = SCRATCH_PAL$sequential, na.value = "#eeefee")),
   ggplot2.continuous.colour = .scratch_scale_factory(
@@ -219,6 +257,7 @@ scratch_save <- function(plot, name, width = "single", ratio = 0.75,
   stem <- file.path(dir, sub("\\.(png|pdf|svg|tiff)$", "", name))
 
   ok_png <- tryCatch({
+    try(scratch_interactive_twin(plot, paste0(stem, ".png")), silent = TRUE)
     ggplot2::ggsave(paste0(stem, ".png"), plot, width = sz$width, height = sz$height,
                     dpi = dpi, units = "in", bg = SCRATCH_PAL$surface)
     TRUE
@@ -249,10 +288,49 @@ scratch_save <- function(plot, name, width = "single", ratio = 0.75,
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
+# Interactive twin for EVERY figure.
+#
+# The reporting layer's interactive components only ever reached the handful of
+# notebooks that were rewritten to call them; the other ~38 vendored notebooks
+# kept emitting flat PNGs. Rather than edit 40 notebooks, convert at the point
+# every one of them already goes through: ggsave(). Any `ggsave("fig.png", p)`
+# now also writes `fig.html`, a hoverable plotly version of the same plot.
+#
+# plotly.js is written ONCE into a shared `_figlibs/` directory rather than
+# inlined per figure -- self-contained widgets are ~3 MB each, which across a
+# cohort's worth of figures is hundreds of MB of duplicated JavaScript.
+scratch_interactive_twin <- function(plot, filename) {
+  if (!requireNamespace("plotly", quietly = TRUE) ||
+      !requireNamespace("htmlwidgets", quietly = TRUE)) return(invisible(FALSE))
+  if (!inherits(plot, "ggplot")) return(invisible(FALSE))
+  if (!isTRUE(getOption("scratch.interactive", TRUE))) return(invisible(FALSE))
+
+  html <- sub("\\.(png|jpe?g|tiff?)$", ".html", filename, ignore.case = TRUE)
+  ok <- try({
+    w <- plotly::ggplotly(plot)
+    w <- plotly::config(w, displaylogo = FALSE, responsive = TRUE,
+                        modeBarButtonsToRemove = c("lasso2d", "select2d"))
+    # libdir is resolved RELATIVE to the widget file, so pass a bare name --
+    # passing dirname(html)/_figlibs nests it as figures/figures/_figlibs.
+    htmlwidgets::saveWidget(w, html, selfcontained = FALSE,
+                            libdir = "_figlibs", title = basename(html))
+    TRUE
+  }, silent = TRUE)
+
+  if (inherits(ok, "try-error")) {
+    # Never fail a render over a figure twin -- some geoms have no plotly
+    # equivalent and that is acceptable; the static figure still exists.
+    return(invisible(FALSE))
+  }
+  SCRATCH_FIG_LOG$interactive <- c(SCRATCH_FIG_LOG$interactive, html)
+  invisible(TRUE)
+}
+
 # Shim: existing `ggsave("fig.png", p)` calls throughout the vendored notebooks
-# now also emit `fig.pdf`, with no edit to those notebooks. The raster call is
-# delegated verbatim so any arguments they pass still apply.
+# now also emit `fig.pdf` AND `fig.html`, with no edit to those notebooks. The
+# raster call is delegated verbatim so any arguments they pass still apply.
 ggsave <- function(filename, plot = ggplot2::last_plot(), ...) {
+  plot <- tryCatch(scratch_autoscale_text(plot), error = function(e) plot)
   out <- ggplot2::ggsave(filename, plot, ...)
   if (grepl("\\.png$", filename, ignore.case = TRUE)) {
     try({
@@ -263,8 +341,321 @@ ggsave <- function(filename, plot = ggplot2::last_plot(), ...) {
       if (!is.null(dev)) dots$device <- dev
       do.call(ggplot2::ggsave, c(list(filename = pdfname, plot = plot), dots))
     }, silent = TRUE)
+    try(scratch_interactive_twin(plot, filename), silent = TRUE)
   }
   invisible(out)
+}
+
+# Automatic text scaling.
+#
+# ggplot text sizes are absolute points, so a theme tuned for a 6-category bar
+# chart renders unreadably crowded once the same code is handed 39 samples --
+# the labels do not shrink, they just collide. Every figure in this pipeline is
+# produced by vendored code that cannot know how many categories it will get at
+# runtime, so the adjustment has to happen here, after the plot is built and the
+# real category count is knowable.
+#
+# Only text size and x-label rotation change; geometry, data and colour are
+# untouched.
+scratch_autoscale_text <- function(plot) {
+  if (!inherits(plot, "ggplot")) return(plot)
+  # In current ggplot2 `panel_params$x$get_labels` is a FUNCTION, so taking
+  # length() of it yields 1 and the whole adjustment silently never fires.
+  # It has to be CALLED. Older versions expose a plain `x.labels` vector.
+  n <- try({
+    b  <- ggplot2::ggplot_build(plot)
+    px <- b$layout$panel_params[[1]]
+    labs <- NULL
+    if (!is.null(px$x) && is.function(px$x$get_labels)) labs <- px$x$get_labels()
+    if (is.null(labs)) labs <- px$x.labels
+    length(labs[!is.na(labs)])
+  }, silent = TRUE)
+  if (inherits(n, "try-error") || !length(n) || is.na(n)) n <- 0L
+
+  # Text layers at a panel boundary get sliced in half by the default clipping --
+  # visible in the cluster composition plot, where the 0% and 100% labels are cut
+  # by the axis line. Turning clipping off fixes it, but ONLY when the plot has
+  # not set its own coord: overwriting coord_flip/coord_polar would silently
+  # change the chart.
+  has_text <- tryCatch(
+    any(vapply(plot$layers, function(l) inherits(l$geom, c("GeomText", "GeomLabel")),
+               logical(1))), error = function(e) FALSE)
+  coord_is_default <- tryCatch(
+    identical(class(plot$coordinates)[1], "CoordCartesian") &&
+      isTRUE(plot$coordinates$clip == "on"),
+    error = function(e) FALSE)
+  if (has_text && coord_is_default)
+    plot <- plot + ggplot2::coord_cartesian(clip = "off")
+
+  # Below ~12 categories the default is fine; past that shrink toward a floor so
+  # dense axes stay legible instead of overlapping.
+  if (n > 12) {
+    shrink <- max(0.55, 1 - (n - 12) * 0.012)
+    plot <- plot + ggplot2::theme(
+      axis.text.x  = ggplot2::element_text(size = ggplot2::rel(shrink),
+                                           angle = 45, hjust = 1),
+      axis.text.y  = ggplot2::element_text(size = ggplot2::rel(max(0.75, shrink))),
+      legend.text  = ggplot2::element_text(size = ggplot2::rel(max(0.75, shrink))),
+      legend.title = ggplot2::element_text(size = ggplot2::rel(max(0.8, shrink)))
+    )
+  }
+  plot
+}
+
+# Shim: DimPlot label geometry.
+#
+# Seurat draws cluster/sample labels at a fixed point size that does not scale
+# with the figure, and does not repel them unless asked. Across the vendored
+# notebooks that produced UMAPs with labels rendered enormous and stacked on top
+# of each other -- one had label.size = 12 against a Seurat default of 4, with no
+# repel, so sample names overlapped into an unreadable smear.
+#
+# Fixing this per notebook means editing eight-plus vendored files; fixing it
+# here reaches all of them. Only label geometry is touched -- the plot, its data
+# and its colours are untouched, and an explicit small label.size is respected.
+DimPlot <- function(object, ...) {
+  dots <- list(...)
+  if (isTRUE(dots$label)) {
+    if (is.null(dots$repel)) dots$repel <- TRUE
+    dots$label.size <- if (is.null(dots$label.size)) 3.6
+                       else min(as.numeric(dots$label.size), 4.5)
+  }
+  do.call(Seurat::DimPlot, c(list(object), dots))
+}
+
+# -----------------------------------------------------------------------------
+# Interactive plots INSIDE the rendered report
+#
+# The ggsave shim writes a .html twin beside each saved figure, but the report
+# itself still embeds the static PNG -- so a reader opening the report sees
+# nothing interactive. This hook makes knitr render a ggplot AS a plotly widget
+# in the document.
+#
+# COVERAGE LIMIT, stated plainly: this only fires for plots that are the VALUE of
+# a chunk (`p` or a bare `ggplot(...)` call). An explicit `print(p)` still
+# rasterises, because ggplot2 4.0 objects are S7 (class includes S7_object) and
+# print() dispatches through S7 rather than S3 -- print.gg / print.ggplot
+# overrides do not intercept it. Converting those call sites is a per-notebook
+# job: a bare `p` inside a for loop prints NOTHING, so it cannot be done blind.
+#
+# Disable with options(scratch.interactive = FALSE).
+# -----------------------------------------------------------------------------
+# Auto-printed plots never touch ggsave(), so the knit_print hook below renders
+# them into the HTML and leaves figures/ EMPTY -- which is how a successful run
+# published zero figures. Export here so every figure reaches figures/ whether
+# it was ggsave()d explicitly or just printed by a chunk.
+.scratch_export_figure <- function(x) {
+  if (!isTRUE(getOption("scratch.export", TRUE))) return(invisible(NULL))
+  lbl <- tryCatch(knitr::opts_current$get("label"), error = function(e) NULL)
+  if (is.null(lbl) || !nzchar(lbl)) return(invisible(NULL))
+  # Unnamed chunks get knitr's generated labels; those make useless filenames.
+  if (grepl("^unnamed-chunk", lbl)) return(invisible(NULL))
+  dir.create("figures", showWarnings = FALSE, recursive = TRUE)
+  w <- tryCatch(knitr::opts_current$get("fig.width"), error = function(e) NULL)
+  h <- tryCatch(knitr::opts_current$get("fig.height"), error = function(e) NULL)
+  if (is.null(w) || !is.numeric(w)) w <- 8
+  if (is.null(h) || !is.numeric(h)) h <- 5
+  base <- file.path("figures", gsub("[^A-Za-z0-9_.-]+", "_", lbl))
+  # Never let a failed export abort the render: a missing figure file is a far
+  # smaller problem than a notebook that does not finish.
+  for (ext in c("png", "pdf")) {
+    try(suppressMessages(ggplot2::ggsave(paste0(base, ".", ext), plot = x,
+                                         width = w, height = h, dpi = 300,
+                                         limitsize = FALSE)), silent = TRUE)
+  }
+  invisible(NULL)
+}
+
+.scratch_as_widget <- function(x) {
+  if (!isTRUE(getOption("scratch.interactive", TRUE))) return(NULL)
+  if (!requireNamespace("plotly", quietly = TRUE)) return(NULL)
+
+  # SIZE GUARD -- this is not an optimisation, it is a correctness fix.
+  # ggplotly serialises EVERY data point into the document's JSON. A 24,691-cell
+  # UMAP x ~9 plots blew past the maximum string length and quarto died with
+  # "failed to allocate string; buffer exceeds maximum length", taking the whole
+  # Azimuth stage with it. Even when it fits, a 24k-point widget is unusable.
+  # Big plots stay static rasters; small ones become interactive.
+  #
+  # The count that matters is RENDERED MARKS, not input rows. A geom_bin2d over
+  # 18,000 cells draws ~1,500 tiles and serialises to a small widget, but an
+  # input-row count rejected it as if it were 18,000 points -- which is why the
+  # QC density plots came out static while the 3-row waterfall beside them was
+  # interactive. Statistical layers that aggregate get measured on their output.
+  .binning <- c("StatBin2d", "StatBinhex", "StatBin", "StatCount",
+                "StatBoxplot", "StatSummary", "StatDensity", "StatYdensity")
+  n <- tryCatch({
+    all_binned <- length(x$layers) > 0 && all(vapply(x$layers, function(l)
+      class(l$stat)[1] %in% .binning, logical(1)))
+    if (all_binned) {
+      # Build it and count what actually gets drawn.
+      b <- ggplot2::ggplot_build(x)
+      max(vapply(b$data, function(d) if (is.data.frame(d)) nrow(d) else 0L, integer(1)))
+    } else {
+      d <- x$data
+      rows <- if (is.data.frame(d)) nrow(d) else 0L
+      for (l in x$layers) {
+        ld <- tryCatch(l$data, error = function(e) NULL)
+        if (is.data.frame(ld)) rows <- max(rows, nrow(ld))
+      }
+      rows
+    }
+  }, error = function(e) .Machine$integer.max)
+  if (!is.numeric(n) || is.na(n)) n <- .Machine$integer.max
+
+  # A flat 5,000-mark cap made every full-cohort UMAP static, which is the single
+  # thing most complained about. Measured: one 24,439-point UMAP serialises to
+  # 2.7 MB, or 2.2 MB with coordinates rounded -- perfectly viable. The original
+  # crash ("failed to allocate string; buffer exceeds maximum length") came from
+  # ~9 of them in ONE document, i.e. ~24 MB. So the limit that matters is a
+  # per-DOCUMENT budget, not a per-plot cap.
+  #
+  # Pure point layers get the larger allowance; anything else keeps the old cap,
+  # because a 24k-row heatmap or boxplot is unreadable interactively anyway.
+  # "Scatter-like" rather than "point-only". SCP::CellDimPlot -- which draws
+  # nearly every UMAP in the annotation reports -- adds cluster labels and leader
+  # lines on top of the points. A strict point-only test excluded all of them, so
+  # only the small ones (under the 5k mark cap) ever became interactive and every
+  # full-cohort UMAP stayed a static raster. The annotation layers carry a handful
+  # of rows; the points are what costs, so they should not veto interactivity.
+  # GeomCustomAnn is the one that actually mattered and the one I guessed wrong.
+  # A real SCP::CellDimPlot is exactly `GeomCustomAnn, GeomPoint, GeomTextRepel`
+  # -- the CustomAnn being the little corner axis arrows that `theme_use =
+  # "theme_blank"` draws. Omitting it disqualified EVERY annotation-stage UMAP,
+  # while my synthetic test (which used geom_segment for the same decoration)
+  # passed happily. Verified against the real 24,439-cell object, not a mock.
+  .anno_geoms <- c("GeomText", "GeomLabel", "GeomTextRepel", "GeomLabelRepel",
+                   "GeomSegment", "GeomCurve", "GeomPath", "GeomLine",
+                   "GeomBlank", "GeomCustomAnn", "GeomRug")
+  .geoms <- tryCatch(vapply(x$layers, function(l) class(l$geom)[1], character(1)),
+                     error = function(e) character(0))
+  .point_only <- length(.geoms) > 0 &&
+                 any(.geoms %in% c("GeomPoint", "GeomJitter")) &&
+                 all(.geoms %in% c("GeomPoint", "GeomJitter", .anno_geoms))
+
+  # Charge the budget for the POINT layers only -- a 20-row label layer is free.
+  if (.point_only) {
+    n <- tryCatch({
+      pl <- x$layers[.geoms %in% c("GeomPoint", "GeomJitter")]
+      rows <- vapply(pl, function(l) {
+        ld <- tryCatch(l$data, error = function(e) NULL)
+        if (is.data.frame(ld)) nrow(ld)
+        else if (is.data.frame(x$data)) nrow(x$data) else 0L
+      }, numeric(1))
+      max(c(0, rows))
+    }, error = function(e) n)
+  }
+
+  cap <- if (.point_only) as.numeric(getOption("scratch.interactive.scattermax", 60000))
+         else              as.numeric(getOption("scratch.interactive.maxpoints", 5000))
+  if (n > cap) return(NULL)
+
+  if (.point_only && n > 5000) {
+    spent  <- as.numeric(getOption("scratch.interactive.spent", 0))
+    # ~100k points is about 4 full-cohort UMAPs, ~9 MB of widget JSON -- roomy
+    # for any one notebook and far below the ~24 MB that broke the string buffer.
+    budget <- as.numeric(getOption("scratch.interactive.budget", 100000))
+    # Falling back to a static raster is always safe; blowing the string buffer
+    # kills the entire stage. When the budget is gone, stay static.
+    if (spent + n > budget) return(NULL)
+    options(scratch.interactive.spent = spent + n)
+
+    # Rounding the positional aesthetics is free visually (a UMAP coordinate does
+    # not mean anything past 2dp) and strips ~20% off the serialised widget.
+    for (nm in c("x", "y")) {
+      col <- tryCatch(rlang::as_name(x$mapping[[nm]]), error = function(e) NULL)
+      if (!is.null(col) && is.data.frame(x$data) && is.numeric(x$data[[col]]))
+        x$data[[col]] <- round(x$data[[col]], 2)
+    }
+  }
+
+  # Honour an explicit `text` aesthetic when the plot supplies one; otherwise
+  # ggplotly builds the hover string out of the raw aes expressions, e.g.
+  # "reorder(sample, cells): HRS371755  cells: 10365  cells: 10365".
+  .has_text <- tryCatch("text" %in% names(x$mapping) ||
+                        any(vapply(x$layers, function(l)
+                              "text" %in% names(if (is.null(l$mapping)) list() else l$mapping),
+                            logical(1))),
+                        error = function(e) FALSE)
+  # GeomCustomAnn wraps a raw grob (SCP's corner axis arrows). plotly has no
+  # equivalent and emits a malformed trace of type "gl" that carries none of the
+  # attributes it is given -- verified in the built widget. It is pure decoration
+  # and the axis titles say the same thing, so drop it rather than ship a broken
+  # trace into the document.
+  if (isTRUE(.point_only) && any(.geoms == "GeomCustomAnn")) {
+    x$layers <- x$layers[.geoms != "GeomCustomAnn"]
+  }
+
+  # suppressWarnings: ggplotly reports every ggplot attribute a plotly trace type
+  # does not accept, one line per trace. Eight cell types meant eight identical
+  # notices printed into the report above the figure.
+  w <- try(suppressWarnings(
+         if (.has_text) plotly::ggplotly(x, tooltip = "text") else plotly::ggplotly(x)),
+         silent = TRUE)
+  if (inherits(w, "try-error")) return(NULL)
+
+  # SVG chokes above ~10k points; WebGL renders 24k smoothly. It does not shrink
+  # the payload (measured: identical), it makes the widget usable once open.
+  # WebGL ONLY when every layer is points. ggplotly turns a text/label layer into
+  # a trace with no `type`, and toWebGL renames that to the invalid type "gl" --
+  # confirmed in the built widget for SCP::CellDimPlot, which carries repelled
+  # cluster labels. The speed-up is not worth emitting a trace plotly.js does not
+  # recognise, so labelled UMAPs stay SVG (interactive, just less brisk).
+  .pure_points <- length(.geoms) > 0 &&
+                  all(.geoms[.geoms != "GeomCustomAnn"] %in% c("GeomPoint", "GeomJitter"))
+  if (isTRUE(.point_only) && isTRUE(.pure_points) && n > 5000) {
+    # suppressWarnings: WebGL traces legitimately lack a few SVG-only attributes
+    # ("'scattergl' objects don't have these attributes: 'hoveron'"), and plotly
+    # reports each one. Nothing is lost, but the notices land in the rendered
+    # report above the figure.
+    wg <- try(suppressWarnings(plotly::toWebGL(w)), silent = TRUE)
+    if (!inherits(wg, "try-error")) w <- wg
+  }
+  # ggplotly DROPS the subtitle. Every subtitle in this pipeline carries the
+  # interpretation -- which line is the applied cutoff, what the colour means --
+  # so losing it silently gutted the interactive figures. Fold it into the
+  # plotly title as a second, smaller line.
+  .sub <- tryCatch(x$labels$subtitle, error = function(e) NULL)
+  .ttl <- tryCatch(x$labels$title, error = function(e) NULL)
+  if (!is.null(.sub) && nzchar(.sub)) {
+    esc <- function(z) { z <- gsub("&", "&amp;", z); z <- gsub("<", "&lt;", z)
+                         gsub(">", "&gt;", z) }
+    w <- try(plotly::layout(w, title = list(
+      text = sprintf("<b>%s</b><br><sup>%s</sup>",
+                     esc(if (is.null(.ttl)) "" else .ttl), esc(.sub)),
+      x = 0, xanchor = "left", font = list(size = 15)),
+      margin = list(t = 70)), silent = TRUE)
+    if (inherits(w, "try-error")) return(NULL)
+  }
+  # Legend on the RIGHT, one entry per cell type, and clickable: in plotly a
+  # legend entry toggles its trace, so a single UMAP coloured by label replaces a
+  # grid of one-panel-per-label figures -- click to isolate a population instead
+  # of hunting for its panel. Double-click isolates it outright.
+  w <- try(plotly::layout(w,
+             legend = list(orientation = "v", x = 1.02, xanchor = "left",
+                           y = 1, yanchor = "top", itemsizing = "constant",
+                           itemclick = "toggle", itemdoubleclick = "toggleothers"),
+             margin = list(r = 10)),
+           silent = TRUE)
+  if (inherits(w, "try-error")) return(NULL)
+
+  try(plotly::config(w, displaylogo = FALSE, responsive = TRUE), silent = TRUE)
+}
+
+if (requireNamespace("knitr", quietly = TRUE)) {
+  knit_print.ggplot <- function(x, ...) {
+    .scratch_export_figure(x)
+    w <- .scratch_as_widget(x)
+    if (is.null(w) || inherits(w, "try-error")) return(knitr::normal_print(x))
+    knitr::knit_print(w, ...)
+  }
+  # Register for every class ggplot2 4.0 (S7) puts on a plot object, so the
+  # method is found wherever knitr looks.
+  for (.cls in c("ggplot", "gg", "ggplot2::ggplot", "ggplot2::gg")) {
+    try(registerS3method("knit_print", .cls, knit_print.ggplot,
+                         envir = asNamespace("knitr")), silent = TRUE)
+  }
+  rm(.cls)
 }
 
 scratch_figure_manifest <- function(path = "figures/figure_manifest.csv") {
@@ -450,4 +841,73 @@ scratch_module_score <- function(obj, features, name = "Score", nbin = 24,
   obj <- SeuratObject::AddMetaData(obj, df)
   attr(obj, "scratch_score_map") <- setNames(names(scores), names(features))
   obj
+}
+
+
+# ---------------------------------------------------------------------------
+# scratch_feature_selector() -- one UMAP, a dropdown, one score at a time.
+#
+# Replaces the FeaturePlot small-multiples grid. That grid drew N near-identical
+# UMAPs at ~2 inches each: the cluster labels collided into an unreadable smear,
+# every panel spent most of its ink redrawing the same grey background, and the
+# colour bar was too small to read. The information is one embedding and N
+# scores, so the honest form is one embedding and a way to choose the score.
+#
+# Built with plotly directly rather than ggplotly: this needs `updatemenus`,
+# which has no ggplot equivalent, and one scattergl trace per feature keeps the
+# widget usable at cohort scale.
+# ---------------------------------------------------------------------------
+scratch_feature_selector <- function(object, features, reduction = "umap",
+                                     max_cells = getOption("scratch.selector.maxcells", 30000),
+                                     title = "Signature score") {
+  if (!requireNamespace("plotly", quietly = TRUE)) return(NULL)
+  emb <- try(as.data.frame(SeuratObject::Embeddings(object, reduction))[, 1:2], silent = TRUE)
+  if (inherits(emb, "try-error") || !nrow(emb)) return(NULL)
+  names(emb) <- c("d1", "d2")
+  md    <- object@meta.data
+  feats <- intersect(features, names(md))
+  feats <- feats[vapply(feats, function(f) is.numeric(md[[f]]), logical(1))]
+  if (!length(feats)) return(NULL)
+
+  idx <- seq_len(nrow(emb))
+  if (length(idx) > max_cells) idx <- sort(sample(idx, max_cells))  # keeps the widget openable
+  emb <- emb[idx, , drop = FALSE]
+  md  <- md[idx, , drop = FALSE]
+
+  # ONE trace, not one per feature. The x/y coordinates are identical for every
+  # signature, so a trace-per-feature serialised the same embedding N times --
+  # 4 MB for five signatures, and this notebook can have sixteen. The dropdown
+  # restyles the colour and hover arrays of a single trace instead, so the
+  # coordinates are paid for once.
+  cols <- lapply(feats, function(f) as.numeric(md[[f]]))
+  txts <- lapply(seq_along(feats), function(i)
+    sprintf("%s\nscore: %.3f", feats[i], cols[[i]]))
+
+  p <- plotly::plot_ly(
+    x = round(emb$d1, 2), y = round(emb$d2, 2),
+    type = "scattergl", mode = "markers",
+    marker = list(size = 3, color = cols[[1]], colorscale = "Viridis",
+                  showscale = TRUE,
+                  colorbar = list(title = list(text = "score"), len = .75)),
+    text = txts[[1]], hoverinfo = "text")
+
+  ttl <- function(i) list(text = sprintf("<b>%s</b><br><sup>%s</sup>", title, feats[i]),
+                          x = 0, xanchor = "left")
+  btns <- lapply(seq_along(feats), function(i)
+    list(method = "update", label = feats[i],
+         args = list(list(`marker.color` = list(cols[[i]]), text = list(txts[[i]])),
+                     list(title = ttl(i)))))
+
+  plotly::config(
+    plotly::layout(p,
+      title = ttl(1),
+      xaxis = list(title = paste0(reduction, "_1"), zeroline = FALSE),
+      yaxis = list(title = paste0(reduction, "_2"), zeroline = FALSE),
+      showlegend = FALSE,
+      margin = list(t = 90, r = 10),
+      updatemenus = list(list(
+        type = "dropdown", direction = "down", showactive = TRUE,
+        x = 1.02, xanchor = "left", y = 1, yanchor = "top",
+        pad = list(r = 4, t = 4), buttons = btns))),
+    displaylogo = FALSE, responsive = TRUE)
 }

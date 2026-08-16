@@ -114,7 +114,6 @@ for(sub_directory in c('data', 'figures')) {
 
 ```
 
-```
 ## Loading Seurat object
 
 ```{r LoadingDta}
@@ -157,9 +156,22 @@ set.seed(random_seed)
 anchors <- FindTransferAnchors(reference = reference_object, query = seurat_object)
 
 # transfer labels
+# TransferData defaults to k.weight = 50, but a small or poorly-overlapping
+# reference can yield fewer anchors than that and the call dies with
+# "Please set k.weight to be smaller than the number of anchors". Scale k.weight
+# to the anchors actually found instead of hard-failing the whole stage.
+.n_anchors <- tryCatch(nrow(slot(anchors, "anchors")), error = function(e) NA_integer_)
+.kw <- if (is.na(.n_anchors)) 50L else max(2L, min(50L, .n_anchors - 5L))
+if (!is.na(.n_anchors) && .n_anchors < 30)
+  warning(sprintf(paste("Only %d transfer anchors were found between query and reference;",
+                        "using k.weight = %d. Label transfer on this few anchors is weak --",
+                        "treat the Azimuth labels as provisional and check the prediction",
+                        "scores before relying on them."), .n_anchors, .kw), call. = FALSE)
+
 predictions <- TransferData(
   anchorset = anchors,
-  refdata = reference_object$seurat_annotations
+  refdata = reference_object$seurat_annotations,
+  k.weight = .kw
 )
 
 ```
@@ -188,6 +200,10 @@ seurat_object <- AddMetaData(
 #| fig-cap: "Azimuth annotation UMAP"
 #| fig-width: 12
 #| fig-height: 9
+# SCP declares manual colour/fill scales that ggplot2 4.0 reports as having no
+# shared levels with the layer data. Cosmetic -- the colours are correct -- but
+# it printed three notices into the report directly above the figure.
+#| warning: false
 
 annotation_UMAP <- SCP::CellDimPlot(
   srt = seurat_object,
@@ -207,24 +223,42 @@ annotation_UMAP
 
 ```{r CellDimPlot}
 #| label: fig-azimuth-celldimplot-split
-#| fig-cap: "Azimuth split UMAP (one panel per label)"
-#| fig-width: 14
-#| fig-height: 9
+#| fig-cap: "Azimuth UMAP — click a cell type on the right to hide it, double-click to show it on its own"
+#| fig-width: 11
+#| fig-height: 8
 
-p_split <- SCP::CellDimPlot(
-  srt = seurat_object,
-  group.by = "azimuth_labels",
-  split.by = "azimuth_labels",
-  reduction = "umap",
-  label = FALSE,
-  label_repel = FALSE,
-  show_stat = TRUE,
-  legend.position = "none",
-  theme_use = "theme_blank"
-) +
-  theme(legend.position = "right")
+# Was one static panel per label: 11 near-identical grey UMAPs with a few
+# coloured dots each, most of the ink spent redrawing the same background, and
+# the small populations (Mast, 11 cells) invisible at that size. A single
+# interactive UMAP does the same job better -- plotly makes each cell type its
+# own trace, so the legend IS the selector: click to drop a population,
+# double-click to isolate it.
+#
+# Built with plain ggplot rather than SCP::CellDimPlot on purpose. The shim only
+# promotes point-ONLY plots to the large-scatter path, and CellDimPlot adds label
+# and stat layers that disqualify it, so it would have stayed a static raster.
+.emb <- as.data.frame(Seurat::Embeddings(seurat_object, "umap"))[, 1:2]
+names(.emb) <- c("umap_1", "umap_2")
+.emb$label <- as.character(seurat_object@meta.data[["azimuth_labels"]])
+.emb <- .emb[!is.na(.emb$label), ]
 
-p_split
+# Order the legend by population size, so the eye meets the big populations
+# first instead of an alphabetical list.
+.counts <- sort(table(.emb$label), decreasing = TRUE)
+.emb$label <- factor(.emb$label, levels = names(.counts))
+.emb$tip <- sprintf("%s\n%s cells (%.1f%% of cohort)",
+                    .emb$label,
+                    format(as.integer(.counts[as.character(.emb$label)]), big.mark = ","),
+                    100 * as.numeric(.counts[as.character(.emb$label)]) / nrow(.emb))
+
+ggplot(.emb, aes(umap_1, umap_2, colour = label, text = tip)) +
+  geom_point(size = .25, alpha = .85) +
+  guides(colour = guide_legend(override.aes = list(size = 3, alpha = 1))) +
+  labs(title = "Azimuth cell-type annotation",
+       subtitle = sprintf("%s cells, %d labels; legend doubles as a filter",
+                          format(nrow(.emb), big.mark = ","), length(.counts)),
+       x = "UMAP 1", y = "UMAP 2", colour = NULL) +
+  theme_scratch()
 ```
 
 
@@ -313,17 +347,104 @@ cell_hierarchical <- stats::hclust(cell_dist_matrix)
 
 ```
 
+```{r dendrogram-finding, results = 'asis'}
+#| warning: false
+# Computed at render time from the same hclust the figure draws, so the text can
+# never drift from the tree beside it.
+if (exists("cell_hierarchical") && length(cell_hierarchical$height)) {
+  .m <- cell_hierarchical$merge; .h <- cell_hierarchical$height
+  .lab <- cell_hierarchical$labels
+  # The first merge is by definition the closest pair; it is only interpretable
+  # when BOTH sides are leaves (a leaf-to-cluster join is not a pair of labels).
+  .leafpairs <- which(.m[, 1] < 0 & .m[, 2] < 0)
+  .cnt <- table(as.character(seurat_object@meta.data[["azimuth_labels"]]))
+  if (length(.leafpairs)) {
+    i <- .leafpairs[which.min(.h[.leafpairs])]
+    a <- .lab[-.m[i, 1]]; b <- .lab[-.m[i, 2]]
+    n_ab <- sum(.cnt[c(a, b)], na.rm = TRUE)
+    msg <- sprintf(paste(
+      "**%s and %s are the least separable pair of labels here** -- they join at a",
+      "height of **%.2f** (Pearson r = %.2f between their mean expression profiles),",
+      "the earliest merge of any two labels in this tree. **%s cells** carry one of",
+      "those two labels, so if the boundary between them is wrong, that is how many",
+      "cells move. Treat any result that depends on separating these two -- composition",
+      "shifts, differential abundance, cell-cell communication -- as the weakest claim",
+      "in the report, and check it survives merging them into one class."),
+      a, b, .h[i], 1 - .h[i], format(n_ab, big.mark = ","))
+    scratch_finding(msg, type = if (.h[i] < 0.5) "caution" else "note",
+                    title = "Least distinct annotations")
+  }
+}
+```
+
 ```{r figDendrogram}
+# `text` is not a ggplot aesthetic -- ggplotly consumes it for the hover label --
+# so a static build warns "Ignoring unknown aesthetics: text".
+#| warning: false
 #| fig-cap: 'Dendrogram'
 #| fig-width: 10
 #| fig-height: 12
 #| fig-align: center
 
-# Printing dendrogram
-Cairo::CairoPNG(filename = "figures/FigDendogram.png", width = 1800, height = 1400, res = 300)
-FigDendogram.png <- plot(cell_hierarchical, main = "Dendrogram", xlab = "Index", ylab = "Height", hang = -1)
-print(FigDendogram.png)
-dev.off()
+# Base graphics could not be made to appear here: the previous version drew the
+# tree correctly to figures/FigDendogram.png but emitted NOTHING inline, leaving
+# the literal words "NULL" and "png 2" in the report where the figure should be.
+# Rebuilt as a ggplot from the hclust segments, so it is the chunk's VALUE and
+# goes through the same knit_print -> interactive + auto-export path as every
+# other figure. Horizontal layout so long cell-type names have room to sit
+# without overlapping, which the vertical base-R version could not manage.
+.dend_gg <- function(hc) {
+  n     <- length(hc$order)
+  # x = leaf position in plotting order, y = merge height.
+  xpos  <- numeric(nrow(hc$merge)); ypos <- hc$height
+  leafx <- match(seq_len(n), hc$order)
+  getx  <- function(k) if (k < 0) leafx[-k] else xpos[k]
+  gety  <- function(k) if (k < 0) 0          else ypos[k]
+  segs  <- list()
+  for (i in seq_len(nrow(hc$merge))) {
+    l <- hc$merge[i, 1]; r <- hc$merge[i, 2]
+    lx <- getx(l); rx <- getx(r); ly <- gety(l); ry <- gety(r)
+    xpos[i] <- (lx + rx) / 2
+    segs[[length(segs) + 1]] <- data.frame(
+      x = c(lx, rx, lx), xend = c(lx, rx, rx),
+      y = c(ly, ry, ypos[i]), yend = c(ypos[i], ypos[i], ypos[i]))
+  }
+  list(segments = do.call(rbind, segs),
+       leaves   = data.frame(x = seq_len(n), label = hc$labels[hc$order]))
+}
+
+.dd <- .dend_gg(cell_hierarchical)
+
+# A bare tree says "these branches are near each other" and stops there. What a
+# reader actually needs is which labels are hardest to tell apart, and how many
+# cells ride on that. Leaf size = population, hover = counts, and the finding
+# below names the closest pair explicitly.
+.ncells <- table(as.character(seurat_object@meta.data[["azimuth_labels"]]))
+.dd$leaves$n <- as.integer(.ncells[.dd$leaves$label])
+.dd$leaves$n[is.na(.dd$leaves$n)] <- 0L
+.dd$leaves$pct <- 100 * .dd$leaves$n / max(1, sum(.dd$leaves$n))
+
+ggplot() +
+  geom_segment(data = .dd$segments,
+               aes(x = x, xend = xend, y = y, yend = yend),
+               linewidth = .45, colour = "#31506b", lineend = "round") +
+  geom_point(data = .dd$leaves,
+             aes(x = x, y = 0, size = n,
+                 text = sprintf("%s\n%s cells (%.1f%% of cohort)",
+                                label, format(n, big.mark = ","), pct)),
+             colour = "#0d366b", alpha = .85) +
+  scale_size_area(max_size = 9, guide = "none") +
+  scale_x_continuous(breaks = .dd$leaves$x, labels = .dd$leaves$label,
+                     expand = expansion(mult = c(.05, .05))) +
+  scale_y_reverse(expand = expansion(mult = c(.12, .02))) +
+  coord_flip() +
+  labs(title = "How distinct are the annotated cell types?",
+       subtitle = paste("branches join at 1 - Pearson r between mean scale.data profiles;",
+                        "an EARLY join = two labels the data barely separates.",
+                        "\nPoint area = number of cells carrying that label"),
+       x = NULL, y = "height (1 - Pearson correlation)") +
+  theme_scratch() +
+  theme(panel.grid.major.y = element_blank())
 
 ```
 
@@ -449,11 +570,15 @@ if (exists("DE_azimuth_sig") &&
 ```
 
 ```{r fig-azimuth-de-heatmap}
+#| warning: false
+#| message: false
 #| fig-cap: "Azimuth DE heatmap (top markers per label)"
-#| fig-width: 14
-#| fig-height: 10
+# Enlarged to the size the removed duplicate used -- at 14x10 the gene names
+# were unreadable. `dev: pdf` dropped: it made this the only raster-less figure
+# in the report and it rendered smaller than everything around it.
+#| fig-width: 16
+#| fig-height: 12
 #| fig-path: "figures/azimuth_de_heatmap_"
-#| dev: pdf
 
 if (exists("DE_azimuth_sig") &&
     is.data.frame(DE_azimuth_sig) &&
@@ -464,13 +589,28 @@ if (exists("DE_azimuth_sig") &&
   p_heat <- DoHeatmap(
     object  = seurat_annotation,
     features = unique(top_markers_heat$gene),
-    group.by = "azimuth_labels"
+    group.by = "azimuth_labels",
+    # `size` is the group-label text along the top. At the default 5.5 with 45
+    # degrees, the narrow groups (Mast = 11 cells, NK, pDC, Endothelial) had
+    # their labels printed on top of one another. Smaller and vertical: 90
+    # degrees costs height, which this figure has, instead of width, which the
+    # narrow groups do not.
+    size  = 3.2,
+    angle = 90
   ) +
     scale_fill_viridis_c(option = "B") +
     theme(
-      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6),
-      axis.text.y = element_text(size = 6)
-    )
+      # DoHeatmap's x axis is one tick PER CELL. Drawing 24,000 rotated barcode
+      # labels produced the solid grey band under the plot -- not small text, a
+      # wall of overlapping text carrying no information. The coloured group bar
+      # along the top already says which cells belong to which label.
+      axis.text.x  = element_blank(),
+      axis.ticks.x = element_blank(),
+      # ~60 gene names down the side: 7pt still collided, 5.5 fits.
+      axis.text.y  = element_text(size = 5.5)
+    ) +
+    labs(x = sprintf("cells, grouped by Azimuth label (n = %s)",
+                     format(ncol(seurat_annotation), big.mark = ",")))
 
   p_heat
 } else {
@@ -482,11 +622,12 @@ if (exists("DE_azimuth_sig") &&
 
 
 ```{r fig-azimuth-de-dotplot}
+#| warning: false
+#| message: false
 #| fig-cap: "Azimuth DE dotplot (top markers per label)"
-#| fig-width: 14
-#| fig-height: 8
+#| fig-width: 16
+#| fig-height: 11
 #| fig-path: "figures/azimuth_de_dotplot_"
-#| dev: pdf
 
 if (exists("all_markers_azimuth") &&
     is.data.frame(all_markers_azimuth) &&
@@ -520,6 +661,10 @@ if (exists("all_markers_azimuth") &&
 
 
 ```{r MarkerBasedVisualization}
+#| fig-width: 16
+#| fig-height: 11
+#| warning: false
+#| message: false
 if (exists("all_markers_azimuth") &&
 is.data.frame(all_markers_azimuth) &&
 nrow(all_markers_azimuth) > 0) {
@@ -537,58 +682,11 @@ print(length(unique(top_markers$gene)))
 message(">>> [DE_top_markers_summary] No markers available; skipping summary.")
 }
 
-if (exists("DE_azimuth_sig") &&
-is.data.frame(DE_azimuth_sig) &&
-nrow(DE_azimuth_sig) > 0) {
-
-message(">>> [DE_azimuth_heatmap] building heatmap")
-
-top_markers_heat <- DE_azimuth_sig %>%
-dplyr::group_by(cluster) %>% # 'cluster' = azimuth_labels
-dplyr::slice_max(order_by = avg_log2FC, n = 10, with_ties = FALSE)
-
-DoHeatmap(
-object = seurat_annotation,
-features = unique(top_markers_heat$gene),
-group.by = "azimuth_labels"
-) +
-scale_fill_viridis_c(option = "B") +
-theme(
-axis.text.x = element_text(
-angle = 90,
-vjust = 0.5,
-hjust = 1,
-size = 6
-),
-axis.text.y = element_text(size = 6)
-)
-} else {
-message(">>> [DE_azimuth_heatmap] No significant DE markers; skipping heatmap.")
-}
-
-if (exists("all_markers_azimuth") &&
-is.data.frame(all_markers_azimuth) &&
-nrow(all_markers_azimuth) > 0) {
-
-message(">>> [DE_azimuth_dotplot] building DotPlot")
-
-top_markers_dot <- all_markers_azimuth %>%
-dplyr::group_by(cluster) %>%
-dplyr::slice_max(order_by = avg_log2FC, n = 5, with_ties = FALSE)
-
-DotPlot(
-seurat_annotation,
-features = unique(top_markers_dot$gene),
-group.by = "azimuth_labels"
-) +
-RotatedAxis() +
-theme(
-axis.text.x = element_text(size = 6),
-axis.text.y = element_text(size = 6)
-)
-} else {
-message(">>> [DE_azimuth_dotplot] No markers table available; skipping DotPlot.")
-}
+# The duplicated DoHeatmap() and DotPlot() that used to live here were removed.
+# They rebuilt the SAME two figures already produced by the captioned chunks
+# `fig-azimuth-de-heatmap` and `fig-azimuth-de-dotplot` above, so every reader
+# saw each figure twice -- once small, once large. The captioned versions are
+# kept (they carry the cross-references) and have been enlarged to match.
 
 ```
 
@@ -628,7 +726,7 @@ file = file.path("data", paste0(project_name, "_Azimuth_annotation_object.RDS"))
 
 ```{r params_log, message = FALSE, warning = FALSE, echo = FALSE}
 
-print(params)
+params
 
 ```
 

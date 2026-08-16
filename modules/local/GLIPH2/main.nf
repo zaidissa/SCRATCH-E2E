@@ -14,6 +14,15 @@ process GLIPH2 {
     
 
     output:
+    
+
+        // Figures were written by the notebook but never declared as an
+    
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+    
+
+        path("figures/**"), emit: figure_files, optional: true
     path "GLIPH2_Report.html", emit: report_html
     path "GLIPH2_Report/data/seurat_with_GLIPH2.rds", emit: seurat_with_gliph2
     path "GLIPH2_Report/tables/gliph2_export_cells.tsv", emit: export_cells

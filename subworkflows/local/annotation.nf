@@ -23,6 +23,7 @@ include { SCYTPE_MAJOR_ANNOTATION                         } from '../../modules/
 include { SCYTPE_STATE_ANNOTATION                         } from '../../modules/local/sctype/state/main.nf'
 include { SCYTPE_AGGREGATE_ANNOTATION                     } from '../../modules/local/sctype/aggregate/main.nf'
 include { AZIMUTH_ANNOTATION                              } from '../../modules/local/azimuth/main.nf'
+include { ANNOTATION_CONCORDANCE                          } from '../../modules/local/annotation_concordance/main.nf'
 include { HELPER_SCEASY_CONVERTER as SCEASY_CONVERTER_TWO } from '../../modules/local/helpers/convert/main.nf'
 
 workflow ANNOTATION {
@@ -56,9 +57,11 @@ workflow ANNOTATION {
         ch_annotated = ch_working
         ch_sctype_rds = Channel.empty()
         ch_azimuth_rds = Channel.empty()
+        ch_celltypist_obs = Channel.empty()
 
         if (!params.skip_celltypist) {
             CELLTYPIST_ANNOTATION(ch_notebook_celltypist, SCEASY_CONVERTER_ONE.out.project_rds, ch_page_config)
+            ch_celltypist_obs = CELLTYPIST_ANNOTATION.out.csv_file
         }
 
         // scType's marker database is human-only in this build.
@@ -92,6 +95,22 @@ workflow ANNOTATION {
         if (has_reference && !params.skip_azimuth) {
             AZIMUTH_ANNOTATION(ch_notebook_azimuth, ch_working, ch_reference_object, ch_page_config)
             ch_azimuth_rds = AZIMUTH_ANNOTATION.out.seurat_rds
+        }
+
+        // The three annotators above run in PARALLEL on the same input and never
+        // meet, so nothing in the pipeline ever checked whether they agree. This
+        // joins their labels per cell and reports the disagreement rate. Optional
+        // inputs are filled with the NO_FILE placeholder; the notebook renders a
+        // "not enough annotators" finding when fewer than two are present.
+        if (!params.skip_annotation_concordance) {
+            def no_file = file("${projectDir}/assets/NO_FILE")
+            ANNOTATION_CONCORDANCE(
+                Channel.fromPath(params.notebook_annotation_concordance, checkIfExists: true),
+                ch_celltypist_obs.ifEmpty(no_file),
+                ch_sctype_rds.ifEmpty(no_file),
+                ch_azimuth_rds.ifEmpty(no_file),
+                ch_page_config
+            )
         }
 
         // Preference order: Azimuth -> scType aggregate -> unannotated input.

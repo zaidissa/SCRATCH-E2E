@@ -10,6 +10,12 @@ process COPYKAT_PROCESS {
         path page_config
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figures, optional: true
         path "copykat_prediction.csv"
         path "seurat_copykat_annotated.rds"
         path "umap_copykat.png"

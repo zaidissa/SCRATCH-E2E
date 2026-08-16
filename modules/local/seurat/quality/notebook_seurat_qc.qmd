@@ -123,16 +123,49 @@ for(sub_directory in c('figures', 'objects', 'log')) {
 ```{r sample_level}
 #| echo: false
 
-sample_metrics <- read_csv(file = csv_metrics)
+raw_metrics <- read_csv(file = csv_metrics, show_col_types = FALSE)
 
-string_to_numeric <- function(x) {
-  as.numeric(sub('%', '', x))
+# Normalise a metric value to numeric: drop thousands separators, percent
+# signs, and cellranger's "---" placeholder for unavailable values.
+clean_numeric <- function(x) {
+  x <- as.character(x)
+  x <- gsub(',', '', x, fixed = TRUE)
+  x <- sub('%', '', x)
+  x[x %in% c('---', '', 'NA')] <- NA
+  as.numeric(x)
 }
 
-sample_metrics <- sample_metrics %>%
-  mutate_if(
-    is.character, string_to_numeric
+if (all(c("Metric Name", "Metric Value") %in% colnames(raw_metrics))) {
+
+  # cellranger multi: long/tidy metrics_summary.csv. Per-sample cell metrics
+  # live under Category == "Cells"; metrics not reported per demultiplexed
+  # sample (mean reads per cell, sequencing saturation are pool-level and
+  # shared across samples) are taken from Category == "Library".
+  gex <- raw_metrics %>% dplyr::filter(`Library Type` == "Gene Expression")
+
+  pick <- function(category, metric) {
+    v <- gex %>%
+      dplyr::filter(Category == category, `Metric Name` == metric) %>%
+      dplyr::pull(`Metric Value`)
+    if (length(v) == 0) NA_real_ else clean_numeric(v[[1]])
+  }
+
+  sample_metrics <- tibble::tibble(
+    `Estimated Number of Cells`  = pick("Cells",   "Cells"),
+    `Mean Reads per Cell`        = pick("Library", "Mean reads per cell"),
+    `Median Genes per Cell`      = pick("Cells",   "Median genes per cell"),
+    `Median UMI Counts per Cell` = pick("Cells",   "Median UMI counts per cell"),
+    `Sequencing Saturation`      = pick("Library", "Sequencing saturation")
   )
+
+} else {
+
+  # cellranger count: wide, single-row metrics_summary.csv. Coerce the
+  # character measure columns (percentages, comma-grouped counts) to numeric.
+  sample_metrics <- raw_metrics %>%
+    mutate_if(is.character, clean_numeric)
+
+}
 
 #
 
@@ -140,22 +173,22 @@ check_list <- c(FALSE, FALSE, FALSE, FALSE)
 
 #
 
-if(sample_metrics$`Estimated Number of Cells` >= thr_estimate_n_cells) {
+if(isTRUE(sample_metrics$`Estimated Number of Cells` >= thr_estimate_n_cells)) {
   check_list[1] <- TRUE #300
 
 }
 
-if(sample_metrics$`Mean Reads per Cell` >= thr_mean_reads_per_cells) {
+if(isTRUE(sample_metrics$`Mean Reads per Cell` >= thr_mean_reads_per_cells)) {
   check_list[2] <- TRUE #25000
 
 }
 
-if(sample_metrics$`Median Genes per Cell` >= thr_median_genes_per_cell) {
+if(isTRUE(sample_metrics$`Median Genes per Cell` >= thr_median_genes_per_cell)) {
   check_list[3] <- TRUE #900
 
 }
 
-if(sample_metrics$`Median UMI Counts per Cell` >= thr_median_umi_per_cell) {
+if(isTRUE(sample_metrics$`Median UMI Counts per Cell` >= thr_median_umi_per_cell)) {
   check_list[4] <- TRUE #1000
 
 }
@@ -172,7 +205,7 @@ if(all(check_list)) {
 
 } else {
 
-  if(sample_metrics$`Sequencing Saturation` <= 70) {
+  if(isTRUE(sample_metrics$`Sequencing Saturation` <= 70)) {
 
     status_flag <- "SAMPLE:FIXABLE"
 
@@ -232,6 +265,41 @@ ggplot(data = gpdat, aes(x = orig.ident, y = value)) +
 
 ```{r cell_filtering}
 
+# The subset() calls below overwrite seurat_object, so the pre-filter metadata
+# has to be kept now or the QC diagnostics have nothing to plot: every figure
+# in this notebook would otherwise describe only the cells that survived, which
+# is precisely the population that cannot tell you whether the cut was right.
+# sc-best-practices uses "percent counts in the top 20 genes" as a third MAD
+# filtering axis alongside counts and genes. A library where a handful of genes
+# (MALAT1, mitochondrial, ribosomal) dominate is low-complexity even when its
+# total count looks healthy, and neither nCount nor nFeature catches that.
+.topn <- 20L
+qc_pre <- seurat_object@meta.data
+.pct_top <- tryCatch({
+  .m <- SeuratObject::LayerData(seurat_object, layer = "counts")
+  .tot <- Matrix::colSums(.m)
+  # Walk the sparse column pointers directly rather than apply() over columns:
+  # a dense per-cell sort would materialise a 30k x 18k matrix.
+  .pp <- .m@p; .xx <- .m@x
+  .ts <- vapply(seq_len(ncol(.m)), function(j) {
+    if (.pp[j + 1] <= .pp[j]) return(0)
+    v <- .xx[(.pp[j] + 1):.pp[j + 1]]
+    sum(sort(v, decreasing = TRUE)[seq_len(min(.topn, length(v)))])
+  }, numeric(1))
+  100 * .ts / pmax(1, .tot)
+}, error = function(e) NULL)
+if (!is.null(.pct_top) && length(.pct_top) == nrow(qc_pre)) {
+  qc_pre[[paste0("pct_counts_top", .topn)]] <- .pct_top
+}
+
+# Which genes dominate the library overall (scater's "top expressed features").
+.top_genes <- tryCatch({
+  .m <- SeuratObject::LayerData(seurat_object, layer = "counts")
+  .gs <- Matrix::rowSums(.m); .gt <- sum(.gs)
+  .o <- head(order(.gs, decreasing = TRUE), 20)
+  data.frame(gene = rownames(.m)[.o], pct = 100 * .gs[.o] / max(1, .gt))
+}, error = function(e) NULL)
+
 n_total_cells <- dim(seurat_object)[2]
 
 seurat_object <- subset(
@@ -253,6 +321,9 @@ seurat_object <- subset(
 #
 
 n_observed_cells <- dim(seurat_object)[2]
+# Inline `r n_observed_cells` printed as "1.0365^{4}" -- knitr renders a
+# scientific-notation number as LaTeX. Format it once, here.
+n_observed_fmt <- format(n_observed_cells, big.mark = ",", scientific = FALSE)
 
 #
 
@@ -272,6 +343,227 @@ if(status_flag == 'SAMPLE:SUCCESS') {
 
 write_lines(status_flag, file = paste0('log/', sub('\\w+:', '', status_flag), '.txt'))
 
+```
+
+## QC diagnostics {#qc-diagnostics}
+
+```{r qc-thresholds, include = FALSE}
+suppressPackageStartupMessages({library(ggplot2); library(data.table)})
+qcd <- as.data.table(qc_pre)
+setnames(qcd, old = intersect(c("percent.mt","percent.mito"), names(qcd)),
+              new = rep("percent_mito", length(intersect(c("percent.mt","percent.mito"), names(qcd)))),
+         skip_absent = TRUE)
+
+# --- MAD-based thresholds, computed for COMPARISON only ---------------------
+# sc-best-practices recommends 5 MADs on log1p(counts) and log1p(genes) and
+# 3 MADs on mitochondrial percent, on the grounds that a fixed cutoff applied
+# to every sample biases against samples with genuinely smaller cells. This
+# notebook does NOT act on them -- changing what gets filtered would silently
+# move every downstream result. It reports what MADs would have chosen so the
+# decision can be made on evidence rather than on a default.
+mad_bounds <- function(x, n_mad = 5, log = TRUE) {
+  v <- if (log) log1p(x) else x
+  m <- median(v, na.rm = TRUE); d <- mad(v, na.rm = TRUE)
+  b <- c(m - n_mad * d, m + n_mad * d)
+  if (log) expm1(b) else b
+}
+# geom_hex() silently requires the `hexbin` package, which is NOT a ggplot2
+# dependency; if it is missing the chunk aborts and takes the whole render with
+# it. geom_bin2d() is core ggplot2 and needs nothing extra, so fall back to it.
+.binlayer <- function(bins = 95) {
+  if (requireNamespace("hexbin", quietly = TRUE)) ggplot2::geom_hex(bins = bins)
+  else ggplot2::geom_bin2d(bins = bins)
+}
+
+mad_feat <- mad_bounds(qcd$nFeature_RNA, 5, TRUE)
+# A 5-MAD bound in log space is deliberately lenient and its UPPER end routinely
+# lands past the number of genes that exist (the first real run reported
+# "9-186452 genes"). Cap it at the transcriptome and record whether either end
+# actually binds, so the advisory does not quote an impossible number.
+n_genes_total <- nrow(seurat_object)
+mad_feat[2] <- min(mad_feat[2], n_genes_total)
+mad_feat[1] <- max(mad_feat[1], 0)
+mad_hi_binds <- mad_feat[2] < n_genes_total
+mad_lo_binds <- mad_feat[1] > min(qcd$nFeature_RNA, na.rm = TRUE)
+mad_mito <- mad_bounds(qcd$percent_mito, 3, FALSE)[2]
+# Third MAD axis recommended by sc-best-practices: percent counts in top N.
+.topn_report <- if (exists('.topn')) .topn else 20L
+.topcol <- grep("^pct_counts_top", names(qcd), value = TRUE)[1]
+mad_top <- if (!is.na(.topcol)) mad_bounds(qcd[[.topcol]], 5, FALSE)[2] else NA_real_
+
+keep_fixed <- qcd$nFeature_RNA >= thr_n_feature_rna_min &
+              qcd$nFeature_RNA <  thr_n_feature_rna_max &
+              qcd$percent_mito <  thr_percent_mito
+keep_mad   <- qcd$nFeature_RNA >= mad_feat[1] & qcd$nFeature_RNA < mad_feat[2] &
+              qcd$percent_mito < mad_mito
+n_disagree <- sum(keep_fixed != keep_mad, na.rm = TRUE)
+```
+
+```{r qc-finding, results = 'asis'}
+pct_kept <- 100 * sum(keep_fixed, na.rm = TRUE) / nrow(qcd)
+msg <- sprintf(paste("Of **%s barcodes**, **%s (%.1f%%)** pass the fixed thresholds",
+                     "(genes %s-%s, mitochondrial <%s%%). Median depth is **%s UMIs**",
+                     "and **%s genes** per cell."),
+               format(nrow(qcd), big.mark = ","),
+               format(sum(keep_fixed, na.rm = TRUE), big.mark = ","), pct_kept,
+               format(thr_n_feature_rna_min, big.mark = ","),
+               format(thr_n_feature_rna_max, big.mark = ","), thr_percent_mito,
+               format(round(median(qcd$nCount_RNA, na.rm = TRUE)), big.mark = ","),
+               format(round(median(qcd$nFeature_RNA, na.rm = TRUE)), big.mark = ","))
+if (pct_kept < 50) msg <- paste(msg,
+  "**Fewer than half the barcodes survive QC**, which usually means the thresholds",
+  "are too aggressive for this sample rather than that the sample is bad.")
+scratch_finding(msg, type = if (pct_kept < 50) "caution" else "note",
+                title = "Filtering outcome")
+
+pct_dis <- 100 * n_disagree / nrow(qcd)
+# Braces are load-bearing: at top level R closes `if (cond) expr` at the
+# newline and then fails on a bare `else`.
+gene_txt <- {
+  if (!mad_hi_binds && !mad_lo_binds) {
+    sprintf("**no effective gene limit** (the 5-MAD range spans the whole observed range, %d-%d)",
+            round(mad_feat[1]), round(mad_feat[2]))
+  } else {
+    sprintf("**%s-%s genes**", format(round(mad_feat[1]), big.mark = ","),
+            format(round(mad_feat[2]), big.mark = ","))
+  }
+}
+m2 <- sprintf(paste("Adaptive (MAD) thresholds derived from this sample would be",
+                    "%s and **mitochondrial <%.1f%%**, versus the fixed",
+                    "**%s-%s** and **<%s%%** actually applied. The two rules disagree on",
+                    "**%s cells (%.1f%%)**."),
+              gene_txt, mad_mito,
+              format(thr_n_feature_rna_min, big.mark = ","),
+              format(thr_n_feature_rna_max, big.mark = ","), thr_percent_mito,
+              format(n_disagree, big.mark = ","), pct_dis)
+if (!is.na(mad_top)) m2 <- paste(m2, sprintf(
+  paste("A third axis best practice recommends -- percent of counts in the top %d genes --",
+        "has a 5-MAD upper bound of **%.1f%%** here (median **%.1f%%**); **%s cells** exceed it.",
+        "This is not filtered on at all at present."),
+  .topn_report, mad_top, median(qcd[[.topcol]], na.rm = TRUE),
+  format(sum(qcd[[.topcol]] > mad_top, na.rm = TRUE), big.mark = ",")))
+m2 <- paste(m2, "_Advisory only -- filtering used the fixed thresholds._")
+if (pct_dis > 10) m2 <- paste(m2,
+  "**A disagreement above 10% means the threshold choice is materially shaping this",
+  "dataset**, not just trimming its edges. Worth deciding deliberately.")
+scratch_finding(m2, type = if (pct_dis > 10) "caution" else "note",
+                title = "Fixed vs adaptive thresholds")
+```
+
+```{r qc-joint, message = FALSE, warning = FALSE}
+#| fig-width: 8
+#| fig-height: 5
+# The chapter is explicit that QC metrics must be read JOINTLY: a low-count cell
+# with low mitochondrial content is a small cell, while the same count with high
+# mitochondrial content is a dying one, and no single-metric histogram separates
+# them. Hexbin rather than points because 10k+ overplotted dots hide the density
+# that matters -- and it also keeps the figure under the interactive-widget
+# size guard, so it stays hoverable.
+# Colour each bin by MEAN mitochondrial content rather than by cell count.
+# Density alone cannot separate small cells from dying ones; this recovers the
+# mito dimension that a coloured scatter would show, without the overplotting
+# that makes a scatter unreadable at this cell count.
+.summlayer <- function(bins = 95) {
+  if (requireNamespace("hexbin", quietly = TRUE))
+    ggplot2::stat_summary_hex(ggplot2::aes(z = percent_mito), fun = mean, bins = bins)
+  else
+    ggplot2::stat_summary_2d(ggplot2::aes(z = percent_mito), fun = mean, bins = bins)
+}
+ggplot(qcd, aes(nCount_RNA, nFeature_RNA)) +
+  .summlayer() +
+  scale_x_log10() + scale_y_log10() +
+  scale_fill_gradient(low = "#dbe8fa", high = "#8c1d18",
+                      name = "mean\nmito %") +
+  geom_hline(yintercept = c(thr_n_feature_rna_min, thr_n_feature_rna_max),
+             linetype = "dashed", colour = "#8a5a00") +
+  labs(title = "Library size vs genes detected",
+       subtitle = "dashed = applied gene thresholds; log-log; colour = mean mitochondrial % per bin",
+       x = "UMIs per cell", y = "genes per cell") +
+  theme_scratch()
+```
+
+```{r qc-mito-vs-depth, message = FALSE, warning = FALSE}
+#| fig-width: 8
+#| fig-height: 4.5
+.mito_top <- max(as.numeric(thr_percent_mito) * 1.2,
+                 quantile(qcd$percent_mito, 0.995, na.rm = TRUE))
+.mito_hidden <- sum(qcd$percent_mito > .mito_top, na.rm = TRUE)
+ggplot(qcd, aes(nCount_RNA, percent_mito)) +
+  .binlayer() +
+  scale_x_log10() +
+  scale_fill_gradient(low = "#f7e2d8", high = "#8c1d18", trans = "log10", name = "cells") +
+  geom_hline(yintercept = thr_percent_mito, linetype = "dashed", colour = "#8a5a00") +
+  geom_hline(yintercept = mad_mito, linetype = "dotted", colour = "#0d366b") +
+  # Most cells sit below ~20% while a handful of dying cells reach 70%, so a
+  # linear axis spends half the panel on near-empty space. Clip the view to the
+  # 99.5th percentile (or just above the applied cutoff, whichever is higher)
+  # and say how many points that hides -- clipping silently would misrepresent
+  # the tail that the cutoff exists to remove.
+  coord_cartesian(ylim = c(0, .mito_top)) +
+  labs(title = "Mitochondrial content vs library size",
+       subtitle = sprintf("dashed = applied cutoff (%s%%); dotted = 3-MAD adaptive cutoff (%.1f%%)%s",
+                          thr_percent_mito, mad_mito,
+                          if (.mito_hidden > 0)
+                            sprintf("; %s cells above %.0f%% not shown",
+                                    format(.mito_hidden, big.mark = ","), .mito_top) else ""),
+       x = "UMIs per cell", y = "mitochondrial reads (%)") +
+  theme_scratch()
+```
+
+```{r qc-top-genes, message = FALSE, warning = FALSE}
+#| fig-width: 8
+#| fig-height: 4.5
+# scater's "top expressed features": if a handful of genes hold a large share of
+# every library, the dataset carries less biological signal than its cell count
+# suggests. MALAT1 and MT- genes at the top of this list are the usual sign.
+if (exists(".top_genes") && !is.null(.top_genes) && nrow(.top_genes)) {
+  .tg <- .top_genes
+  .tg$tip <- sprintf("%s\n%.2f%% of all counts", .tg$gene, .tg$pct)
+  # A logical fill renders its legend as FALSE/TRUE; `labels=` on the scale is
+  # dropped by ggplotly. Map to a factor with the wanted levels up front so the
+  # legend text survives the conversion to a widget.
+  .tg$origin <- factor(ifelse(grepl("^MT-", .tg$gene), "mitochondrial", "nuclear"),
+                       levels = c("nuclear", "mitochondrial"))
+  ggplot(.tg, aes(reorder(gene, pct), pct, fill = origin, text = tip)) +
+    geom_col(width = .7) +
+    scale_fill_manual(values = c(nuclear = "#3f6fa8", mitochondrial = "#8c1d18"),
+                      name = NULL, drop = FALSE) +
+    scale_y_continuous(expand = expansion(mult = c(0, .12))) +
+    coord_flip() +
+    labs(title = "Genes taking the largest share of all counts",
+         subtitle = sprintf("top 20 account for %.1f%% of every count in this sample",
+                            sum(.tg$pct)),
+         x = NULL, y = "% of total counts") +
+    theme_scratch()
+}
+```
+
+```{r qc-waterfall, message = FALSE, warning = FALSE}
+#| fig-width: 8
+#| fig-height: 3.4
+# Which filter removed what. A single "n cells retained" number cannot tell you
+# whether a low yield came from the gene filter or the mitochondrial one, and
+# those have opposite remedies.
+wf <- data.table(
+  step  = factor(c("input", "after gene filter", "after mito filter"),
+                 levels = c("input", "after gene filter", "after mito filter")),
+  cells = c(n_total_cells, n_thr_features_cells, n_observed_cells))
+wf[, removed := c(0L, diff(cells)) * -1L]
+wf[, tip := sprintf("%s\n%s cells%s", step, format(cells, big.mark = ","),
+                    ifelse(removed > 0, sprintf("\n%s removed at this step",
+                                                format(removed, big.mark = ",")), ""))]
+ggplot(wf, aes(step, cells, fill = step, text = tip)) +
+  geom_col(width = .6, show.legend = FALSE) +
+  geom_text(aes(label = format(cells, big.mark = ",")), vjust = -.5, size = 3.3) +
+  scale_fill_manual(values = c("#0d366b", "#3f6fa8", "#8fb4dd")) +
+  scale_y_continuous(expand = expansion(mult = c(0, .15))) +
+  labs(title = "Cells remaining after each filter",
+       subtitle = sprintf("%s of %s barcodes retained (%.1f%%)",
+                          format(n_observed_cells, big.mark = ","),
+                          format(n_total_cells, big.mark = ","),
+                          100 * n_observed_cells / max(1, n_total_cells)),
+       x = NULL, y = "cells") +
+  theme_scratch()
 ```
 
 ```{r compile_csv}
@@ -314,7 +606,7 @@ if(auto_save) {
 ```
 
 :::{.callout-important}
-The number of observed high-quality cells is equal to `r n_observed_cells`. This sample has been flag as <strong>`r status_flag`</strong>
+The number of observed high-quality cells is equal to `r n_observed_fmt`. This sample has been flag as <strong>`r status_flag`</strong>
 :::
 
 ## Parameters log

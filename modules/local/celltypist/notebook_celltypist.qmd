@@ -37,6 +37,19 @@ for _p in (".", "assets/viz", os.environ.get("SCRATCH_VIZ_DIR", ".")):
         except Exception as _e:
             print("scratch_viz unavailable:", _e)
         break
+
+# The notebook now CALLS sv.umap(), so `sv` must exist even when the library is
+# not staged -- otherwise the guarded import above stops being a no-op and
+# becomes a NameError that kills the render. Fall back to plain scanpy.
+if "sv" not in dir():
+    class _SvFallback:
+        @staticmethod
+        def umap(adata, color, **kw):
+            import scanpy as sc
+            kw.pop("figsize", None); kw.pop("legend_ncol", None)
+            kw.pop("legend_fontsize", None)
+            return sc.pl.umap(adata, color=color, **kw)
+    sv = _SvFallback()
 ```
 
 ```{python}
@@ -58,7 +71,20 @@ work_directory = os.getcwd()
 if not os.path.exists(os.path.join(work_directory, 'data')):
     os.mkdir(os.path.join(work_directory, 'data')) 
 
-# Directory and outputs
+```
+
+```{python}
+#| include: False
+
+# Derived paths MUST live outside the `parameters` cell.
+#
+# Quarto/papermill overrides parameters by INJECTING A NEW CELL AFTER the tagged
+# one. Anything computed inside the tagged cell is therefore frozen at the
+# DEFAULT values before the override runs. output_object was built here from
+# project_name, so `-P project_name:hgsoc_raw` produced a file still named
+# `project_celltypist_annotation_object.h5ad` -- the notebook rendered fine,
+# exit code 0, and Nextflow then failed on a missing output. Silent wrong result,
+# not a crash.
 output_object  = "{work_directory}/data/{project_name}_{object_label}".format(work_directory = work_directory, project_name = project_name, object_label = "celltypist_annotation_object.h5ad")
 annot_table    = "{work_directory}/data/{cell_model}".format(work_directory = work_directory, cell_model = "Immune_All")
 
@@ -181,21 +207,15 @@ sc.tl.umap(adata)
 #|  - High granularity
 #|  - Prediction score
 
-sc.pl.umap(
-    adata,
-    color = ["celltypist_cell_label_coarse"],
-    frameon = False,
-    sort_order = False,
-    wspace = 1
-)
+# scratch_viz.umap() instead of sc.pl.umap(): scanpy chooses the legend layout
+# itself and puts 25 CellTypist labels into two wide columns of large text, which
+# took two thirds of the figure and squeezed the embedding into the left third.
+# The helper redraws the legend as one narrow column at 7pt on a larger canvas.
+sv.umap(adata, color="celltypist_cell_label_coarse", wspace=1)
 
-sc.pl.umap(
-    adata,
-    color = ["celltypist_conf_score_coarse"],
-    frameon = False,
-    sort_order = False,
-    wspace = 1
-)
+# Continuous score: this one gets a colourbar, not a legend, so the helper leaves
+# it alone and only the larger canvas applies.
+sv.umap(adata, color="celltypist_conf_score_coarse", wspace=1)
 
 ```
 
@@ -256,9 +276,17 @@ for cell, genes in top_genes.items():
 #| fig-show: hold
 #| warning: false
 
-# Plot each gene score in a subplot
-for cell, genes in top_genes.items():
-    if cell in adata.obs.columns:
+# One panel with a dropdown instead of ~16 stacked full-size violin figures.
+# They share an x axis and a purpose, so the reader is choosing between them --
+# which is a menu, not a stack. Falls back to the original loop if plotly or the
+# helper is unavailable, so the notebook still renders without scratch_viz.
+_keys = [c for c in top_genes if c in adata.obs.columns]
+_fig = getattr(sv, "violin_selector", lambda *a, **k: None)(
+    adata, keys=_keys, groupby="ident", title="Signature score")
+if _fig is not None:
+    _fig.show()
+else:
+    for cell in _keys:
         sc.pl.violin(adata, keys=cell, groupby="ident", rotation=90)
 
 ```

@@ -11,6 +11,12 @@ process REPERTOIRE {
     val  project_name
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figure_files, optional: true
     path "Repertoire_Report.html", emit: report_html
     path "Repertoire_Report/tables/*", emit: tables
     path "Repertoire_Report/figures/*", emit: figures

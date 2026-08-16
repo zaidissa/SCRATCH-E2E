@@ -32,6 +32,12 @@ process CELLTRAJECTORY {
       path config
 
     output:
+
+        // Figures were written by the notebook but never declared as an
+
+        // output, so publishDir had nothing to copy and figures/ stayed empty.
+
+        path("figures/**"), emit: figure_files, optional: true
       path "report/${notebook.baseName}.html", emit: report,  optional: true
       path "data/**",                          emit: rds,     optional: true
       path "figures/**",                       emit: figures, optional: true

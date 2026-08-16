@@ -1,0 +1,737 @@
+---
+title: "Annotation concordance"
+subtitle: "Do the automated annotators agree with each other?"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    # MUST be true. With embed-resources:false quarto writes widget JS to a
+    # sibling `site_libs/` directory, and NO module publishes that directory --
+    # so every plotly widget rendered BLANK in the published report while the
+    # HTML itself looked fine. Self-contained is the only form that survives
+    # publishDir copying the .html on its own.
+    embed-resources: true
+    code-fold: true
+    code-tools: true
+params:
+  celltypist_obs: "NO_FILE"
+  sctype_object: "NO_FILE"
+  azimuth_object: "NO_FILE"
+  project_name: "project"
+  work_directory: "."
+  min_pair_cells: 20
+---
+
+<!--
+This notebook exists because the pipeline runs up to three independent cell-type
+annotators on the SAME input object, in parallel, and then never compares them.
+Each writes its own report claiming its own labels. Nothing in the pipeline ever
+asked whether they agree, so a disagreement on a third of the cells would have
+been completely invisible.
+
+That is the same failure mode as the CNV callers (inferCNV vs SCEVAN disagreeing
+on 649 of 1,683 cells with no report saying so).
+
+sc-best-practices' annotation chapter asks for exactly these diagnostics:
+crosstab of manual vs automated labels, uncertainty/confidence scores per cell
+type, and flagging low-confidence cells as Unknown.
+-->
+
+```{r scratch-viz-setup, include = FALSE}
+for (f in c("scratch_viz.R", "scratch_report.R")) if (file.exists(f)) source(f)
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+suppressPackageStartupMessages({
+  library(data.table); library(ggplot2)
+})
+if (!dir.exists(params$work_directory)) dir.create(params$work_directory, recursive = TRUE)
+for (sub in c("data", "figures")) dir.create(file.path(params$work_directory, sub), showWarnings = FALSE)
+```
+
+```{r load, include = FALSE}
+is_real <- function(p) {
+  !is.null(p) && !is.na(p) && nzchar(p) && !grepl("NO_FILE", p) && file.exists(p)
+}
+
+# Each annotator writes a different column name. Order matters: the first match
+# wins. The column this pipeline actually writes is listed FIRST in each vector;
+# the rest are fallbacks for objects produced by a stock Seurat/Azimuth workflow.
+#
+# `sctype` is the major-class call and is deliberately preferred over the
+# aggregated `scytpe_subset`: `sctype` is what the rest of the pipeline consumes
+# (--celltype_col sctype), so it is the label whose disagreement actually
+# propagates downstream.
+#
+# Azimuth's column is `azimuth_labels` (plural) -- notebook_azimuth.qmd renames
+# TransferData's `predicted.id` to it. Getting this name wrong does not fail; it
+# silently drops the annotator, which is the exact class of bug this module was
+# written to catch.
+LABEL_CANDIDATES <- list(
+  celltypist = c("majority_voting", "predicted_labels", "celltypist_cell_label_coarse"),
+  sctype     = c("sctype", "scytpe_subset", "sctype_aggregate", "cell_type",
+                 "sctype_classification", "customclassif", "sctype_major"),
+  azimuth    = c("azimuth_labels", "predicted.celltype.l2", "predicted.celltype.l1",
+                 "predicted.id", "predicted_celltype", "azimuth_label")
+)
+
+# Per-cell confidence, where the annotator emits one. These are NOT on a common
+# scale -- CellTypist's `conf_score` is a classifier probability, Azimuth's
+# `prediction.score.max` is the best label-transfer score -- so they are reported
+# side by side and never pooled or subtracted. scType emits no per-cell score.
+CONF_CANDIDATES <- list(
+  celltypist = c("conf_score", "celltypist_conf_score_coarse"),
+  sctype     = character(0),
+  azimuth    = c("prediction.score.max", "predicted.celltype.l2.score", "predicted.id.score")
+)
+
+# What each score MEANS, so the report can say it rather than assume the reader knows.
+CONF_MEANING <- c(
+  CellTypist = "logistic-regression probability for the winning class",
+  Azimuth    = "highest per-label reference-mapping transfer score"
+)
+
+pick_from <- function(nms, cands) {
+  hit <- intersect(cands, nms)
+  if (length(hit)) hit[1] else NA_character_
+}
+pick_label <- function(nms, which) pick_from(nms, LABEL_CANDIDATES[[which]])
+pick_conf  <- function(nms, which) pick_from(nms, CONF_CANDIDATES[[which]])
+
+labels  <- list()     # name -> data.table(cell_id, label)
+conf    <- list()     # name -> data.table(cell_id, conf_score)  (annotators that emit one)
+conf_col <- list()    # name -> the column the score came from, for the methods note
+extra   <- list()     # side-channel info (clusters)
+dropped <- list()     # annotator -> why it contributed nothing, for reporting
+
+# --- CellTypist: obs.csv exported by sceasy -------------------------------
+ct_path <- params$celltypist_obs
+if (is_real(ct_path) && dir.exists(ct_path)) ct_path <- file.path(ct_path, "obs.csv")
+if (is_real(ct_path)) {
+  obs <- fread(ct_path)
+  # The index column is written unnamed; fread calls it V1.
+  idcol <- names(obs)[1]
+  setnames(obs, idcol, "cell_id")
+  lc <- pick_label(names(obs), "celltypist")
+  if (is.na(lc)) {
+    dropped$CellTypist <- sprintf(
+      "its obs.csv has none of the expected label columns (%s); it has: %s",
+      paste(LABEL_CANDIDATES$celltypist, collapse = ", "),
+      paste(head(names(obs), 25), collapse = ", "))
+  }
+  if (!is.na(lc)) {
+    labels$CellTypist <- obs[, .(cell_id = as.character(cell_id), label = as.character(get(lc)))]
+    cc <- pick_conf(names(obs), "celltypist")
+    if (!is.na(cc)) {
+      conf$CellTypist <- obs[, .(cell_id = as.character(cell_id),
+                                 conf_score = as.numeric(get(cc)))]
+      conf_col$CellTypist <- cc
+    }
+    ccl <- intersect(c("seurat_clusters", "cluster"), names(obs))
+    if (length(ccl))
+      extra$cluster <- obs[, .(cell_id = as.character(cell_id), cluster = as.character(get(ccl[1])))]
+  }
+}
+
+# --- Seurat-based annotators ---------------------------------------------
+# Returns the labels, or a `why` attribute explaining why there are none. An
+# object that was supplied but yielded nothing must be REPORTED, never dropped
+# in silence -- a silently missing annotator turns a three-way cross-check into
+# a two-way one with no trace in the report.
+read_seurat_labels <- function(path, which) {
+  fail <- function(why) structure(list(), class = "conc_fail", why = why)
+  if (!is_real(path)) return(NULL)                       # genuinely not supplied
+  if (!requireNamespace("Seurat", quietly = TRUE))
+    return(fail("the Seurat package is not available in this container"))
+  obj <- tryCatch(readRDS(path), error = function(e) conditionMessage(e))
+  if (is.character(obj)) return(fail(sprintf("the object could not be read (%s)", obj)))
+  md <- tryCatch(obj@meta.data, error = function(e) NULL)
+  if (is.null(md)) return(fail("the object has no @meta.data slot"))
+  lc <- pick_label(names(md), which)
+  if (is.na(lc)) return(fail(sprintf(
+    "its metadata has none of the expected label columns (%s); it has: %s",
+    paste(LABEL_CANDIDATES[[which]], collapse = ", "),
+    paste(head(names(md), 30), collapse = ", "))))
+  out <- data.table(cell_id = rownames(md), label = as.character(md[[lc]]))
+  # Carry the per-cell score along when the object has one; `take()` splits it off.
+  cc <- pick_conf(names(md), which)
+  if (!is.na(cc)) {
+    out[, conf_score := as.numeric(md[[cc]])]
+    setattr(out, "conf_col", cc)
+  }
+  out
+}
+
+take <- function(res, name) {
+  if (is.null(res)) return(invisible(NULL))
+  if (inherits(res, "conc_fail")) {
+    dropped[[name]] <<- attr(res, "why")
+    return(invisible(NULL))
+  }
+  if ("conf_score" %in% names(res)) {
+    conf[[name]]     <<- res[, .(cell_id, conf_score)]
+    conf_col[[name]] <<- attr(res, "conf_col")
+    res <- res[, .(cell_id, label)]
+  }
+  labels[[name]] <<- res
+  invisible(NULL)
+}
+
+take(read_seurat_labels(params$sctype_object, "sctype"),   "scType")
+take(read_seurat_labels(params$azimuth_object, "azimuth"), "Azimuth")
+
+n_ann <- length(labels)
+```
+
+```{r dropped-annotators, results = 'asis'}
+if (length(dropped)) {
+  scratch_finding(
+    paste0(
+      "**", length(dropped), " annotator output(s) were supplied to this report but ",
+      "contributed no labels**, so the comparison below is narrower than the run ",
+      "actually was:\n\n",
+      paste(sprintf("- **%s** -- %s", names(dropped), unlist(dropped)), collapse = "\n"),
+      "\n\nThis is a wiring problem, not a biological result. Fix the label-column ",
+      "name in `LABEL_CANDIDATES` and re-run: a cross-check that quietly drops one ",
+      "of the methods being cross-checked is worse than no cross-check at all."),
+    type = "important", title = "Annotator supplied but not readable")
+}
+```
+
+```{r no-data, results = 'asis'}
+if (n_ann < 2) {
+  scratch_finding(
+    sprintf(paste("Only **%d** annotator produced labels, so there is nothing to compare.",
+                  "Concordance needs at least two of CellTypist, scType and Azimuth.",
+                  "Enable a second annotator to get a cross-check on the cell-type calls."),
+            n_ann),
+    type = "caution", title = "Not enough annotators")
+}
+```
+
+```{r build-joint, include = FALSE}
+if (n_ann >= 2) {
+  # Cell IDs can carry an annotator-specific prefix. Harmonise by stripping a
+  # leading "<sample>." or "<sample>_" ONLY when that makes the sets overlap --
+  # a silent zero-overlap join is the exact bug that made the CNV consensus run
+  # on one caller for weeks.
+  norm_id <- function(x) sub("^[^._]+[._]", "", x)
+
+  ids <- lapply(labels, function(d) d$cell_id)
+  raw_ov <- length(Reduce(intersect, ids))
+  nrm_ov <- length(Reduce(intersect, lapply(ids, norm_id)))
+  used_norm <- nrm_ov > raw_ov
+  # The confidence tables are keyed on the SAME ids and must be rewritten too,
+  # or every later merge against them silently returns zero rows.
+  if (used_norm) {
+    labels <- lapply(labels, function(d) { d[, cell_id := norm_id(cell_id)]; d })
+    conf   <- lapply(conf,   function(d) { d[, cell_id := norm_id(cell_id)]; d })
+  }
+
+  joint <- Reduce(function(a, b) merge(a, b, by = "cell_id"),
+                  Map(function(d, n) { x <- copy(d); setnames(x, "label", n); x },
+                      labels, names(labels)))
+  overlap <- nrow(joint)
+}
+```
+
+```{r overlap-check, results = 'asis'}
+if (n_ann >= 2 && overlap == 0) {
+  scratch_finding(
+    paste("The annotators share **no cell IDs**, so no comparison is possible.",
+          "This is almost always a naming mismatch (a sample prefix applied by one",
+          "annotator and not another), not a genuine absence of shared cells."),
+    type = "important", title = "Zero cell overlap")
+}
+```
+
+## Pairwise agreement
+
+```{r pairwise, results = 'asis'}
+if (n_ann >= 2 && overlap > 0) {
+  anns  <- names(labels)
+  pairs <- combn(anns, 2, simplify = FALSE)
+
+  # Two annotators can be right and still disagree textually, so normalise
+  # before calling anything a conflict.
+  #
+  # Dropping a trailing "cell"/"cells" token is NOT cosmetic. Without it,
+  # CellTypist's "Epithelial cells" and Azimuth's "Epithelial" scored as a
+  # disagreement on 4,699 cells -- the single largest block in this report --
+  # and the pair's agreement read 7.9% when it is really 28.1%. The optional
+  # space also catches the unspaced "Tcells" form.
+  #
+  # It stops at ONE trailing token on purpose: "B_Plasma_Cells" -> "b plasma"
+  # must NOT collapse onto "B cell" -> "b", because merging B and plasma cells
+  # into one class is a real difference of resolution, not a spelling.
+  canon <- function(x) {
+    x <- tolower(trimws(as.character(x)))
+    x <- gsub("[_/.-]+", " ", x)
+    x <- gsub("\\s+", " ", trimws(x))
+    stripped <- sub("\\s*cells?$", "", x)
+    x <- ifelse(nzchar(stripped), stripped, x)   # a bare "cell" stays "cell"
+    sub("s$", "", x)
+  }
+
+  # How much of the raw disagreement was only ever spelling. Reported, not hidden:
+  # a reader who sees "28.1% agree" deserves to know it was 7.9% before names
+  # were harmonised, and on which labels.
+  canon_raw <- function(x) {
+    x <- tolower(trimws(as.character(x)))
+    sub("s$", "", gsub("\\s+", " ", gsub("[_/.-]+", " ", x)))
+  }
+
+  UNCALLED <- c("unknown", "unassigned", "na", "")
+
+  # Raw label-identity agreement is only meaningful between annotators working
+  # at the SAME resolution. One method calling "B_Plasma_Cells" where another
+  # says "B cell" / "Plasma cell" is a difference of resolution, not of opinion,
+  # and scoring it as a disagreement would report a real biological consensus as
+  # a conflict. `nesting` measures the alternative question -- does the finer
+  # partition sit INSIDE the coarser one? -- by taking, for each fine label, the
+  # share of its cells that land in that label's single most common coarse
+  # class. High nesting with low agreement means the two methods concur and
+  # simply disagree about how many names to use.
+  nesting_purity <- function(fine, coarse) {
+    d <- data.table(f = fine, c = coarse)[, .N, by = .(f, c)]
+    sum(d[, max(N), by = f]$V1) / max(1, length(fine))
+  }
+
+  res <- rbindlist(lapply(pairs, function(p) {
+    a <- canon(joint[[p[1]]]); b <- canon(joint[[p[2]]])
+    a_out <- is.na(a) | a %in% UNCALLED
+    b_out <- is.na(b) | b %in% UNCALLED
+    known <- !a_out & !b_out
+    na <- uniqueN(a[known]); nb <- uniqueN(b[known])
+    # Whichever side resolves more types is the "fine" one for the nesting test.
+    nest <- if (sum(known) == 0) NA_real_
+            else if (na >= nb) nesting_purity(a[known], b[known])
+            else nesting_purity(b[known], a[known])
+    # Same comparison without the name harmonisation, to size its effect.
+    ar <- canon_raw(joint[[p[1]]]); br <- canon_raw(joint[[p[2]]])
+    agree_raw <- sum(ar[known] == br[known])
+    data.table(pair = paste(p[1], "vs", p[2]),
+               compared = sum(known),
+               agree    = sum(a[known] == b[known]),
+               pct      = round(100 * sum(a[known] == b[known]) / max(1, sum(known)), 1),
+               naming   = sum(a[known] == b[known]) - agree_raw,
+               labels_a = na, labels_b = nb,
+               nesting  = round(100 * nest, 1),
+               uncalled = sum(a_out | b_out))
+  }))
+  res[, disagree := compared - agree]
+  res[, gran := pmax(labels_a, labels_b) / pmax(1, pmin(labels_a, labels_b))]
+
+  worst <- res[which.min(pct)]
+  msg <- sprintf(paste("Across **%s cells** annotated by more than one method,",
+                       "%s agree on **%.1f%%** of calls -- they disagree on **%s of %s cells**."),
+                 format(overlap, big.mark = ","), worst$pair, worst$pct,
+                 format(worst$disagree, big.mark = ","), format(worst$compared, big.mark = ","))
+
+  # A resolution mismatch must not be reported as a contradiction: the remedy is
+  # completely different (map the labels, vs. distrust the calls).
+  resolution_gap <- !is.na(worst$nesting) && worst$gran >= 1.5 && worst$nesting >= 80
+  if (resolution_gap) {
+    msg <- paste(msg, sprintf(paste(
+      "**Read that number with care -- it is mostly a difference of resolution, not of",
+      "opinion.** These two methods resolve **%d** and **%d** distinct types, and **%.1f%%**",
+      "of the finer labels nest inside a single coarser class. They largely agree about",
+      "what the cells are and disagree about how finely to name them, so the fix is a",
+      "label mapping between the two vocabularies, not distrust of the calls."),
+      worst$labels_a, worst$labels_b, worst$nesting))
+  } else if (worst$pct < 70) {
+    msg <- paste(msg,
+      "The labels sit at comparable resolution, so this is a genuine conflict rather than",
+      "a naming difference. **Below 70% agreement the choice of annotator is itself a",
+      "result.** Any downstream analysis keyed on cell type (composition, differential",
+      "abundance, cell-cell communication) inherits that choice, so state which annotator",
+      "was used and check whether the conclusion survives switching to the other.")
+  } else if (worst$pct < 90) {
+    msg <- paste(msg,
+      "Agreement in the 70-90% band is typical for annotators trained on different",
+      "references; the disagreements are usually concentrated in a few related",
+      "populations rather than spread evenly -- see the confusion matrix below.")
+  }
+  if (used_norm) {
+    msg <- paste(msg,
+      "_Cell IDs were harmonised by stripping a sample prefix to make the label sets joinable._")
+  }
+
+  # Naming variation is the first thing a reader suspects, so answer it up front
+  # with a number instead of leaving them to wonder.
+  if (sum(res$naming) > 0) {
+    nw <- res[which.max(naming)]
+    msg <- paste(msg, sprintf(paste(
+      "_Label names were harmonised before comparing (case, `_`/`-`/`.` separators,",
+      "plurals, and a trailing \"cell(s)\" token). That accounts for **%s** of the",
+      "matches in %s alone -- e.g. one method writes `Epithelial cells` where the",
+      "other writes `Epithelial`. Everything still counted as a disagreement below",
+      "is a genuine difference of label, not of spelling._"),
+      format(nw$naming, big.mark = ","), nw$pair))
+  }
+
+  scratch_finding(msg,
+                  type = if (worst$pct < 70 && !resolution_gap) "caution" else "note",
+                  title = "Annotator agreement")
+  scratch_table(res[, .(pair, compared, agree, disagree, `agreement %` = pct,
+                        `same cell type, different name` = naming,
+                        `types A` = labels_a, `types B` = labels_b,
+                        `nesting %` = nesting, `not compared` = uncalled)],
+                caption = paste("Pairwise agreement between annotators.",
+                                "`same cell type, different name` = matches that exist only because",
+                                "names were harmonised; `nesting %` = share of the finer labels",
+                                "contained in a single coarser class; `not compared` = cells at",
+                                "least one method left Unknown/unassigned."))
+}
+```
+
+```{r agreement-figure}
+#| fig-width: 8
+#| fig-height: 3.2
+if (n_ann >= 2 && overlap > 0) {
+  d <- copy(res)
+  d[, tip := sprintf("%s\n%.1f%% agreement\n%s of %s cells match",
+                     pair, pct, format(agree, big.mark = ","), format(compared, big.mark = ","))]
+  ggplot(d, aes(reorder(pair, pct), pct, fill = pct, text = tip)) +
+    geom_col(width = .6) +
+    geom_hline(yintercept = 70, linetype = "dashed", colour = "#8a5a00") +
+    geom_text(aes(label = sprintf("%.1f%%", pct)), hjust = -.15, size = 3.4) +
+    scale_fill_gradient(low = "#f0b7b3", high = "#0d366b", limits = c(0, 100), guide = "none") +
+    scale_y_continuous(limits = c(0, 105), expand = expansion(mult = c(0, .05))) +
+    coord_flip() +
+    labs(title = "Agreement between annotation methods",
+         subtitle = "dashed line = 70%, below which the annotator choice drives downstream results",
+         x = NULL, y = "cells with identical label (%)") +
+    theme_scratch()
+}
+```
+
+## Cells one method refused to call
+
+```{r uncalled, results = 'asis'}
+# Agreement statistics necessarily exclude cells that a method left Unknown --
+# but that exclusion hides the most actionable failure of all. An annotator that
+# declines to call 18% of cells which another annotator confidently assigns to a
+# single population has a reference gap, and the agreement % it earns on the
+# remainder flatters it. This section reports exactly what the denominator drops.
+if (n_ann >= 2 && overlap > 0) {
+  anns <- names(labels)
+  gaps <- rbindlist(lapply(anns, function(a) {
+    av <- canon(joint[[a]])
+    out <- is.na(av) | av %in% UNCALLED
+    if (!sum(out)) return(NULL)
+    others <- setdiff(anns, a)
+    rbindlist(lapply(others, function(o) {
+      ov <- canon(joint[[o]])
+      keep <- out & !is.na(ov) & !ov %in% UNCALLED
+      if (!sum(keep)) return(NULL)
+      tab <- sort(table(joint[[o]][keep]), decreasing = TRUE)
+      data.table(annotator = a, uncalled = sum(out), rescued_by = o,
+                 rescued = sum(keep), top_label = names(tab)[1],
+                 top_n = as.integer(tab[1]))
+    }))
+  }))
+
+  if (!is.null(gaps) && nrow(gaps)) {
+    w <- gaps[which.max(top_n)]
+    pct_unc <- 100 * w$uncalled / overlap
+    msg <- sprintf(paste(
+      "**%s leaves %s of %s shared cells (%.1f%%) Unknown or unassigned.** Those cells are",
+      "excluded from every agreement figure above, so they never count against it.",
+      "%s does assign **%s** of them, and the single largest block -- **%s cells** -- it calls",
+      "**%s**."),
+      w$annotator, format(w$uncalled, big.mark = ","), format(overlap, big.mark = ","),
+      pct_unc, w$rescued_by, format(w$rescued, big.mark = ","),
+      format(w$top_n, big.mark = ","), w$top_label)
+    if (pct_unc >= 10) {
+      msg <- paste(msg, sprintf(paste(
+        "A block this size concentrated on one population is a **reference gap, not",
+        "ambiguity**: if %s carried no marker set for %s it cannot call it, and those",
+        "cells will be silently missing from any composition or abundance analysis keyed",
+        "on %s. Check that population is present in its marker database before using",
+        "these labels downstream."), w$annotator, w$top_label, w$annotator))
+    }
+    scratch_finding(msg, type = if (pct_unc >= 10) "caution" else "note",
+                    title = "Uncalled cells")
+    scratch_table(gaps[order(-top_n),
+                       .(annotator, `cells uncalled` = uncalled, `named by` = rescued_by,
+                         `of those, named` = rescued, `largest block` = top_label,
+                         cells = top_n)],
+                  caption = "What each annotator left uncalled, and what the others made of it")
+  }
+}
+```
+
+## Where they disagree
+
+```{r confusion-figure}
+#| fig-width: 9
+#| fig-height: 7
+if (n_ann >= 2 && overlap > 0) {
+  p <- pairs[[which.min(res$pct)]]
+  cm <- joint[, .N, by = c(p[1], p[2])]
+  setnames(cm, c("A", "B", "n"))
+  # Rare label pairs make the heatmap unreadable and are not actionable.
+  cm <- cm[n >= params$min_pair_cells]
+  if (nrow(cm)) {
+    cm[, pct_of_A := 100 * n / sum(n), by = A]
+    cm[, tip := sprintf("%s (%s)  ->  %s (%s)\n%s cells, %.1f%% of %s",
+                        p[1], A, p[2], B, format(n, big.mark = ","), pct_of_A, A)]
+    ggplot(cm, aes(B, A, fill = pct_of_A, text = tip)) +
+      geom_tile(colour = "white", linewidth = .4) +
+      scale_fill_gradient(low = "#eef4fd", high = "#0d366b", name = "% of row") +
+      labs(title = sprintf("Label correspondence: %s vs %s", p[1], p[2]),
+           subtitle = sprintf("row-normalised; pairs with <%d cells omitted", params$min_pair_cells),
+           x = p[2], y = p[1]) +
+      theme_scratch() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  }
+}
+```
+
+```{r confusion-table, results = 'asis'}
+if (n_ann >= 2 && overlap > 0) {
+  p <- pairs[[which.min(res$pct)]]
+  # `canon()` is defined once in the pairwise chunk. It used to be redefined
+  # here with a slightly different body, which meant the conflict table could
+  # disagree with the agreement percentage it was supposed to explain.
+  cf <- joint[canon(get(p[1])) != canon(get(p[2])), .N, by = c(p[1], p[2])][order(-N)]
+  setnames(cf, c(p[1], p[2], "cells"))
+  if (nrow(cf)) {
+    top <- head(cf, 3)
+    scratch_finding(
+      paste0("The largest single disagreement is **",
+             format(top$cells[1], big.mark = ","), " cells** that ", p[1], " calls **",
+             top[[1]][1], "** and ", p[2], " calls **", top[[2]][1], "**. ",
+             "Disagreements concentrated in one pair of related populations are a ",
+             "boundary problem (where does one state end and the next begin) rather ",
+             "than a failure of either method -- but the boundary is yours to choose."),
+      type = "note", title = "Largest disagreement")
+    scratch_table(head(cf, 25), caption = "Most frequent label conflicts, largest first")
+  }
+}
+```
+
+## Annotation confidence
+
+```{r conf-prep, include = FALSE}
+# Every annotator that emits a per-cell score, not just CellTypist. The scores are
+# kept SEPARATE throughout: pooling a logistic-regression probability with a
+# reference-mapping transfer score would produce a number that means nothing.
+conf_anns <- intersect(names(labels), names(conf))
+has_conf  <- length(conf_anns) > 0
+
+if (has_conf) {
+  cd <- rbindlist(lapply(conf_anns, function(a) {
+    m <- merge(labels[[a]], conf[[a]], by = "cell_id")
+    m[, annotator := a][]
+  }))
+  by_type <- cd[, .(cells = .N,
+                    median_conf = as.numeric(round(median(conf_score, na.rm = TRUE), 3)),
+                    pct_below_half = round(100 * mean(conf_score < 0.5, na.rm = TRUE), 1)),
+                by = .(annotator, label)][order(annotator, median_conf)]
+  by_ann <- cd[, .(cells = .N,
+                   median_conf = as.numeric(round(median(conf_score, na.rm = TRUE), 3)),
+                   pct_below_half = round(100 * mean(conf_score < 0.5, na.rm = TRUE), 1)),
+               by = annotator]
+
+  # Prepared HERE, not in the figure chunk, because the figure's `fig-height` is
+  # computed from `cs_rows` and chunk options are evaluated before the body runs.
+  # A fixed height cannot work: this axis is one row per cell type, and the count
+  # depends entirely on which annotators and references the run used.
+  keep    <- by_type[cells >= params$min_pair_cells]
+  cs      <- merge(cd, keep[, .(annotator, label)], by = c("annotator", "label"))
+  cs_rows <- nrow(keep)
+}
+```
+
+```{r conf-finding, results = 'asis'}
+if (has_conf) {
+  low <- by_type[median_conf < 0.5 & cells >= params$min_pair_cells]
+
+  parts <- vapply(conf_anns, function(a) {
+    s <- by_ann[annotator == a]
+    meaning <- if (a %in% names(CONF_MEANING)) CONF_MEANING[[a]] else "per-cell score"
+    lo <- low[annotator == a]
+    txt <- sprintf(paste("- **%s** (`%s`, %s): median **%.3f**, with **%.1f%%** of cells",
+                         "below 0.5."),
+                   a, conf_col[[a]], meaning, s$median_conf, s$pct_below_half)
+    if (nrow(lo)) txt <- paste(txt, sprintf(
+      "Weakest population(s): **%s**.", paste(head(lo$label, 4), collapse = ", ")))
+    txt
+  }, character(1))
+
+  msg <- paste0(
+    "Each annotator that reports a per-cell score, scored on its own scale:\n\n",
+    paste(parts, collapse = "\n"), "\n\n")
+
+  if (length(conf_anns) > 1) {
+    msg <- paste0(msg,
+      "**These numbers are not comparable to each other.** A CellTypist probability and ",
+      "an Azimuth transfer score answer different questions, so the annotator with the ",
+      "higher median is not the better one -- read each against its own 0.5 line, and ",
+      "use the comparison below, which asks the one question they can both answer.")
+  }
+  if (nrow(low)) {
+    msg <- paste0(msg,
+      "\n\nPopulations whose median score sits below 0.5 should be treated as provisional; ",
+      "best practice is to relabel low-confidence cells as `Unknown` rather than carry a ",
+      "weak call into downstream analysis.")
+  }
+  scratch_finding(msg, type = if (nrow(low)) "caution" else "note",
+                  title = "Classifier confidence")
+  scratch_table(by_type[, .(annotator, label, cells, median_conf,
+                            `% below 0.5` = pct_below_half)],
+                caption = "Per-cell confidence by predicted cell type, lowest first within each annotator")
+}
+```
+
+```{r conf-figure}
+#| fig-width: 10
+#| fig-height: !expr if (exists("cs_rows")) max(6, 0.30 * cs_rows + 2.2) else 8
+if (has_conf && exists("cs") && nrow(cs)) {
+  # Mapped straight to y instead of x + coord_flip(). With coord_flip(),
+  # facet_wrap(scales = "free_x") did NOT drop the other annotator's levels, so
+  # both panels rendered all 36 cell-type names stacked on top of each other and
+  # the axis was unreadable. Faceting the aesthetic the labels actually sit on
+  # frees them correctly.
+  SEP <- "\u001f"
+  ord <- keep[order(annotator, -median_conf)]
+  ord[, key := paste(annotator, label, sep = SEP)]
+  cs[, key := factor(paste(annotator, label, sep = SEP), levels = ord$key)]
+  ggplot(cs, aes(conf_score, key, fill = annotator)) +
+    geom_vline(xintercept = 0.5, linetype = "dashed", colour = "#8a5a00") +
+    # 24k outlier dots per panel buried the boxes and forced the figure static.
+    # The box, whiskers and the 0.5 line carry the message; the dots did not.
+    geom_boxplot(outlier.shape = NA, linewidth = .3, show.legend = FALSE) +
+    scale_y_discrete(labels = function(x) sub(paste0("^.*", SEP), "", x)) +
+    scale_x_continuous(limits = c(0, 1), expand = expansion(mult = c(.02, .02))) +
+    facet_wrap(~ annotator, scales = "free_y", ncol = 1) +
+    labs(title = "Per-cell confidence by predicted cell type",
+         subtitle = sprintf(paste("dashed line = 0.5; types with <%d cells omitted;",
+                                  "outliers hidden.\nScales are per-annotator and",
+                                  "not comparable across facets"),
+                            params$min_pair_cells),
+         x = "confidence score (annotator's own scale)", y = NULL) +
+    theme_scratch() +
+    theme(panel.grid.major.y = element_blank())
+}
+```
+
+
+```{r conf-vs-uncalled, results = 'asis'}
+# The one question the two scores CAN both answer, on a common footing: are the
+# cells a third annotator refused to call also the cells the scoring annotators
+# found hard? If yes, the Unknowns are genuinely ambiguous cells and every method
+# is struggling on them. If no -- confident calls where another method saw
+# nothing -- the gap is that method's reference, not the biology, and treating
+# its Unknowns as "low quality cells" would be wrong.
+if (has_conf && n_ann >= 2 && overlap > 0) {
+  jkeys <- intersect(names(joint), names(labels))
+  rows <- rbindlist(lapply(conf_anns, function(a) {
+    cj <- merge(joint, conf[[a]], by = "cell_id")
+    rbindlist(lapply(setdiff(jkeys, a), function(o) {
+      ov <- canon(cj[[o]])
+      out <- is.na(ov) | ov %in% UNCALLED
+      if (sum(out) < params$min_pair_cells || sum(!out) < params$min_pair_cells) return(NULL)
+      m_out <- median(cj$conf_score[out],  na.rm = TRUE)
+      m_in  <- median(cj$conf_score[!out], na.rm = TRUE)
+      pw <- tryCatch(suppressWarnings(
+              wilcox.test(cj$conf_score[out], cj$conf_score[!out])$p.value),
+            error = function(e) NA_real_)
+      data.table(scorer = a, uncalled_by = o,
+                 n_uncalled = sum(out), n_called = sum(!out),
+                 median_on_uncalled = round(m_out, 3), median_on_called = round(m_in, 3),
+                 ratio = round(m_out / max(m_in, 1e-9), 2), p_value = pw)
+    }))
+  }))
+
+  if (!is.null(rows) && nrow(rows)) {
+    fmt_p <- function(p) {
+      if (is.na(p)) return("")
+      if (p < 2.2e-16) return(", Wilcoxon p < 2.2e-16")
+      sprintf(", Wilcoxon p = %.3g", p)
+    }
+    # Report the target ONE annotator's Unknowns at a time: "which cells did X
+    # refuse to call" is the question, and every scorer answers it separately.
+    tgt   <- rows[, .(n = sum(n_uncalled)), by = uncalled_by][which.max(n)]$uncalled_by
+    sub   <- rows[uncalled_by == tgt][order(-ratio)]
+    sure  <- sub[ratio >= 0.9]
+    unsure <- sub[ratio <  0.9]
+
+    lines <- sprintf(
+      "- **%s**: median **%.3f** on those cells vs **%.3f** elsewhere (ratio **%.2f**%s)",
+      sub$scorer, sub$median_on_uncalled, sub$median_on_called, sub$ratio,
+      vapply(sub$p_value, fmt_p, character(1)))
+
+    msg <- sprintf(paste0(
+      "**%s leaves %s cells uncalled.** Every other annotator that reports a per-cell ",
+      "score was asked how certain it is about exactly those cells:\n\n%s\n\n"),
+      tgt, format(sub$n_uncalled[1], big.mark = ","), paste(lines, collapse = "\n"))
+
+    # The verdict depends on whether the scorers AGREE. Taking the worst scorer
+    # and speaking for all of them would report a reference gap as ambiguity.
+    if (nrow(unsure) == 0) {
+      verdict <- "caution"
+      msg <- paste0(msg, sprintf(paste(
+        "**Every scorer stays fully confident there, so these cells are not intrinsically",
+        "ambiguous -- %s simply has no marker set that covers them.** Treat this as a gap in",
+        "%s's reference rather than as low-quality cells, and do not filter them out on the",
+        "strength of the Unknown call."), tgt, tgt))
+    } else if (nrow(sure) == 0) {
+      verdict <- "note"
+      msg <- paste0(msg, sprintf(paste(
+        "**Every scorer is measurably less certain on exactly those cells**, so the methods",
+        "are struggling on the same population. That is a genuinely ambiguous subset rather",
+        "than a gap peculiar to %s -- expect no annotator to resolve it cleanly, and carry",
+        "it as `Unknown` rather than forcing a label."), tgt))
+    } else {
+      verdict <- "important"
+      msg <- paste0(msg, sprintf(paste(
+        "**The scorers split, and that split is the finding.** %s is certain about these",
+        "cells while %s is not. Confidence is measured against each classifier's own",
+        "reference, so disagreement of this shape means the population is present in one",
+        "reference and absent or poorly represented in the other -- it is a statement about",
+        "**reference coverage, not about the cells**. Trust the annotator whose reference",
+        "actually contains the tissue you sequenced, and read %s's low scores here as the",
+        "same missing-population signal that made %s give up, not as evidence of ambiguity."),
+        paste(sure$scorer, collapse = ", "), paste(unsure$scorer, collapse = ", "),
+        paste(unsure$scorer, collapse = "/"), tgt))
+    }
+    scratch_finding(msg, type = verdict,
+                    title = "Is low confidence where the annotators disagree?")
+    scratch_table(rows[order(ratio),
+                       .(scorer, `uncalled by` = uncalled_by, `n uncalled` = n_uncalled,
+                         `median on uncalled` = median_on_uncalled,
+                         `median on called` = median_on_called, ratio,
+                         `p (Wilcoxon)` = signif(p_value, 3))],
+                  caption = paste("Each scoring annotator's confidence on the cells another",
+                                  "annotator left Unknown, versus the cells it named"))
+  }
+}
+```
+
+```{r export, include = FALSE}
+if (n_ann >= 2 && overlap > 0) {
+  fwrite(joint, file.path(params$work_directory, "data",
+                          paste0(params$project_name, "_annotation_concordance.csv")))
+  fwrite(res,   file.path(params$work_directory, "data",
+                          paste0(params$project_name, "_annotator_agreement.csv")))
+}
+```
+
+## Parameters log
+
+```{r params_log}
+knitr::kable(data.frame(parameter = names(params),
+                        value = vapply(params, function(x) paste(as.character(x), collapse = "; "), "")),
+             row.names = FALSE)
+```
+
+## Session info
+
+```{r session_info}
+sessionInfo()
+```
