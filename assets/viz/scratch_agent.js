@@ -327,14 +327,121 @@
       .replace(/\n{2,}/g, "<br><br>").replace(/\n/g, "<br>");
   }
 
+  /* ---------------------------------------------------------------------
+     Charts the agent draws on request
+     ---------------------------------------------------------------------
+     Plotly is already in the page (the report's own figures are widgets), so a
+     chart costs no new dependency. If a report happens to carry no widget,
+     Plotly is absent and these handlers say so instead of throwing.
+
+     Deliberately limited to the registered tables. The agent can plot what the
+     report computed; it cannot invent a variable that was never measured.
+     ------------------------------------------------------------------ */
+
+  const havePlotly = () => typeof window.Plotly !== "undefined";
+
+  function plotTheme(title) {
+    const dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return {
+      title: { text: title, font: { size: 13 } },
+      margin: { l: 52, r: 16, t: 38, b: 46 },
+      paper_bgcolor: "rgba(0,0,0,0)",
+      plot_bgcolor: "rgba(0,0,0,0)",
+      font: { color: dark ? "#e6edf3" : "#24292f", size: 11 },
+      showlegend: false,
+    };
+  }
+
+  function drawPlot(node, traces, title) {
+    if (!havePlotly()) {
+      node.insertAdjacentHTML("beforeend",
+        "<br><em>This report carries no Plotly runtime, so I cannot draw here. " +
+        "The numbers above are still computed from the data.</em>");
+      return;
+    }
+    const div = document.createElement("div");
+    div.className = "sxa-plot";
+    node.appendChild(div);
+    window.Plotly.newPlot(div, traces, plotTheme(title),
+                          { displayModeBar: false, responsive: true });
+  }
+
+  // "plot|chart|histogram|scatter ..." -> { traces, title, summary }
+  function buildChart(q) {
+    const tname = pickTable(q);
+    const rows = T(tname);
+    if (!rows.length) return null;
+
+    const nums = numericCols(rows), txts = textCols(rows);
+    const named = Object.keys(rows[0]).filter(
+      (c) => q.includes(" " + c.toLowerCase() + " ") || q.includes(c.toLowerCase()));
+
+    const wantHist = /\bhistogram|\bdistribution\b/.test(q);
+    const wantScatter = /\bscatter\b|\bvs\b|\bagainst\b/.test(q);
+
+    const numNamed = named.filter((c) => nums.includes(c));
+    const txtNamed = named.filter((c) => txts.includes(c));
+
+    if (wantScatter && numNamed.length >= 2) {
+      const [x, y] = numNamed;
+      return {
+        title: `${y} vs ${x} — ${tname}`,
+        summary: `Scatter of **${y}** against **${x}** over ${rows.length} rows of \`${tname}\`.`,
+        traces: [{ x: rows.map((r) => num(r[x])), y: rows.map((r) => num(r[y])),
+                   text: rows.map((r) => txts.length ? r[txts[0]] : ""),
+                   mode: "markers", type: "scattergl",
+                   marker: { size: 7, color: "#2a78d6", opacity: .8 } }],
+      };
+    }
+
+    if (wantHist && numNamed.length >= 1) {
+      const x = numNamed[0];
+      return {
+        title: `Distribution of ${x} — ${tname}`,
+        summary: `Histogram of **${x}** over ${rows.length} rows of \`${tname}\`.`,
+        traces: [{ x: rows.map((r) => num(r[x])), type: "histogram",
+                   marker: { color: "#2a78d6" } }],
+      };
+    }
+
+    // Default: a bar of one numeric by one categorical — the shape most of these
+    // tables actually are (per-sample, per-cluster, per-cell-type summaries).
+    const yv = numNamed[0] || nums[0];
+    const xv = txtNamed[0] || txts[0];
+    if (!yv || !xv) return null;
+    const idx = rows.map((r, i) => i).sort((a, b) => (num(rows[b][yv]) || 0) - (num(rows[a][yv]) || 0)).slice(0, 30);
+    return {
+      title: `${yv} by ${xv} — ${tname}`,
+      summary: `**${yv}** by **${xv}** from \`${tname}\`${idx.length < rows.length ? `, top ${idx.length}` : ""}.`,
+      traces: [{ x: idx.map((i) => rows[i][xv]), y: idx.map((i) => num(rows[i][yv])),
+                 type: "bar", marker: { color: "#2a78d6" } }],
+    };
+  }
+
   function mount() {
     const host = document.getElementById("scratch-agent");
     if (!host) return;
+
+    // Launcher lives outside the panel so it stays reachable when the panel is
+    // closed. The panel opens on first load: a chat box nobody notices is the
+    // same as no chat box, which is what the previous inline version was.
+    const launch = document.createElement("button");
+    launch.className = "sxa-launch";
+    launch.innerHTML = '<span class="sxa-dot"></span> Ask about this report';
+    document.body.appendChild(launch);
+
+    const setOpen = (open) => {
+      host.classList.toggle("sxa-open", open);
+      launch.style.display = open ? "none" : "flex";
+    };
+    launch.onclick = () => setOpen(true);
+
     host.innerHTML = `
       <div class="sxa">
         <div class="sxa-head">
-          <span class="sxa-title">Ask about this run</span>
+          <span class="sxa-title">${(DATA.meta && DATA.meta.stage) ? DATA.meta.stage + " — ask about this report" : "Ask about this report"}</span>
           <span class="sxa-mode" id="sxa-mode">offline · deterministic</span>
+          <button class="sxa-close" id="sxa-close" title="Close" aria-label="Close">&times;</button>
         </div>
         <div class="sxa-log" id="sxa-log"></div>
         <div class="sxa-chips" id="sxa-chips"></div>
@@ -346,8 +453,8 @@
 
     const log = host.querySelector("#sxa-log");
     const chips = host.querySelector("#sxa-chips");
-    ["Summarise this run", "What failed and why?", "Any rare patterns?",
-     "Top 5 by cell count", "Lowest median genes"]
+    ["Summarise this report", "What needs attention?", "Any rare patterns?",
+     "Plot the main table", "Top 5 by cell count"]
       .forEach((s) => {
         const b = document.createElement("button");
         b.className = "sxa-chip"; b.type = "button"; b.textContent = s;
@@ -363,8 +470,30 @@
       return d;
     }
 
-    say("bot", md(`Ready. I answer from the data embedded in this page — no network needed. `
-      + `${(DATA.findings || []).length} finding(s) and ${Object.keys(DATA.tables).length} table(s) loaded.`));
+    host.querySelector("#sxa-close").onclick = () => setOpen(false);
+
+    // Open with the summary already written. The first thing a reader wants is
+    // "what does this report say", and making them ask for it is friction.
+    const openingSummary = () => {
+      const f = DATA.findings || [];
+      const sev = (t) => f.filter((x) => (x.type || "").toLowerCase() === t).length;
+      const nT = Object.keys(DATA.tables || {}).length;
+      const bits = [];
+      bits.push(`**${DATA.meta && DATA.meta.stage ? DATA.meta.stage : "This stage"}**`
+        + `${DATA.meta && DATA.meta.project ? " · " + DATA.meta.project : ""}`
+        + ` — ${f.length} finding(s), ${nT} table(s) in this page.`);
+      const caution = f.filter((x) => /caution|important/i.test(x.type || ""));
+      if (caution.length) {
+        bits.push("", `**${caution.length} need attention:**`);
+        caution.slice(0, 4).forEach((x) => bits.push(`- ${strip(x.title || "")}: ${strip(x.text || "").slice(0, 190)}`));
+      } else if (f.length) {
+        bits.push("", "Nothing flagged as a caution. Headline findings:");
+        f.slice(0, 3).forEach((x) => bits.push(`- ${strip(x.title || "")}: ${strip(x.text || "").slice(0, 170)}`));
+      }
+      bits.push("", "Ask me anything about these numbers, or say _plot \`<column>\` by \`<column>\`_ and I will draw it.");
+      return bits.join("\n");
+    };
+    say("bot", md(openingSummary()));
 
     host.querySelector("#sxa-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -372,6 +501,18 @@
       const q = inp.value.trim(); if (!q) return;
       inp.value = "";
       say("user", md(q));
+
+      // Plot requests are handled before the deterministic text handlers: they
+      // produce a figure plus a sentence, not a paragraph.
+      if (/\bplot\b|\bchart\b|\bgraph\b|\bhistogram\b|\bdraw\b|\bvisuali[sz]e\b/.test(" " + q.toLowerCase() + " ")) {
+        const spec = buildChart(" " + q.toLowerCase() + " ");
+        if (spec) { drawPlot(say("bot", md(spec.summary)), spec.traces, spec.title); return; }
+        say("bot", md("I could not work out what to plot from that. Name a table column — "
+          + "e.g. _plot n_observed_cells by sample_id_, or _histogram of percent_mito_. "
+          + `Columns I have: ${Object.keys(DATA.tables).map((t) => "`" + t + "`").join(", ") || "none"}.`));
+        return;
+      }
+
       const det = answerDeterministic(q);
       const node = say("bot", md(det.text));
       if (llm && det.intent !== "unknown") {
@@ -389,6 +530,12 @@
       const m = host.querySelector("#sxa-mode");
       if (f) { m.textContent = `offline · local model (${f.model})`; m.classList.add("sxa-live"); }
     });
+
+    // Open on load, after a beat so it slides in over a settled page rather than
+    // fighting the widgets for first paint. The summary is the point of the
+    // panel; a reader should not have to know to go looking for it. Closing it
+    // is one click and the launcher brings it back.
+    setTimeout(() => setOpen(true), 400);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount);

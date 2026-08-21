@@ -37,3 +37,43 @@
 .sx-filters{margin:.2rem 0 .6rem}
 .sx-filters .form-group{margin-bottom:.35rem}
 .sx-filters label{font-size:.74rem;letter-spacing:.05em;text-transform:uppercase;opacity:.7}
+
+/* ---------------------------------------------------------------------------
+   Docked side panel
+   ---------------------------------------------------------------------------
+   The agent used to render as an inline block wherever scratch_agent() was
+   called, which put it at the very bottom of a 15 MB report — past every figure,
+   where nobody scrolled to it. It is now a launcher plus a slide-out panel
+   fixed to the right edge, so it is reachable from anywhere in the document
+   without moving the reader's place in it.
+
+   Colours are declared for BOTH themes: these reports are read in whatever the
+   viewer's browser is set to, and a panel that assumes light backgrounds is
+   unreadable in dark mode.
+   ------------------------------------------------------------------------ */
+#scratch-agent{position:fixed;top:0;right:0;height:100vh;width:min(420px,92vw);
+  z-index:9999;display:flex;flex-direction:column;transform:translateX(100%);
+  transition:transform .22s ease;background:var(--sxa-bg,#fff);
+  border-left:1px solid rgba(128,128,128,.3);box-shadow:-8px 0 26px rgba(0,0,0,.13)}
+#scratch-agent.sxa-open{transform:translateX(0)}
+#scratch-agent .sxa-log{flex:1;max-height:none}
+
+.sxa-launch{position:fixed;right:18px;bottom:18px;z-index:10000;
+  display:flex;align-items:center;gap:9px;padding:11px 17px;border:0;cursor:pointer;
+  border-radius:999px;font:inherit;font-size:.83rem;font-weight:600;color:#fff;
+  background:#2a78d6;box-shadow:0 4px 16px rgba(42,120,214,.42)}
+.sxa-launch:hover{background:#1f66bd}
+.sxa-launch .sxa-dot{width:8px;height:8px;border-radius:50%;background:#7ee787}
+.sxa-close{background:none;border:0;cursor:pointer;font-size:1.15rem;line-height:1;
+  opacity:.55;padding:0 2px;color:inherit}
+.sxa-close:hover{opacity:1}
+
+/* A chart the agent drew, inside the conversation. */
+.sxa-plot{width:100%;min-height:250px;margin-top:8px;
+  border:1px solid rgba(128,128,128,.22);border-radius:8px}
+
+@media (prefers-color-scheme: dark){
+  #scratch-agent{--sxa-bg:#1b1f24;color:#e6edf3}
+  .sxa-form input{background:#0f1317;color:#e6edf3;border-color:rgba(128,128,128,.4)}
+}
+@media (max-width:640px){ #scratch-agent{width:100vw} }

@@ -106,12 +106,12 @@ for (sample_metric in input_metrics_report) {
 ```{r}
 #| column: screen-inset-shaded
 
-DT::datatable(metric_report_db, 
-    class = 'cell-border stripe',
-    rownames = FALSE,
-    filter = 'top',
-    width = '100%', 
-    options = list(scrollX = TRUE))
+# scratch_table(), not DT::datatable() directly: it renders the same searchable
+# table AND registers it, which is what puts the numbers in front of the in-page
+# agent. A raw DT call is invisible to the agent, so this report could be
+# summarised but not queried — the cohort metrics table is the one thing a reader
+# is most likely to ask about.
+scratch_table(metric_report_db, caption = "Per-sample cohort metrics", page = 15)
 
 ```
 

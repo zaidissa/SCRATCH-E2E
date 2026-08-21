@@ -81,6 +81,17 @@ scratch_finding <- function(text, type = c("note", "tip", "important", "warning"
                  if (!is.null(title)) sprintf(' title="%s"', title) else "",
                  if (collapse) ' collapse="true"' else "")
   cat("\n", hdr, "\n", paste(text, collapse = "\n"), "\n:::\n", sep = "")
+
+  # Register as well as render. `.SX_FINDINGS` was only ever written by
+  # scratch_register(), which no notebook calls — every notebook uses THIS
+  # function. So the in-page agent received `findings: []` on every report and
+  # could not summarise the one thing a reader most wants summarised. Recording
+  # it here means all ~40 existing call sites are covered without touching one.
+  .SX_FINDINGS$rows[[length(.SX_FINDINGS$rows) + 1L]] <- list(
+    type  = type,
+    title = if (is.null(title)) "" else title,
+    text  = paste(text, collapse = " ")
+  )
   invisible(NULL)
 }
 
@@ -177,9 +188,27 @@ scratch_interact <- function(p, tooltip = "all", height = NULL, static_ok = TRUE
 # Tables: searchable, sortable, exportable
 # -----------------------------------------------------------------------------
 
+# Every table a report renders is also REGISTERED here, so the in-page agent can
+# answer from the same numbers the reader is looking at. Previously the agent had
+# to be handed its tables by hand, which is why it only ever appeared in
+# stage_report.qmd and never in the per-module notebooks anyone actually opens.
+.SX_TABLES <- new.env(parent = emptyenv()); .SX_TABLES$rows <- list()
+
 scratch_table <- function(df, caption = NULL, page = 10, searchable = TRUE,
                           max_static = 25, digits = 3) {
   if (is.null(df) || !nrow(df)) { cat("\n_No rows._\n"); return(invisible(NULL)) }
+
+  # Register before rendering, capped so a 24k-row cell table cannot inflate the
+  # page: the agent needs enough rows to compute over, not the whole matrix.
+  local({
+    nm <- caption
+    if (is.null(nm) || !nzchar(nm)) nm <- paste0("table_", length(.SX_TABLES$rows) + 1L)
+    nm <- substr(gsub("[^A-Za-z0-9 _-]", "", nm), 1, 60)
+    cap <- getOption("scratch.agent.maxrows", 2000L)
+    d <- as.data.frame(df)
+    if (nrow(d) > cap) d <- d[seq_len(cap), , drop = FALSE]
+    .SX_TABLES$rows[[nm]] <- d
+  })
 
   # `df[num]` with a logical is data.frame idiom for COLUMN selection. On a
   # data.table the same expression selects ROWS, and errors outright when the
@@ -373,6 +402,31 @@ scratch_should_interact <- function(n_rows, budget = 5000) {
 # computation, never from the model.
 # -----------------------------------------------------------------------------
 
+#' Mount the agent using everything the report registered as it rendered.
+#' Called automatically by the document hook below, so no notebook needs to know
+#' the agent exists.
+scratch_agent_auto <- function(stage = NULL, project = NULL) {
+  if (isFALSE(getOption("scratch.agent", TRUE))) return(invisible(NULL))
+  scratch_agent(tables  = .SX_TABLES$rows,
+                stage   = stage   %||% getOption("scratch.stage", NULL),
+                project = project %||% getOption("scratch.project", NULL))
+}
+
+# Appending via knitr's `document` hook is what makes this universal: it runs
+# once per rendered notebook, after every chunk, so the panel carries the
+# report's COMPLETE set of findings and tables. Wiring it per-notebook would
+# mean 40 edits and would still miss whichever one was added next.
+.sx_install_agent_hook <- function() {
+  if (!requireNamespace("knitr", quietly = TRUE)) return(invisible(NULL))
+  if (isFALSE(getOption("scratch.agent", TRUE))) return(invisible(NULL))
+  knitr::knit_hooks$set(document = function(x) {
+    html <- try(utils::capture.output(scratch_agent_auto()), silent = TRUE)
+    if (inherits(html, "try-error") || !length(html)) return(x)
+    c(x, "", html)
+  })
+  invisible(NULL)
+}
+
 scratch_agent <- function(tables = list(), stage = NULL, project = NULL,
                           viz_dir = ".", height = NULL) {
   js  <- file.path(viz_dir, "scratch_agent.js")
@@ -383,9 +437,16 @@ scratch_agent <- function(tables = list(), stage = NULL, project = NULL,
   }
   if (!file.exists(js)) { cat("\n_Agent assets not staged._\n"); return(invisible(NULL)) }
 
+  # An empty R list serialises to JSON `[]` (an array), but the agent indexes
+  # tables by name and expects `{}`. Naming the empty list forces the object
+  # form, so a report with no registered tables still presents a valid shape
+  # instead of an array the JS then treats as a table called "0".
+  tbl <- lapply(tables, function(d) { d <- as.data.frame(d); d[] <- lapply(d, as.character); d })
+  if (!length(tbl)) tbl <- stats::setNames(list(), character(0))
+
   payload <- list(
     findings = .SX_FINDINGS$rows,
-    tables   = lapply(tables, function(d) { d <- as.data.frame(d); d[] <- lapply(d, as.character); d }),
+    tables   = tbl,
     meta     = list(stage = stage %||% "", project = project %||% "",
                     generated = format(Sys.time(), "%Y-%m-%d %H:%M"))
   )
@@ -499,4 +560,97 @@ scratch_table_set <- function(tables, level = 3, page = 10, collapse_after = 3) 
       htmltools::tagList(hdr, body)
     }
   }))
+}
+
+# Install the auto-mount hook at source() time. Every notebook already sources
+# this file in its scratch-viz-setup chunk, so every report gets the panel.
+# Disable with options(scratch.agent = FALSE).
+try(.sx_install_agent_hook(), silent = TRUE)
+
+# =============================================================================
+# Cell-type vocabulary matching, and the CNV reference-null cutoff
+# =============================================================================
+#
+# These live here because TWO notebooks need them to agree exactly:
+# stratify_compartments.qmd decides the compartment split, and
+# notebook_cnv_concordance.qmd draws the confusion matrix that claims to
+# describe that same decision. Two copies of one rule silently diverge; the
+# comparison then describes a decision the pipeline never made.
+#
+# The matching problem is two problems wearing one symptom:
+#
+#   SPELLING     "T_Cells" (scType) vs "T cell" (Azimuth) — punctuation and
+#                plurality. Normalisation handles it.
+#   GRANULARITY  "Myeloid" vs "Macrophage" — a lineage and a cell type within
+#                it. No string transform connects them; that needs a table.
+#
+# Under exact `%in%` matching, an scType reference list against an Azimuth
+# column intersects on exactly ONE label (Fibroblast). That built a CNV null
+# from 544 fibroblasts all scoring zero, so mean + 3*SD collapsed to a cutoff of
+# 0 and every cell with any CNV signal was called malignant.
+
+scratch_norm_label <- function(x) {
+  x <- tolower(trimws(as.character(x)))
+  x <- gsub("[^a-z0-9]+", " ", x)
+  x <- gsub("\\b(cells|cell)\\b", " ", x)   # drop the "cell(s)" token
+  x <- gsub("s\\b", "", x)                  # naive singular
+  trimws(gsub(" +", " ", x))
+}
+
+# One-directional on purpose: a coarse lineage expands to the finer labels that
+# fall under it, never the reverse. Expanding "Macrophage" up to "Myeloid" would
+# make a macrophage match a request for the whole myeloid compartment.
+.SCRATCH_LINEAGE_ALIASES <- list(
+  "myeloid"     = c("macrophage","monocyte","dendritic","dc","pdc","mast",
+                    "neutrophil","granulocyte","mono","mdc"),
+  "b plasma"    = c("b","plasma","plasmablast"),
+  "t"           = c("t","cd4 t","cd8 t","treg","regulatory t"),
+  "nk"          = c("nk","nkt","innate lymphoid"),
+  "endothelial" = c("endothelial","ec","lymphatic endothelial"),
+  "fibroblast"  = c("fibroblast","caf","stromal","smooth muscle","pericyte"),
+  "epithelial"  = c("epithelial","tumor","tumour","malignant","carcinoma")
+)
+
+scratch_expand_labels <- function(labels) {
+  n <- scratch_norm_label(labels)
+  unique(c(n, unlist(.SCRATCH_LINEAGE_ALIASES[intersect(n, names(.SCRATCH_LINEAGE_ALIASES))],
+                     use.names = FALSE)))
+}
+
+#' TRUE for each observed label that falls under any requested lineage.
+scratch_match_labels <- function(observed, requested) {
+  scratch_norm_label(observed) %in% scratch_expand_labels(requested)
+}
+
+#' The CNV cutoff for one sample, from the reference-lineage null.
+#'
+#' Returns list(cutoff, n_ref, basis). `basis` names the rule that was used, so
+#' a report can say which one applied rather than presenting every threshold as
+#' if it came from the same place.
+#'
+#' A null with ZERO SPREAD is refused: mean + k*sd collapses to mean, and when
+#' the reference cells all score 0 the cutoff is 0 and `score > cutoff` calls
+#' everything malignant. The old `n_ref >= 30` guard never caught it because
+#' count was never the problem — spread was.
+scratch_cnv_cutoff <- function(scores, is_ref, k = 3, fallback_q = 0.75) {
+  nulls <- scores[is_ref & is.finite(scores)]
+  sd_n  <- if (length(nulls) >= 2) stats::sd(nulls) else NA_real_
+  if (length(nulls) >= 30 && is.finite(sd_n) && sd_n > 0) {
+    list(cutoff = mean(nulls) + k * sd_n, n_ref = length(nulls), basis = "per_sample")
+  } else {
+    # The null has no spread (or too few cells to have one). A plain quantile of
+    # the whole distribution is NOT a safe fallback: when most cells score zero,
+    # the 75th percentile is also zero and the cutoff is degenerate again under a
+    # different name. Take the quantile of the scores that actually EXCEED the
+    # null instead, so the threshold sits inside the signal rather than on the
+    # floor. If nothing exceeds the null, there is no separation to find and the
+    # null's own maximum is returned — every reference cell then stays below the
+    # cutoff by construction, which is the one property that must hold.
+    above <- scores[is.finite(scores) & scores > max(c(nulls, -Inf), na.rm = TRUE)]
+    cut <- if (length(above)) as.numeric(stats::quantile(above, fallback_q, na.rm = TRUE))
+           else max(c(nulls, 0), na.rm = TRUE)
+    list(cutoff = cut, n_ref = length(nulls),
+         basis = if (length(nulls) >= 30) "quantile_degenerate_null"
+                 else "quantile_too_few_reference")
+  }
 }

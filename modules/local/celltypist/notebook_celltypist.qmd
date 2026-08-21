@@ -366,3 +366,23 @@ adata.write_csvs(annot_table)
 session_info.show()
 
 ```
+
+```{python}
+#| output: asis
+#| echo: false
+# Mount the in-page agent. The R notebooks get this automatically from a knitr
+# document hook in scratch_report.R; a Jupyter-engine notebook never sources
+# that file, so this one rendered with no panel at all until now. Guarded: if
+# the viz library did not import, the notebook renders exactly as before.
+try:
+    sv.finding(f"CellTypist annotated **{adata.n_obs:,} cells** with the "
+               f"`{model_name if 'model_name' in dir() else 'Immune_All'}` model.",
+               type="note", title="CellTypist run")
+    if "predicted_labels" in adata.obs:
+        _counts = adata.obs["predicted_labels"].value_counts().reset_index()
+        _counts.columns = ["cell_type", "cells"]
+        sv.table(_counts, caption="CellTypist predicted labels")
+    sv.agent(stage="annotation", project=project_name)
+except Exception as _e:
+    pass
+```

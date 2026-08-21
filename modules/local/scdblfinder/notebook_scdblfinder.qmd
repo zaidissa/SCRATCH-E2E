@@ -239,13 +239,9 @@ if (nrow(meta_preview) > 2000) {
   meta_preview <- meta_preview[sample(nrow(meta_preview), 2000), , drop = FALSE]
 }
 
-datatable(meta_preview,
-    class = 'cell-border stripe',
-    rownames = FALSE,
-    filter = 'top',
-    width = '100%',
-    options = list(scrollX = TRUE)
-    )
+# Registered as well as rendered, so the agent can compute over these cells.
+# See the note in notebook_quality_table_report.qmd.
+scratch_table(meta_preview, caption = "Per-cell doublet metadata (sampled)", page = 12)
 
 ```
 
@@ -442,6 +438,13 @@ singlet_object <- subset(
 
 n_after <- ncol(singlet_object)
 
+# Inline `r n_after` printed as "2.4415^{4}" -- knitr renders a
+# scientific-notation number as LaTeX. Format once, here, as in notebook_seurat_qc.
+.fmt_n     <- function(x) format(x, big.mark = ",", scientific = FALSE)
+n_before_fmt  <- .fmt_n(n_before)
+n_after_fmt   <- .fmt_n(n_after)
+n_removed_fmt <- .fmt_n(n_before - n_after)
+
 ```
 
 The singlet subset is still a lazy BPCells view over the full merged store. So
@@ -483,7 +486,7 @@ singlet_object <- CreateSeuratObject(
 ```
 
 ::: {.callout-warning}
-Total cells after doublet removal **`r n_after`** (removed **`r n_before - n_after`** of **`r n_before`**).
+Total cells after doublet removal **`r n_after_fmt`** (removed **`r n_removed_fmt`** of **`r n_before_fmt`**).
 :::
 
 ## Saving Seurat object

@@ -394,3 +394,69 @@ def violin_selector(adata, keys, groupby, title="Signature score",
                                            "x": 0, "xanchor": "left"}}])
                      for i, k in enumerate(keys)])])
     return fig
+
+
+# =============================================================================
+# In-page agent, python side
+# =============================================================================
+#
+# The R notebooks get the agent automatically: scratch_report.R installs a knitr
+# `document` hook that mounts it once per render. The Jupyter-engine notebooks
+# (CellTypist is the only one today) never source that file, so they rendered
+# without a panel at all — verified: zero occurrences of `scratch_agent` in
+# notebook_celltypist.html.
+#
+# This is the same payload contract, built from python. Call it from a cell with
+# `#| output: asis` at the end of the notebook.
+
+_SX_FINDINGS = []
+_SX_TABLES = {}
+
+
+def finding(text, type="note", title=""):
+    """Render a Quarto callout AND register it for the agent."""
+    _SX_FINDINGS.append({"type": type, "title": title, "text": str(text)})
+    hdr = f'::: {{.callout-{type}' + (f' title="{title}"' if title else "") + "}"
+    print("\n" + hdr + "\n" + str(text) + "\n:::\n")
+
+
+def table(df, caption=None, max_rows=2000):
+    """Register a dataframe for the agent. Returns it so the cell still displays."""
+    name = caption or f"table_{len(_SX_TABLES) + 1}"
+    try:
+        d = df.head(max_rows)
+        _SX_TABLES[name] = [
+            {k: ("" if v is None else str(v)) for k, v in row.items()}
+            for row in d.to_dict(orient="records")
+        ]
+    except Exception:
+        pass
+    return df
+
+
+def agent(stage=None, project=None, viz_dir="."):
+    """Emit the agent panel. Mirrors scratch_agent() in scratch_report.R."""
+    import json
+    import os
+
+    js = css = None
+    for root in (viz_dir, "assets/viz", "."):
+        j, c = os.path.join(root, "scratch_agent.js"), os.path.join(root, "scratch_agent.css")
+        if os.path.exists(j) and os.path.exists(c):
+            js, css = j, c
+            break
+    if not js:
+        print("\n_Agent assets not staged._\n")
+        return
+
+    payload = {
+        "findings": _SX_FINDINGS,
+        "tables": _SX_TABLES,
+        "meta": {"stage": stage or "", "project": project or ""},
+    }
+    print("\n```{=html}")
+    print("<style>\n" + open(css).read() + "\n</style>")
+    print('<div id="scratch-agent"></div>')
+    print("<script>window.SCRATCH_DATA = " + json.dumps(payload) + ";</script>")
+    print("<script>\n" + open(js).read() + "\n</script>")
+    print("```\n")
