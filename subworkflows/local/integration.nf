@@ -20,13 +20,13 @@ workflow INTEGRATION {
         ch_seurat_object
         ch_annotated_object
         ch_cnv_infercnv
-        ch_cnv_scevan
         ch_metaprog
         ch_trajectory
         ch_liana
         ch_cellchat
         ch_tcr
         ch_compartment   // stratification assignment + TME tables
+        ch_annotation    // per-cell annotator labels (concordance table)
         ch_page_config
 
     main:
@@ -41,11 +41,11 @@ workflow INTEGRATION {
             ch_nb_integrate,
             ch_page_config,
             ch_cnv_infercnv,
-            ch_cnv_scevan,
             ch_metaprog,
             ch_trajectory,
             ch_tcr,
-            ch_compartment
+            ch_compartment,
+            ch_annotation
         )
 
         // ---- 2. Analyses that need two or more stages at once -------------

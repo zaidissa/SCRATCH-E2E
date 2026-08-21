@@ -16,7 +16,7 @@ workflow NUMBAT {
 
     take:
         ch_annotated_object
-        ch_bam               // tuple(sample_id, possorted_genome_bam.bam)
+        ch_bam               // tuple(sample_id, possorted_genome_bam.bam, .bam.bai)
 
     main:
 
@@ -87,7 +87,7 @@ workflow NUMBAT {
             // which reported "Succeeded: 58, Failed: 0" with no pileup at all.
             //
             // That matters more for Numbat than for any other caller, because
-            // stratify_numbat_priority = true means STRATIFY is meant to trust it
+            // cnv_caller_priority = numbat means STRATIFY is meant to trust it
             // over the others. Silently losing it changes the malignant split with
             // nothing in the report to say so. This is the same failure that let
             // the SCEVAN doubled-prefix bug run a "two-caller consensus" on one

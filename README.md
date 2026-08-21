@@ -18,7 +18,7 @@ ALIGN ──┬── GEX ──> QC ──> CLUSTER ──> ANNOTATION ──> 
 ```
 
 
-CNV calling runs inferCNV and SCEVAN by default, with CopyKAT and
+CNV calling runs inferCNV and Numbat in parallel by default, with CopyKAT and
 [Numbat](docs/NUMBAT.md) available. Numbat is opt-in because it needs the BAM
 plus a phasing panel — but it is the only caller that can see copy-neutral LOH,
 which the expression-based three are structurally blind to.
@@ -113,7 +113,7 @@ also commented at the site of the fix.
 | `conf/modules.config` | `paramas.input_integration_dimension` typo made `SEURAT_CLUSTER` fail at config evaluation | corrected |
 | Parameters | `organism` was `"Human"` in Annotation but `"human"` in CNV/CellComm; `thr_n_features`, `thr_resolution`, `seed`, `project_name`, `outdir` all collided across pipelines | one canonical `organism` with derived `organism_capitalised`/`organism_lower`; all stage params namespaced (`qc_`, `cluster_`, `annot_`, `bc_`, `cnv_`, `metaprog_`, `traj_`, `cc_`, `tcr_`) |
 | Containers | absolute `.sif` paths (`/home/sazaidi/…`, `/path/to/…`), local-only tags (`nf-quarto:latest`), `SEURAT_MERGE` with its container commented out | all images centralised in `conf/containers.config`, individually overridable, with a `--container_registry` mirror hook |
-| QC | `SCDBLFINDER` ran but its result was discarded (`ch_final_object = ch_merge_object`) — because the notebook writes **two** objects matching one output glob | `--qc_doublet_filter sample\|cluster` selects one, and it propagates |
+| QC | `SCDBLFINDER` ran but its result was discarded (`ch_final_object = ch_merge_object`) — because the notebook writes **two** objects matching one output glob | the doublet-filtered object propagates; since the BPCells port the notebook writes exactly one (`_qc_dbl_singlet_object.RDS`) and the subworkflow asserts it |
 | Annotation | subworkflow emitted `Channel.empty()`, so nothing chained downstream | emits the annotated object (Azimuth → scType → input fallback) |
 | Batch correction | no chainable output; `cpus 4 / memory 16.GB` hardcoded well below need | explicit `seurat_rds` emit; resources from `conf/base.config` |
 | Trajectory | `shell:` block used `${var}` (a *shell* variable), so the staged object never reached Quarto; self-referential `cpus`/`memory`; output glob on an absolute path | rewritten as `script:`; resources from config; outputs captured under `data/` |
@@ -122,7 +122,7 @@ also commented at the site of the fix.
 | Compartments | the malignant/non-malignant split was implicit and duplicated — `notebook_batch_correctionR.qmd` built its own `obj_non_tumor` by excluding the `Epithelial` label, and the metaprogram stage separately subset to `Epithelial`; two notebooks deciding what a tumour cell is, from a lineage proxy, with no record | explicit `STRATIFY` stage using CNV evidence with the label as tie-break; writes `malignant_status`, an assignment table and caller-concordance figures. `bc_exclude_labels` and `metaprog_subset_*` retuned so cells are not filtered twice |
 | TCR | eight optional inputs shared one `assets/NO_FILE`, causing `MASTER_SUMMARY` "input file name collision" whenever more than one was absent | one placeholder per slot |
 | Alignment | `GEX+TCR` overwrote the GEX handle with the TCR one, so VDJ contigs were unreachable | separate `gex_outs` / `vdj_outs` / `bam` emissions |
-| Stubs | 21 processes had none; several existing ones wrote filenames the real code never produces, and `SCEVAN`'s "stub" ran `quarto render` | full stub coverage; `-stub` now dry-runs all 47 tasks |
+| Stubs | 21 processes had none; several existing ones wrote filenames the real code never produces | full stub coverage; `-stub` dry-runs the whole DAG (65 tasks from ALIGN) |
 | Repo | 1.4 GB of committed macOS/aarch64 R libraries under `modules/local/scdblfinder/renv/` | not vendored |
 | Test data | samplesheet pointed at another developer's absolute paths and had a UTF-8 BOM on the header | self-contained fixture in `assets/test_data/` |
 

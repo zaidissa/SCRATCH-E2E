@@ -178,15 +178,25 @@ workflow ALIGN {
             }
         }
 
-        // The microbiome stage consumes the aligned BAM, which lives inside the
-        // same cellranger `outs` directory as the count matrices.
+        // The microbiome and Numbat stages consume the aligned BAM, which lives
+        // inside the same cellranger `outs` directory as the count matrices.
+        //
+        // The INDEX travels with it. NUMBAT_PILEUP declares
+        // `tuple val(sample_id), path(bam), path(bai), path(barcodes)`, and
+        // main.nf's --input_bam_path branch builds that 3-tuple; emitting only
+        // (sample, bam) here made the ALIGN-fed path one element short, so
+        // `--from align --run_numbat true` — the only route that never needs a
+        // pre-existing BAM — could not reach the pileup at all. cellranger writes
+        // possorted_genome_bam.bam.bai beside the BAM, so there is nothing to
+        // rebuild; a missing index falls back to the same placeholder main.nf uses.
         ch_bam = ch_gex_outs
             .flatMap { it instanceof List && it.size() == 2 ? [it] : [] }
             .map    { sample, files ->
-                def bam = (files instanceof List ? files : [files]).find {
-                    it.toString().endsWith('possorted_genome_bam.bam')
-                }
-                bam ? tuple(sample, bam) : null
+                def fl  = (files instanceof List ? files : [files])
+                def bam = fl.find { it.toString().endsWith('possorted_genome_bam.bam') }
+                def bai = fl.find { it.toString().endsWith('possorted_genome_bam.bam.bai') }
+                bam ? tuple(sample, bam,
+                            bai ?: file("${projectDir}/assets/NO_FILE_bai")) : null
             }
             .filter { it != null }
 

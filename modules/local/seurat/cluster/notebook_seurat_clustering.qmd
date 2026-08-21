@@ -423,45 +423,25 @@ rogue_result
 ```
 
 ::: {.callout-warning}
-The ROGUE score for the clustering composition (resolution = **`r thr_resolution`**) is equal to **`r rogue_value`**.
+The ROGUE score for the clustering composition (resolution = **`r thr_resolution`**) is
+**`r rogue_value`**: the block above is `eval: false`, so no purity score was computed
+for this run.
+
+ROGUE calls `as.matrix()` on the sampled counts, which materialises a dense matrix —
+the one thing the on-disk BPCells path exists to avoid. Re-enabling it needs a
+cluster-wise downsample small enough to densify safely, not a straight `eval: true`.
 :::
 
-### SEplot
-
-```{r rogue_seplot}
-#| label: fig-se-plot
-#| fig-cap: 'UMAP'
-#| fig-cap-location: top
-#| eval: false
-
-# Highly variable genes
-SEplot(entropy_result)
-
+```{r rogue_removed_note, include = FALSE}
+# The SEplot and ROGUE-boxplot sections were removed with the BPCells port. Their
+# chunks were `eval: false` alongside the block above, so they emitted no figure
+# while their prose still wrote @fig-se-plot / @fig-rogue-plot -- unresolvable
+# cross-references in every rendered clustering report. The plotting code lives
+# with ROGUE itself; restore both together.
+#
+# Kept as an include:FALSE chunk, not a markdown comment: an HTML comment in the
+# prose is passed through to the rendered page and shows up in its text.
 ```
-
-:::{.callout-tip}
-The @fig-se-plot shows the relationship between S and E. S-E curve identifies highly informative genes.
-:::
-
-### Boxplot
-
-```{r rogue_boxplot}
-#| label: fig-rogue-plot
-#| fig-cap: 'UMAP'
-#| fig-cap-location: top
-#| eval: false
-
-rogue.boxplot(rogue_result) +
-  scale_x_discrete(limits = sort(unique(seurat_object@meta.data$seurat_clusters))) +
-  theme(
-    axis.text = element_text(size = 16)
-  )
-
-```
-
-:::{.callout-tip}
-The @fig-rogue-plot displays boxplot of the ROGUE values for each cluster in different samples.
-:::
 
 ## Data visualization {.tabset}
 
@@ -576,11 +556,100 @@ if (all(group_vars %in% colnames(seurat_object@meta.data))) {
 
 ```
 
-:::{.callout-tip}
-The @fig-umap-multi shows the other study/experimental design features.
+:::{.callout-note}
+The group-based UMAP above is `eval: false`, so it draws nothing here. It facets on
+the other study/design features (`patient_id;timepoint`). Set `eval: true` when the
+metadata carries those columns — the chunk already falls back to a message when it
+does not.
 :::
 
 ## Saving Seurat object
+
+```{r materialise_layers}
+#| code-fold: true
+
+# CLUSTER is the last stage that runs in a BPCells-aware image. Everything
+# downstream -- annotation, CNV, stratify, metaprograms, batch correction,
+# trajectory, cell communication, TME -- runs in its own container, and none of
+# them ship BPCells. A BPCells-backed object handed to any of them dies at load
+# with "unable to load required package 'BPCells'" from deep inside
+# as.SingleCellExperiment(), which names the missing package but not the reason.
+#
+# So the on-disk store stops here: the layers are realised into ordinary sparse
+# matrices before the object is published. BPCells still does the job it was
+# brought in for -- the merge and the doublet pass over every raw cell, where
+# JoinLayers used to hit dgCMatrix's ~2.1 billion non-zero ceiling. By this
+# point the object has been through QC filtering and doublet removal.
+#
+# It does not always fit, which is why this is measured rather than assumed.
+.nnz_ceiling <- 2^31 - 1   # dgCMatrix indexes non-zeros with a 32-bit signed int
+
+.layer_names <- SeuratObject::Layers(seurat_object, assay = 'RNA')
+.bp_layers <- .layer_names[vapply(.layer_names, function(ln) {
+  inherits(SeuratObject::LayerData(seurat_object, assay = 'RNA', layer = ln),
+           'IterableMatrix')
+}, logical(1))]
+
+.materialised <- character(0)
+.kept_ondisk  <- character(0)
+
+if (length(.bp_layers)) {
+
+  # Counted once, on the counts layer, and applied to all of them: normalisation
+  # transforms the stored values but not which entries are stored, so every layer
+  # shares one sparsity pattern. Running matrix_stats() on the `data` layer would
+  # instead force the whole lazy log-normalisation to compute just to be counted.
+  .counts_layer <- if ('counts' %in% .bp_layers) 'counts' else .bp_layers[1]
+  .nnz <- tryCatch(
+    sum(as.numeric(BPCells::matrix_stats(
+      SeuratObject::LayerData(seurat_object, assay = 'RNA', layer = .counts_layer),
+      row_stats = 'nonzero')$row_stats['nonzero', ])),
+    error = function(e) NA_real_)
+
+  for (.ln in .bp_layers) {
+    .lay <- SeuratObject::LayerData(seurat_object, assay = 'RNA', layer = .ln)
+    if (!is.na(.nnz) && .nnz > .nnz_ceiling) {
+      .kept_ondisk <- c(.kept_ondisk, .ln)
+      next
+    }
+    # scale.data must be a DENSE base matrix: Seurat's v5->v4 assay coercion
+    # (which Azimuth performs before mapping) validates that slot as
+    # "matrix", and a dgCMatrix there aborts with `invalid class "Assay"
+    # object: invalid object for slot "scale.data"`. It is scaled over the
+    # variable features only, so densifying it is bounded.
+    SeuratObject::LayerData(seurat_object, assay = 'RNA', layer = .ln) <-
+      if (startsWith(.ln, 'scale.data')) as.matrix(.lay) else as(.lay, 'dgCMatrix')
+    .materialised <- c(.materialised, .ln)
+  }
+
+  message(sprintf("BPCells layers: %s | non-zeros: %s | materialised: %s",
+                  paste(.bp_layers, collapse = ','),
+                  format(.nnz, big.mark = ',', scientific = FALSE),
+                  paste(c(.materialised, '(none)')[1], collapse = ',')))
+}
+
+```
+
+```{r materialise-finding, results = 'asis'}
+if (length(.bp_layers)) {
+  if (length(.kept_ondisk)) {
+    scratch_finding(sprintf(paste(
+      "Layer(s) **%s** exceed dgCMatrix's 2.1 billion non-zero ceiling and were",
+      "left as on-disk BPCells matrices. **Every stage after clustering runs in a",
+      "container without BPCells and will fail to load this object.** Subset the",
+      "cohort, or add BPCells to the downstream images, before running annotation."),
+      paste(.kept_ondisk, collapse = ', ')),
+      type = "caution", title = "Object left on disk")
+  } else {
+    scratch_finding(sprintf(paste(
+      "Layer(s) **%s** were realised from the on-disk BPCells store into in-memory",
+      "sparse matrices, so the published object loads in the downstream containers",
+      "(none of which ship BPCells). The store itself is unchanged."),
+      paste(.materialised, collapse = ', ')),
+      type = "note", title = "Counts materialised for downstream stages")
+  }
+}
+```
 
 ```{r object_dump}
 

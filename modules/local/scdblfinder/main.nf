@@ -47,8 +47,10 @@ process SCDBLFINDER {
         
         touch _freeze/DUMMY/figure-html/FILE.png
 
-        touch data/${params.project_name}_qc_dbl_sample_object.RDS
-        touch data/${params.project_name}_qc_dbl_cluster_object.RDS
+        # Must match the notebook's object_dump chunk exactly — a stub that emits
+        # names the notebook does not write makes -stub prove nothing about the
+        # channel wiring downstream of here.
+        touch data/${params.project_name}_qc_dbl_singlet_object.RDS
 
         touch report/${notebook_scdblfinder.baseName}.html
 

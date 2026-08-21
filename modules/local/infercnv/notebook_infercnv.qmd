@@ -27,6 +27,7 @@ params:
   # reference_table: "data/Ovarian_reference_table.csv"
   organism: "human"
   input_analysis_mode: 'samples'
+  bayes_max_p_normal: 0
   thr_cluster_size: 1000
   n_threads: 8
   n_memory: 16
@@ -60,6 +61,7 @@ reference_table <- params$reference_table
 # Inputs and thresholds
 input_model <- params$input_model
 input_analysis_mode <- params$input_analysis_mode
+bayes_max_p_normal <- as.numeric(params$bayes_max_p_normal)
 thr_cluster_size <- params$thr_cluster_size
 
 # Dataflow/Computational parameters
@@ -291,6 +293,22 @@ infercnv_object <- infercnv::CreateInfercnvObject(
 ```
 
 ```{r infer_cnv_run part 2}
+# BayesMaxPNormal gates inferCNV's Bayesian mixture step, which re-scores each
+# predicted CNV region and drops the ones likely to be normal. On this data it
+# aborts inside inferCNV's own MCMC code:
+#
+#   Error in `do.call()`: second argument must be a list
+#     infercnv::run -> inferCNVBayesNet -> runMCMC -> getProbabilities
+#       -> do.call(rbind, mcmc[[j]])
+#
+# getProbabilities assumes every cell group accumulated MCMC draws; a group that
+# produced none leaves NULL there, and rbind refuses it. It is a property of the
+# grouping, not of the call here, so it cannot be retried around. Setting the
+# threshold to 0 skips that step and keeps the HMM's own state calls, which is
+# what the downstream `add_to_seurat` and the STRATIFY consensus actually read.
+#
+# Restore inferCNV's upstream default with -P bayes_max_p_normal:0.5 once the
+# image carries a version where the MCMC step tolerates an empty group.
 infercnv_object <- infercnv::run(
           infercnv_object,
           cutoff = 0.25,
@@ -299,6 +317,7 @@ infercnv_object <- infercnv::run(
           analysis_mode = input_analysis_mode,
           denoise = TRUE,
           HMM = TRUE,
+          BayesMaxPNormal = bayes_max_p_normal,
           num_threads = n_threads
           )
 ```

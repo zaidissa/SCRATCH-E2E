@@ -40,6 +40,12 @@ process CELLTRAJECTORY {
         path("figures/**"), emit: figure_files, optional: true
       path "report/${notebook.baseName}.html", emit: report,  optional: true
       path "data/**",                          emit: rds,     optional: true
+      // Object 3, carried forward. The notebook already writes this — an object
+      // with per-cell pseudotime attached — and nothing consumed it, which is why
+      // pseudotime reached INTEGRATION as a side-file join covering 24% of cells
+      // instead of travelling on the non-malignant object itself.
+      path "data/Concordance/final_obj_nonmal_with_pseudotime.rds",
+                                               emit: seurat_rds, optional: true
       path "figures/**",                       emit: figures, optional: true
 
     when:

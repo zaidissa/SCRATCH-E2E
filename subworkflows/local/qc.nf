@@ -7,16 +7,20 @@
     `ch_final_object = ch_merge_object`, discarding the doublet-filtered result,
     so every downstream stage silently analysed the un-deduplicated object.
 
-    That was not arbitrary: the notebook saves TWO objects that both match the
-    module's `data/<project>_qc_*.RDS` output glob —
+    That was not arbitrary: the pre-BPCells notebook saved TWO objects that both
+    matched the module's `data/<project>_qc_*.RDS` output glob —
 
         <project>_qc_dbl_sample_object.RDS    doublets called per sample
         <project>_qc_dbl_cluster_object.RDS   doublets called per cluster
 
-    so `emit: seurat_rds` is a two-element list and chaining it directly would
-    hand two objects to a single downstream task. The choice is now explicit via
-    `--qc_doublet_filter sample|cluster` (default: sample) and exactly one
-    object propagates.
+    so `emit: seurat_rds` was a two-element list and chaining it directly would
+    hand two objects to a single downstream task; `--qc_doublet_filter` picked one.
+
+    The BPCells port (from SCRATCH-QC `multi-mode`) detects per sample ONLY and
+    saves exactly ONE object, `<project>_qc_dbl_singlet_object.RDS`. The selector
+    param is therefore gone, and the single object is asserted rather than chosen.
+    Selection by filename survived the port only in the stub, which is why 56/56
+    stub tasks passed while a real run would have died at SCDBLFINDER.
 ----------------------------------------------------------------------------------------
 */
 
@@ -107,12 +111,13 @@ workflow QC {
             SCDBLFINDER(ch_merged, SEURAT_MERGE.out.bpcells_store,
                         ch_notebook_scdblfinder, ch_page_config)
 
-            def wanted = params.qc_doublet_filter == 'cluster' ? '_qc_dbl_cluster_object.RDS'
-                                                              : '_qc_dbl_sample_object.RDS'
+            // The notebook saves exactly one object. Flatten + assert rather than
+            // assume, so a notebook that starts saving a second one fails loudly
+            // here instead of silently handing two objects to one downstream task.
             ch_final = SCDBLFINDER.out.seurat_rds
                 .flatten()
-                .filter { it.name.endsWith(wanted) }
-                .ifEmpty { error "SCDBLFINDER produced no object matching '${wanted}'. Check --qc_doublet_filter (sample|cluster)." }
+                .filter { it.name.endsWith('_qc_dbl_singlet_object.RDS') }
+                .ifEmpty { error "SCDBLFINDER produced no '<project>_qc_dbl_singlet_object.RDS'. Its notebook's object_dump chunk is the contract for this name." }
             ch_store = SCDBLFINDER.out.bpcells_store
         } else {
             ch_final = ch_merged

@@ -26,11 +26,11 @@ process INTEGRATE_OBJECTS {
         path notebook
         path config
         path cnv_infercnv,  stageAs: 'stage_inputs/cnv_infercnv/*'
-        path cnv_scevan,    stageAs: 'stage_inputs/cnv_scevan/*'
         path metaprog,      stageAs: 'stage_inputs/metaprog/*'
         path trajectory,    stageAs: 'stage_inputs/trajectory/*'
         path tcr,           stageAs: 'stage_inputs/tcr/*'
         path compartment,   stageAs: 'stage_inputs/compartment/*'
+        path annotation,    stageAs: 'stage_inputs/annotation/*'
 
     output:
 

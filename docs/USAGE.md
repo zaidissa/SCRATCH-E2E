@@ -83,7 +83,7 @@ nextflow run . -profile docker --from tme \
 
 # Continue from the QC object
 nextflow run . -profile docker --from cluster \
-    --input_seurat_object results/GBM_COHORT/qc/data/GBM_COHORT_qc_dbl_sample_object.RDS
+    --input_seurat_object results/GBM_COHORT/qc/data/GBM_COHORT_qc_dbl_singlet_object.RDS
 
 # Just the tumour-heterogeneity stage, comparing both NMF engines
 nextflow run . -profile docker --from metaprog --to metaprog \
@@ -150,7 +150,6 @@ nextflow config -profile docker .
 | `--qc_thr_percent_mito` | `25` |
 | `--qc_thr_median_genes_per_cell` | `900` |
 | `--skip_scdblfinder` | `false` |
-| `--qc_doublet_filter` | `sample` (or `cluster`) |
 
 ### Clustering and annotation
 
@@ -170,7 +169,10 @@ scType's marker database in this build is human-only.
 
 | Parameter | Default | Notes |
 |---|---|---|
-| `--skip_infercnv` / `--skip_scevan` | `false` | |
+| `--skip_infercnv` | `false` | |
+| `--run_numbat` | `true` (auto-skips with a warning when no BAM is available) | |
+| `--cnv_caller_priority` | `numbat` (or `infercnv`) — which caller wins where they disagree | |
+| `--skip_cnv_concordance` | `false` — the inferCNV vs Numbat comparison report | |
 | `--skip_copykat` | `true` | |
 | `--run_numbat` | `false` | allele-aware; needs BAM + phasing panel, see [NUMBAT.md](NUMBAT.md) |
 | `--stratify_gate_by_lineage` | `true` | immune/stromal lineages are non-malignant regardless of CNV score |

@@ -102,6 +102,9 @@ workflow ANNOTATION {
         // joins their labels per cell and reports the disagreement rate. Optional
         // inputs are filled with the NO_FILE placeholder; the notebook renders a
         // "not enough annotators" finding when fewer than two are present.
+        // Initialised outside the guard: an emit that only exists on one branch
+        // is an "is not defined" at parse time when the stage is skipped.
+        ch_concordance = Channel.empty()
         if (!params.skip_annotation_concordance) {
             def no_file = file("${projectDir}/assets/NO_FILE")
             ANNOTATION_CONCORDANCE(
@@ -111,6 +114,7 @@ workflow ANNOTATION {
                 ch_azimuth_rds.ifEmpty(no_file),
                 ch_page_config
             )
+            ch_concordance = ANNOTATION_CONCORDANCE.out.concordance
         }
 
         // Preference order: Azimuth -> scType aggregate -> unannotated input.
@@ -125,4 +129,7 @@ workflow ANNOTATION {
         seurat_rds  = ch_annotated
         azimuth_rds = ch_azimuth_rds
         sctype_rds  = ch_sctype_rds
+        // Per-cell table of every annotator side by side. INTEGRATION joins this
+        // so the master object is not Azimuth-only.
+        concordance = ch_concordance
 }

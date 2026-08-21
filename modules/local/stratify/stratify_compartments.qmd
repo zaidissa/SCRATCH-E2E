@@ -41,7 +41,7 @@ params:
   # Cell type defines the compartment; CNV adjudicates only within the
   # compartment that could plausibly be malignant.
   gate_by_lineage: true
-  numbat_priority: true
+  caller_priority: "numbat"    # numbat | infercnv
 
   # exclude | malignant | non_malignant
   ambiguous: "exclude"
@@ -176,6 +176,81 @@ ref_labels   <- split_list(params$reference_labels)
 cat("Tumour-lineage labels:", paste(tumor_labels, collapse = ", "), "\n")
 ```
 
+## Reconciling label vocabularies
+
+```{r label-vocabulary}
+# The label lists and the annotation column come from DIFFERENT annotators, and
+# they do not spell anything the same way.
+#
+#   --stratify_reference_labels : T_Cells;NK_Cells;Myeloid;B_Plasma_Cells;
+#                                 Endothelial_Cells;Fibroblast        (scType)
+#   col_ct = azimuth_labels     : "T cell","NK cell","Macrophage",
+#                                 "Plasma cell","B cell","Fibroblast" (Azimuth)
+#
+# Under exact `%in%` matching the intersection of those two sets is ONE label:
+# Fibroblast. That is not hypothetical -- it happened. The reference null for the
+# inferCNV cutoff was built from 544 fibroblasts alone, every one of them scoring
+# 0, so mean = 0, sd = 0, cutoff = mean + 3*sd = 0, and the test collapsed to
+# `score > 0`. Whole immune lineages were called malignant: Macrophage 2,767,
+# Plasma cell 1,584, Dendritic 482, NK 299, all at 100%. Nothing warned, because
+# 544 cleared the >= 30 reference-cell guard and even earned basis = "per_sample".
+#
+# Two different problems have to be solved to match these vocabularies:
+#
+#  1. SPELLING. "T_Cells" vs "T cell" is punctuation and plurality. Normalising
+#     both sides handles it, including the trailing "cell"/"cells" token so
+#     "Endothelial_Cells" meets Azimuth's "Endothelial".
+#  2. GRANULARITY. "Myeloid" vs "Macrophage" is not a spelling difference -- one
+#     is a lineage, the other a cell type within it, and no amount of string
+#     munging connects them. That needs an explicit table, kept small and
+#     one-directional: a requested lineage expands to the finer labels that fall
+#     under it, never the reverse.
+# The matcher and the cutoff rule live in assets/viz/scratch_report.R, which is
+# staged into every notebook. They are SHARED with notebook_cnv_concordance.qmd
+# on purpose: that notebook draws the confusion matrix describing this very
+# decision, and two copies of one rule diverge silently.
+match_labels <- scratch_match_labels
+
+}
+
+.observed <- sort(unique(as.character(meta[[col_ct]])))
+.ref_hit  <- .observed[match_labels(.observed, ref_labels)]
+.tum_hit  <- .observed[match_labels(.observed, tumor_labels)]
+
+cat("Observed labels in", col_ct, ":", paste(.observed, collapse = ", "), "\n")
+cat("  -> reference lineages matched:", paste(.ref_hit, collapse = ", "), "\n")
+cat("  -> tumour lineages matched   :", paste(.tum_hit, collapse = ", "), "\n")
+```
+
+```{r label-vocabulary-finding, results = 'asis'}
+.unmatched_ref <- ref_labels[!vapply(ref_labels, function(r)
+                     any(match_labels(.observed, r)), logical(1))]
+
+if (length(.ref_hit) == 0L) {
+  scratch_finding(sprintf(paste(
+    "**No reference lineage matched.** `--stratify_reference_labels` (%s) matches",
+    "nothing in `%s`, whose labels are: %s. The CNV cutoff has no null to build",
+    "from and the lineage gate cannot fire."),
+    paste(ref_labels, collapse = ", "), col_ct,
+    paste(.observed, collapse = ", ")),
+    type = "caution", title = "Reference lineages do not match the annotation")
+} else if (length(.unmatched_ref)) {
+  scratch_finding(sprintf(paste(
+    "Matched **%d of %d** requested reference lineages (%s). Unmatched: **%s**.",
+    "Those contribute no cells to the CNV null, which narrows the distribution",
+    "the cutoff is derived from. Observed labels in `%s`: %s."),
+    length(ref_labels) - length(.unmatched_ref), length(ref_labels),
+    paste(.ref_hit, collapse = ", "), paste(.unmatched_ref, collapse = ", "),
+    col_ct, paste(.observed, collapse = ", ")),
+    type = "caution", title = "Some reference lineages unmatched")
+} else {
+  scratch_finding(sprintf(
+    "All %d reference lineages matched `%s`: %s.",
+    length(ref_labels), col_ct, paste(.ref_hit, collapse = ", ")),
+    type = "note", title = "Reference lineages resolved")
+}
+```
+
 ## Collecting CNV evidence
 
 ```{r evidence}
@@ -253,7 +328,9 @@ if (length(f)) {
     # others, so the null is rebuilt per sample from that sample's own
     # reference lineages. Samples with too few reference cells fall back to
     # the cohort-wide null, and only then to a quantile.
-    ref_ids <- meta[get(col_ct) %in% ref_labels, cell_id]
+    # match_labels(), not %in%: see the label-vocabulary chunk. Exact matching
+    # here is what reduced the null to fibroblasts alone.
+    ref_ids <- meta[match_labels(get(col_ct), ref_labels), cell_id]
     ev <- merge(evidence[, .(cell_id, infercnv_score)],
                 meta[, .(cell_id, smp = if (!is.na(col_smp)) as.character(get(col_smp)) else "ALL")],
                 by = "cell_id", all.x = TRUE, sort = FALSE)
@@ -262,24 +339,36 @@ if (length(f)) {
     global_null <- ev[cell_id %in% ref_ids & is.finite(infercnv_score), infercnv_score]
     k <- as.numeric(params$infercnv_sd_threshold)
 
-    global_cut <- if (length(global_null) >= 30) {
-      mean(global_null) + k * stats::sd(global_null)
-    } else {
-      warning(sprintf("Only %d reference cells cohort-wide; falling back to the 75th percentile. Check that --stratify_reference_labels matches your annotation vocabulary.",
-                      length(global_null)))
-      stats::quantile(ev$infercnv_score, .75, na.rm = TRUE)
-    }
+    # Cohort-wide reference count, reported only. The per-sample rule below no
+    # longer falls back to a cohort cutoff — scratch_cnv_cutoff() handles a thin
+    # or degenerate null itself, per sample, and names which rule it used.
+    if (length(global_null) < 30)
+      warning(sprintf(paste("Only %d reference cells cohort-wide. Check that",
+                            "--stratify_reference_labels matches the vocabulary in the",
+                            "annotation column."), length(global_null)), immediate. = TRUE)
 
     cuts <- ev[, {
-      nulls <- infercnv_score[cell_id %in% ref_ids & is.finite(infercnv_score)]
-      if (length(nulls) >= 30) .(cutoff = mean(nulls) + k * stats::sd(nulls),
-                                 n_ref = length(nulls), basis = "per_sample")
-      else                     .(cutoff = global_cut, n_ref = length(nulls), basis = "cohort")
+      r <- scratch_cnv_cutoff(infercnv_score, cell_id %in% ref_ids, k = k)
+      .(cutoff = r$cutoff, n_ref = r$n_ref, basis = r$basis)
     }, by = smp]
 
-    cat(sprintf("inferCNV cutoffs (mean + %g SD of reference lineages):\n", k))
+    cat(sprintf("inferCNV cutoffs (mean + %g SD of the reference null, or a named fallback):\n", k))
     print(cuts[order(smp)])
     fwrite(cuts, "data/infercnv_thresholds.csv")
+
+    .degen <- cuts[basis == "quantile_degenerate_null"]
+    if (nrow(.degen)) {
+      scratch_finding(sprintf(paste(
+        "Sample(s) **%s** had reference cells with **zero spread** in their",
+        "inferCNV score, so `mean + %g SD` degenerated to the mean itself and",
+        "every cell above it would have been called malignant. The threshold was",
+        "taken from the scores that EXCEED the null instead, so it sits inside the",
+        "signal rather than on the floor. Treat the malignant fraction in those",
+        "samples as provisional and check which lineages the reference labels",
+        "actually matched."),
+        paste(.degen$smp, collapse = ", "), k),
+        type = "caution", title = "Degenerate CNV threshold")
+    }
 
     ev <- merge(ev, cuts[, .(smp, cutoff)], by = "smp", all.x = TRUE, sort = FALSE)
     ev[, call := fifelse(is.na(infercnv_score), NA_character_,
@@ -292,55 +381,6 @@ if (length(f)) {
     cat("inferCNV object staged but no recognised score column.\n")
   }
 } else cat("No inferCNV evidence.\n")
-
-# ---- SCEVAN: a per-cell tumour/normal class -------------------------------
-f <- ev_files[grepl("scevan_meta_object\\.RDS$", ev_files)]
-if (length(f)) {
-  sv <- tryCatch(readRDS(f[1]), error = function(e) NULL)
-  sv_meta <- if (inherits(sv, "Seurat")) as.data.table(sv@meta.data, keep.rownames = "cell_id")
-             else if (is.data.frame(sv))  as.data.table(sv, keep.rownames = "cell_id")
-             else NULL
-  cls <- if (!is.null(sv_meta)) intersect(c("class", "scevan_class", "pred"), names(sv_meta))[1] else NA_character_
-
-  if (!is.null(sv_meta) && !is.na(cls)) {
-    sv_meta[, cell_id := as.character(cell_id)]
-
-    # SCEVAN runs per sample and its combined output carries a doubled sample
-    # prefix: "HRS371760.HRS371760_AAACCTG-1" against the object's
-    # "HRS371760_AAACCTG-1". Merging raw gave a ZERO-row match on real data, so
-    # every SCEVAN call was silently dropped and the "consensus" ran on inferCNV
-    # alone -- no error, no warning, just half the evidence missing.
-    # Try the ids as-is, then progressively normalised, and keep whichever
-    # actually matches the object.
-    variants <- list(
-      `as-is`            = sv_meta$cell_id,
-      `strip <prefix>.`  = sub("^[^.]+\\.", "", sv_meta$cell_id),
-      `basename after _` = sub("^.*?\\.", "", sv_meta$cell_id)
-    )
-    hits <- vapply(variants, function(v) length(intersect(v, evidence$cell_id)), integer(1))
-    best <- names(hits)[which.max(hits)]
-
-    if (max(hits) == 0L) {
-      # Loud, because a silent zero-match is exactly the failure this guards.
-      warning("SCEVAN cell ids match NONE of the object's cells (tried: ",
-              paste(names(hits), collapse = ", "), "). SCEVAN evidence is being ",
-              "DISCARDED -- the consensus will run without it.", immediate. = TRUE)
-      cat("SCEVAN id examples:", paste(head(sv_meta$cell_id, 2), collapse = " | "), "\n")
-      cat("object id examples:", paste(head(evidence$cell_id, 2), collapse = " | "), "\n")
-    } else {
-      sv_meta[, cell_id := variants[[best]]]
-      if (best != "as-is")
-        cat(sprintf("SCEVAN cell ids normalised via '%s' (%d/%d matched).\n",
-                    best, max(hits), nrow(evidence)))
-
-      sc <- sv_meta[, .(cell_id, raw = tolower(as.character(get(cls))))]
-      sc[, scevan_call := fifelse(grepl("tumou?r|malig|aneupl", raw), "malignant",
-                           fifelse(grepl("normal|diplo", raw), "non_malignant", NA_character_))]
-      evidence <- merge(evidence, sc[, .(cell_id, scevan_call)], by = "cell_id", all.x = TRUE, sort = FALSE)
-      callers <- c(callers, "scevan")
-    }
-  }
-} else cat("No SCEVAN evidence.\n")
 
 # ---- CopyKAT: aneuploid/diploid -------------------------------------------
 f <- ev_files[grepl("copykat", ev_files, ignore.case = TRUE) & grepl("\\.(csv|tsv|txt|RDS)$", ev_files)]
@@ -389,15 +429,15 @@ cat("\nCNV callers contributing:", if (length(callers)) paste(callers, collapse 
 ```{r annotation-evidence}
 # Annotation-derived call: tumour lineage vs known-reference lineage.
 ann <- meta[, .(cell_id, lab = as.character(get(col_ct)))]
-ann[, annotation_call := fifelse(lab %in% tumor_labels, "malignant",
-                          fifelse(lab %in% ref_labels, "non_malignant", NA_character_))]
+ann[, annotation_call := fifelse(match_labels(lab, tumor_labels), "malignant",
+                          fifelse(match_labels(lab, ref_labels), "non_malignant", NA_character_))]
 evidence <- merge(evidence, ann[, .(cell_id, annotation_call)], by = "cell_id", all.x = TRUE, sort = FALSE)
 ```
 
 ## Combining the evidence
 
 ```{r combine}
-call_cols <- intersect(c("infercnv_call", "scevan_call", "copykat_call", "numbat_call"),
+call_cols <- intersect(c("infercnv_call", "copykat_call", "numbat_call"),
                        names(evidence))
 
 n_mal <- if (length(call_cols)) rowSums(evidence[, ..call_cols] == "malignant", na.rm = TRUE) else rep(0L, nrow(evidence))
@@ -442,7 +482,7 @@ if (method == "annotation" || !length(call_cols)) {
 }
 
 # ---- Numbat takes precedence where it has a verdict -----------------------
-# inferCNV, SCEVAN and CopyKAT all infer copy number from EXPRESSION smoothed
+# inferCNV and CopyKAT infer copy number from EXPRESSION smoothed
 # along the genome, so they are structurally blind to copy-neutral LOH. Numbat
 # reads phased heterozygous SNPs and measures the allelic channel directly — it
 # is not a better-tuned expression caller, it observes something they cannot.
@@ -451,8 +491,13 @@ if (method == "annotation" || !length(call_cols)) {
 #
 # This runs BEFORE the lineage gate, which still overrides everything: an immune
 # or stromal cell stays non-malignant even if Numbat calls it aneuploid.
-if ("numbat_call" %in% names(evidence) &&
-    isTRUE(as.logical(params$numbat_priority))) {
+# --caller_priority names which caller wins where they disagree. Numbat is the
+# default because it observes something inferCNV cannot (allelic imbalance, hence
+# copy-neutral LOH) rather than being a better-tuned version of the same
+# measurement. Setting it to 'infercnv' inverts the preference; any other value
+# falls back to the plain vote tally with neither caller privileged.
+.priority <- tolower(trimws(as.character(params$caller_priority)))
+if ("numbat_call" %in% names(evidence) && .priority == "numbat") {
 
   overridden <- evidence[!is.na(numbat_call) & malignant_status != numbat_call, .N]
   covered    <- evidence[!is.na(numbat_call), .N]
@@ -469,8 +514,27 @@ if ("numbat_call" %in% names(evidence) &&
                            "disagreement with the expression-based callers — check ",
                            "data/cnv_caller_agreement.csv before trusting either."),
                     100 * overridden / covered), immediate. = TRUE)
+} else if ("infercnv_call" %in% names(evidence) && .priority == "infercnv") {
+
+  overridden <- evidence[!is.na(infercnv_call) & malignant_status != infercnv_call, .N]
+  covered    <- evidence[!is.na(infercnv_call), .N]
+
+  evidence[!is.na(infercnv_call), `:=`(malignant_status = infercnv_call,
+                                       evidence_basis   = "infercnv")]
+
+  cat(sprintf("inferCNV priority: verdict for %d/%d cells (%.1f%%); %d overridden.\n",
+              covered, nrow(evidence), 100 * covered / nrow(evidence), overridden))
+  # Worth stating plainly when the expression-only caller is put in charge: it
+  # cannot see copy-neutral LOH at all, so cells whose only evidence is allelic
+  # will be called diploid here regardless of what Numbat found.
+  if ("numbat_call" %in% names(evidence))
+    warning("caller_priority = 'infercnv' overrides Numbat, including on cells ",
+            "where the CNV is copy-neutral and expression cannot see it.",
+            immediate. = TRUE)
+
 } else if ("numbat_call" %in% names(evidence)) {
-  cat("Numbat evidence present but numbat_priority is false; it votes as an equal caller.\n")
+  cat("caller_priority = '", .priority, "' privileges neither caller; ",
+      "Numbat votes as an equal.\n", sep = "")
 }
 
 cat("Method:", method, "| min_callers:", min_callers, "\n\n")
@@ -500,7 +564,7 @@ gate_on <- isTRUE(as.logical(params$gate_by_lineage))
 
 evidence <- merge(evidence, meta[, .(cell_id, .lab = as.character(get(col_ct)))],
                   by = "cell_id", all.x = TRUE, sort = FALSE)
-evidence[, in_reference_lineage := !is.na(.lab) & .lab %in% ref_labels]
+evidence[, in_reference_lineage := !is.na(.lab) & match_labels(.lab, ref_labels)]
 
 if (gate_on) {
   # Empirical false-positive estimate: cells the CNV evidence called malignant

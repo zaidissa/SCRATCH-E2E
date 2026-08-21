@@ -72,7 +72,6 @@ were renamed to `tcr_run_*` to avoid clashing with the stage selectors.
 |---|---|
 | `--from` / `--to` | stage range selection |
 | `--run_<stage>` | per-stage override |
-| `--qc_doublet_filter` | `sample` or `cluster` doublet call to propagate |
 | `--metaprog_nmf_engine` | `python`, `r`, or `both` |
 | `--metaprog_py_*` | Python NMF solver settings |
 | `--container_*`, `--container_registry` | per-image and mirror overrides |

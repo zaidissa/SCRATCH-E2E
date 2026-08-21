@@ -113,36 +113,125 @@ read_cell_table <- function(path) {
   unique(dt, by = "cell_id")
 }
 
+# Every join is recorded here with the number of cells it actually matched.
+# `joined` used to be appended the moment a file parsed, so a stage counted as
+# joined when the merge matched ZERO cells -- which is exactly what happened to
+# cnv_infercnv: it "joined" a heatmap-threshold file and the status table
+# reported TRUE while the master object gained no CNV column at all.
+join_log <- data.table(stage = character(), file = character(),
+                       matched = integer(), total = integer(), columns = integer())
+
+record_join <- function(stage, file, matched, total, columns) {
+  join_log <<- rbind(join_log, data.table(stage = stage, file = file,
+                                          matched = as.integer(matched),
+                                          total = as.integer(total),
+                                          columns = as.integer(columns)))
+}
+
 # Left-join a stage table onto the master metadata, prefixing its columns so two
-# stages can never silently overwrite each other's annotation.
-join_stage <- function(meta, dt, prefix) {
-  if (is.null(dt)) return(meta)
+# stages can never silently overwrite each other's annotation. Returns the merged
+# table and reports how many of the master's cells the stage table actually hit.
+join_stage <- function(meta, dt, prefix, stage, file = NA_character_) {
+  if (is.null(dt)) { record_join(stage, file, 0L, nrow(meta), 0L); return(meta) }
   keep <- setdiff(names(dt), "cell_id")
-  if (!length(keep)) return(meta)
+  if (!length(keep)) { record_join(stage, file, 0L, nrow(meta), 0L); return(meta) }
+
+  matched <- sum(meta$cell_id %in% dt$cell_id)
+  # A zero-match join is not a join. Leave the columns off entirely rather than
+  # adding a block of NAs that later chunks would treat as real data.
+  if (matched == 0L) { record_join(stage, file, 0L, nrow(meta), 0L); return(meta) }
+
   setnames(dt, keep, paste0(prefix, "_", keep))
+  record_join(stage, file, matched, nrow(meta), length(keep))
   merge(meta, dt, by = "cell_id", all.x = TRUE, sort = FALSE)
 }
 
-joined <- character(0)
+# A stage counts as joined only if it matched at least one cell.
+joined_stages <- function() unique(join_log[matched > 0L, stage])
 ```
 
 ## Copy number
 
 ```{r cnv}
-for (stage in c("cnv_infercnv", "cnv_scevan")) {
+for (stage in c("cnv_infercnv")) {
   fs <- stage_files(stage)
   if (!length(fs)) { cat("no output from", stage, "\n"); next }
 
-  # Prefer a file that plainly holds per-cell calls.
-  pick <- fs[grepl("cell|prediction|subclone|malig", basename(fs), ignore.case = TRUE)]
-  if (!length(pick)) pick <- fs
-  dt <- read_cell_table(pick[1])
-
-  if (!is.null(dt)) {
-    meta <- join_stage(meta, dt, sub("cnv_", "cnv", stage))
-    joined <- c(joined, stage)
-    cat("joined", stage, "from", basename(pick[1]), "\n")
+  # inferCNV's run directory holds ~30 .txt files and only ONE of them is a
+  # per-cell table: map_metadata_from_infercnv.txt (barcode x has_cnv_chr*,
+  # proportion_*). The rest are heatmap thresholds, gene orderings and group
+  # summaries. The previous selector matched "cell|prediction|subclone|malig"
+  # against the basename, matched nothing, fell back to "take fs[1]", and picked
+  # infercnv.17_HMM_...heatmap_thresholds.txt purely because it sorts first.
+  # Named files first, in preference order; only then a pattern.
+  preferred <- c("map_metadata_from_infercnv", "cell_groupings", "predictions")
+  pick <- character(0)
+  for (nm in preferred) {
+    hit <- fs[grepl(nm, basename(fs), ignore.case = TRUE)]
+    if (length(hit)) { pick <- hit; break }
   }
+  if (!length(pick))
+    pick <- fs[grepl("cell|prediction|subclone|malig", basename(fs), ignore.case = TRUE)]
+  if (!length(pick)) {
+    cat("no per-cell table among", length(fs), "files from", stage, "\n")
+    record_join(stage, NA_character_, 0L, nrow(meta), 0L)
+    next
+  }
+
+  dt <- read_cell_table(pick[1])
+  meta <- join_stage(meta, dt, sub("cnv_", "cnv", stage), stage, basename(pick[1]))
+  cat(stage, "->", basename(pick[1]), "\n")
+}
+```
+
+## Cell-type annotation
+
+```{r annotation}
+# The base object is the AZIMUTH output, so it carries azimuth_labels and nothing
+# from scType -- this pipeline's own annotator, six notebooks' worth. The
+# concordance table is per-cell and holds every annotator side by side, so the
+# master object stops being Azimuth-only.
+fs <- stage_files("annotation")
+ann <- fs[grepl("annotation_concordance", basename(fs), ignore.case = TRUE)]
+if (!length(ann)) ann <- fs[grepl("annotation\\.csv$", basename(fs), ignore.case = TRUE)]
+
+if (length(ann)) {
+  meta <- join_stage(meta, read_cell_table(ann[1]), "ann", "annotation", basename(ann[1]))
+  cat("annotation ->", basename(ann[1]), "\n")
+} else {
+  cat("no annotation table\n")
+  record_join("annotation", NA_character_, 0L, nrow(meta), 0L)
+}
+```
+
+## Compartment (malignant / non-malignant)
+
+```{r compartment}
+# STRATIFY's assignment was staged into stage_inputs/compartment on every run and
+# this notebook had no code path that read it, so `malignant_status` -- the
+# central result of the pipeline -- never reached the master object or the cell
+# table, and `stratify` was not even a row in the status file.
+fs <- stage_files("compartment")
+asg <- fs[grepl("malignancy_assignment", basename(fs), ignore.case = TRUE)]
+
+if (length(asg)) {
+  dt <- read_cell_table(asg[1])
+  # Kept UNPREFIXED: downstream notebooks, the cross-analysis and the stage
+  # reports all look for `malignant_status` by that exact name.
+  if (!is.null(dt)) {
+    matched <- sum(meta$cell_id %in% dt$cell_id)
+    if (matched > 0L) {
+      meta <- merge(meta, dt, by = "cell_id", all.x = TRUE, sort = FALSE)
+      record_join("stratify", basename(asg[1]), matched, nrow(meta),
+                  length(setdiff(names(dt), "cell_id")))
+    } else {
+      record_join("stratify", basename(asg[1]), 0L, nrow(meta), 0L)
+    }
+  }
+  cat("stratify ->", basename(asg[1]), "\n")
+} else {
+  cat("no compartment assignment\n")
+  record_join("stratify", NA_character_, 0L, nrow(meta), 0L)
 }
 ```
 
@@ -184,8 +273,23 @@ if (length(mp_files)) {
       sc[, metaprog_assigned := colnames(mat)[max.col(mat, ties.method = "first")]]
       sc[, metaprog_assigned := sub("^metaprog_", "", metaprog_assigned)]
 
+      # Metaprograms are derived from the MALIGNANT compartment, so assigning
+      # every cell its best-scoring programme made the recurrence table read
+      # "V2, 2 samples, 24,415 cells" -- i.e. the whole dataset, stroma and
+      # immune included. Scores stay on all cells (they are just signature
+      # scores); the ASSIGNMENT is restricted to the compartment the programmes
+      # came from, when the split is available.
+      if ("malignant_status" %in% names(meta)) {
+        mal <- meta[match(sc$cell_id, meta$cell_id), malignant_status]
+        sc[!(mal %in% "malignant"), metaprog_assigned := NA_character_]
+        cat("metaprog assignment restricted to",
+            sum(!is.na(sc$metaprog_assigned)), "malignant cells\n")
+      }
+
+      matched <- sum(meta$cell_id %in% sc$cell_id)
       meta <- merge(meta, sc, by = "cell_id", all.x = TRUE, sort = FALSE)
-      joined <- c(joined, "metaprog")
+      record_join("metaprog", basename(mp_files[1]), matched, nrow(meta),
+                  length(setdiff(names(sc), "cell_id")))
       cat("scored", length(mp_sets), "metaprograms\n")
     }
   }
@@ -201,11 +305,11 @@ fs <- stage_files("trajectory")
 pt <- fs[grepl("pseudotime|concordance|slingshot|monocle|cytotrace",
                basename(fs), ignore.case = TRUE)]
 if (length(pt)) {
-  meta <- join_stage(meta, read_cell_table(pt[1]), "traj")
-  joined <- c(joined, "trajectory")
-  cat("joined trajectory from", basename(pt[1]), "\n")
+  meta <- join_stage(meta, read_cell_table(pt[1]), "traj", "trajectory", basename(pt[1]))
+  cat("trajectory ->", basename(pt[1]), "\n")
 } else {
   cat("no trajectory output\n")
+  record_join("trajectory", NA_character_, 0L, nrow(meta), 0L)
 }
 ```
 
@@ -215,11 +319,11 @@ if (length(pt)) {
 fs <- stage_files("tcr")
 tc <- fs[grepl("cell|clone|clonotype", basename(fs), ignore.case = TRUE)]
 if (length(tc)) {
-  meta <- join_stage(meta, read_cell_table(tc[1]), "tcr")
-  joined <- c(joined, "tcr")
-  cat("joined TCR from", basename(tc[1]), "\n")
+  meta <- join_stage(meta, read_cell_table(tc[1]), "tcr", "tcr", basename(tc[1]))
+  cat("tcr ->", basename(tc[1]), "\n")
 } else {
   cat("no TCR output\n")
+  record_join("tcr", NA_character_, 0L, nrow(meta), 0L)
 }
 ```
 
@@ -235,16 +339,67 @@ if (length(new_cols)) {
   obj <- AddMetaData(obj, meta[colnames(obj), new_cols, drop = FALSE])
 }
 
+joined <- joined_stages()
 cat("Stages joined:", if (length(joined)) paste(joined, collapse = ", ") else "none", "\n")
 cat("New per-cell columns added:", length(new_cols), "\n")
 
 saveRDS(obj, file.path("data", paste0(params$project_name, "_master_object.RDS")))
 fwrite(meta, file.path("data", paste0(params$project_name, "_cell_table.csv")))
 
-# A compact record of which stages contributed, for the master report.
-fwrite(data.table(stage = c("cnv_infercnv", "cnv_scevan", "metaprog", "trajectory", "tcr"),
-                  joined = c("cnv_infercnv", "cnv_scevan", "metaprog", "trajectory", "tcr") %in% joined),
-       file.path("data", "stage_join_status.csv"))
+# The status table now carries the EVIDENCE for each verdict, not just the
+# verdict: which file was read, how many of the master's cells it matched, and
+# how many columns it contributed. A TRUE with matched = 0 is impossible by
+# construction now, and a stage that was staged but matched nothing is visible
+# rather than indistinguishable from a stage that never ran.
+all_stages <- c("annotation", "cnv_infercnv", "stratify",
+                "metaprog", "trajectory", "tcr")
+status <- data.table(stage = all_stages)
+status <- merge(status, join_log, by = "stage", all.x = TRUE, sort = FALSE)
+status[is.na(matched), `:=`(matched = 0L, columns = 0L)]
+status[, total := nrow(meta)]
+status[, joined := matched > 0L]
+status[, match_pct := round(100 * matched / pmax(1L, total), 1)]
+setcolorder(status, c("stage", "joined", "matched", "total", "match_pct", "columns", "file"))
+fwrite(status, file.path("data", "stage_join_status.csv"))
+```
+
+```{r join-findings, results = 'asis'}
+# A stage that contributed a file but matched no cells is the failure this
+# notebook used to hide. Say so where it will be read.
+staged_but_empty <- status[!is.na(file) & matched == 0L]
+if (nrow(staged_but_empty)) {
+  scratch_finding(sprintf(paste(
+    "**%s** contributed a file but matched **0 of %s** cells: %s.",
+    "Its columns were left off the master object rather than added as NAs.",
+    "The usual cause is a barcode format that does not match the master object's",
+    "`cell_id` (a sample prefix present on one side only)."),
+    paste(staged_but_empty$stage, collapse = ", "),
+    format(nrow(meta), big.mark = ","),
+    paste(sprintf("%s -> %s", staged_but_empty$stage, staged_but_empty$file),
+          collapse = "; ")),
+    type = "caution", title = "Stage joined nothing")
+}
+
+partial <- status[matched > 0L & match_pct < 95]
+if (nrow(partial)) {
+  scratch_finding(sprintf(
+    "Partial joins: %s. Cells outside the matched set carry NA for those columns.",
+    paste(sprintf("**%s** %s%% (%s of %s)", partial$stage, partial$match_pct,
+                  format(partial$matched, big.mark = ","),
+                  format(partial$total, big.mark = ",")), collapse = "; ")),
+    type = "note", title = "Partial joins")
+}
+
+ok <- status[joined == TRUE]
+if (nrow(ok)) {
+  scratch_finding(sprintf(
+    "Joined %s stage(s) onto %s cells: %s.",
+    nrow(ok), format(nrow(meta), big.mark = ","),
+    paste(sprintf("**%s** (+%s cols)", ok$stage, ok$columns), collapse = ", ")),
+    type = "note", title = "Cross-stage join")
+}
+
+scratch_table(status, caption = "Per-stage join result, with the file each stage contributed")
 ```
 
 ```{r overview-plot, fig.width = 9, fig.height = 4}

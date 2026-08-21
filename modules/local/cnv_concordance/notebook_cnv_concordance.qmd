@@ -1,0 +1,540 @@
+---
+title: "Module - CNV caller concordance"
+description: |
+  inferCNV and Numbat, cell by cell: where they agree, where they do not, and
+  what the disagreement is made of.
+execute:
+  freeze: auto
+  cache: false
+format:
+  html:
+    toc: true
+    toc-location: right
+    toc-depth: 2
+    embed-resources: true
+    code-fold: show
+    code-tools: true
+    df-print: paged
+    fig-align: center
+lightbox:
+    match: auto
+    effect: zoom
+    loop: true
+params:
+  project_name: 'Test'
+  seurat_object: 'data/project_Azimuth_annotation_object.RDS'
+  caller_inputs: 'caller_inputs'
+  celltype_col: 'celltype'
+  sample_col: 'sample_id'
+  reference_labels: "T_Cells;NK_Cells;Myeloid;B_Plasma_Cells;Endothelial_Cells;Fibroblast"
+  infercnv_sd_threshold: 3
+  work_directory: !expr here::here()
+  auto_save: TRUE
+---
+
+```{r scratch-viz-setup, include=FALSE}
+# Publication figure system: house theme, validated colour-vision-safe palette,
+# and vector (PDF) output alongside every raster figure. Guarded: if the library
+# is not staged the notebook still renders.
+local({
+  roots <- c(".", "assets/viz", Sys.getenv("SCRATCH_VIZ_DIR", "."))
+  for (lib in c("scratch_viz.R", "scratch_report.R")) {
+    for (r in roots) {
+      p <- file.path(r, lib)
+      if (file.exists(p)) { source(p, local = FALSE); break }
+    }
+  }
+})
+```
+
+```{r setup, include = FALSE, message = FALSE, warning = FALSE, echo = FALSE}
+suppressPackageStartupMessages({
+  library(data.table); library(ggplot2); library(Seurat); library(SeuratObject)
+})
+project_name  <- params$project_name
+work_directory <- params$work_directory
+knitr::opts_knit$set(root.dir = work_directory)
+for (d in c("data", "figures", "report")) dir.create(d, showWarnings = FALSE)
+```
+
+## Why this exists
+
+inferCNV and Numbat answer the same question by different physics. inferCNV
+smooths **expression** along the genome, so a cell whose transcriptional
+programme happens to run high across a chromosome arm can look aneuploid.
+Numbat phases reads at **heterozygous SNPs**, so it reads allelic imbalance
+directly and can see copy-neutral LOH — where allele ratios shift but dosage
+does not, and expression-based callers are blind by construction.
+
+Two callers that fail differently are only useful if somebody looks at both.
+Until this module existed, they were merged straight into a consensus by
+STRATIFY and the disagreement disappeared into it: a run where the two callers
+split on thousands of cells was indistinguishable, in every published output,
+from a run where they agreed completely.
+
+This notebook is **read-only**. It resolves nothing and changes no call. That is
+deliberate — the comparison is only trustworthy if it cannot quietly become the
+answer.
+
+```{r load}
+#| code-fold: true
+
+obj  <- readRDS(params$seurat_object)
+meta <- as.data.table(obj@meta.data, keep.rownames = "cell_id")
+meta[, cell_id := as.character(cell_id)]
+
+# Annotation column, same candidate order as STRATIFY so the two agree on what
+# "cell type" means.
+ct_candidates <- c(params$celltype_col, "azimuth_labels", "celltype", "cell_type",
+                   "annotation", "sctype", "sctype_agg", "sctype_labels", "cell_label")
+col_ct  <- ct_candidates[ct_candidates %in% names(meta)][1]
+smp_candidates <- c(params$sample_col, "sample_id", "orig.ident", "sample", "patient_id")
+col_smp <- smp_candidates[smp_candidates %in% names(meta)][1]
+
+cat("Cells:", nrow(meta), "| cell-type column:", col_ct, "| sample column:", col_smp, "\n")
+
+root <- params$caller_inputs
+stage_files <- function(sub) {
+  d <- file.path(root, sub)
+  if (!dir.exists(d)) return(character(0))
+  list.files(d, recursive = TRUE, full.names = TRUE)
+}
+```
+
+## Reading the callers
+
+```{r read-callers}
+#| code-fold: true
+
+# ---- inferCNV: a continuous genome-wide CNV load --------------------------
+ic_files <- stage_files("infercnv")
+ic <- NULL
+if (length(ic_files)) {
+  f <- ic_files[grepl("infercnv_meta_object\\.RDS$", ic_files)]
+  if (!length(f)) f <- ic_files[grepl("\\.RDS$", ic_files)]
+  if (length(f)) {
+    o <- tryCatch(readRDS(f[1]), error = function(e) NULL)
+    m <- if (inherits(o, "Seurat")) as.data.table(o@meta.data, keep.rownames = "cell_id")
+         else if (is.data.frame(o)) as.data.table(o, keep.rownames = "cell_id") else NULL
+    if (!is.null(m)) {
+      sc <- intersect(c("genomwide_cnv_proportion", "genomewide_cnv_proportion",
+                        "cnv_score", "cnv_load"), names(m))[1]
+      if (!is.na(sc)) {
+        ic <- m[, .(cell_id = as.character(cell_id), infercnv_score = as.numeric(get(sc)))]
+      }
+    }
+  }
+}
+
+# ---- Numbat: a per-cell call plus its posterior ---------------------------
+nb_files <- stage_files("numbat")
+nb <- NULL
+if (length(nb_files)) {
+  tsv <- nb_files[grepl("_numbat_calls\\.tsv$", nb_files)]
+  if (length(tsv)) {
+    parts <- lapply(tsv, function(p) tryCatch(fread(p), error = function(e) NULL))
+    parts <- Filter(function(x) !is.null(x) && nrow(x), parts)
+    if (length(parts)) {
+      nb <- rbindlist(parts, fill = TRUE)
+      if ("cell_id" %in% names(nb)) {
+        keep <- intersect(c("cell_id", "numbat_call", "p_cnv", "clone_opt", "compartment_opt"),
+                          names(nb))
+        nb <- unique(nb[, ..keep], by = "cell_id")
+        nb[, cell_id := as.character(cell_id)]
+      } else nb <- NULL
+    }
+  }
+}
+
+have_ic <- !is.null(ic) && nrow(ic) > 0
+have_nb <- !is.null(nb) && nrow(nb) > 0
+cat("inferCNV per-cell scores:", if (have_ic) nrow(ic) else 0, "\n")
+cat("Numbat per-cell calls   :", if (have_nb) nrow(nb) else 0, "\n")
+
+cmp <- meta[, .(cell_id, celltype = if (!is.na(col_ct)) as.character(get(col_ct)) else NA_character_,
+                sample = if (!is.na(col_smp)) as.character(get(col_smp)) else "ALL")]
+if (have_ic) cmp <- merge(cmp, ic, by = "cell_id", all.x = TRUE, sort = FALSE)
+if (have_nb) cmp <- merge(cmp, nb, by = "cell_id", all.x = TRUE, sort = FALSE)
+```
+
+```{r one-caller-guard, results = 'asis'}
+if (!have_ic || !have_nb) {
+  missing <- c(if (!have_ic) "inferCNV", if (!have_nb) "Numbat")
+  scratch_finding(sprintf(paste(
+    "**Only one caller produced per-cell output**, so there is nothing to compare.",
+    "Missing: **%s**. The compartment split downstream will rest on a single",
+    "caller with no cross-check — the condition under which a degenerate",
+    "threshold in that caller cannot be caught by anything."),
+    paste(missing, collapse = ", ")),
+    type = "caution", title = "No caller comparison possible")
+}
+```
+
+## Do the callers rank cells the same way?
+
+The threshold-free question, and the one worth asking first: **ignoring where
+anyone drew a cutoff, does inferCNV score the cells Numbat calls malignant more
+highly than the ones it calls diploid?** If it does, the callers agree about the
+biology and any disagreement is about where the line sits. If it does not, they
+disagree about the cells themselves, and no choice of threshold will reconcile
+them.
+
+```{r rank-agreement}
+#| code-fold: true
+
+auc <- NA_real_; n_pos <- 0L; n_neg <- 0L
+if (have_ic && have_nb) {
+  d <- cmp[!is.na(infercnv_score) & !is.na(numbat_call)]
+  pos <- d[numbat_call == "malignant", infercnv_score]
+  neg <- d[numbat_call == "non_malignant", infercnv_score]
+  n_pos <- length(pos); n_neg <- length(neg)
+  if (n_pos > 0 && n_neg > 0) {
+    # AUC via the Mann-Whitney U statistic: the probability that a randomly
+    # chosen Numbat-malignant cell scores higher on inferCNV than a randomly
+    # chosen Numbat-diploid one. 0.5 is coin-flip, 1.0 is perfect separation.
+    r <- rank(c(pos, neg))
+    auc <- (sum(r[seq_len(n_pos)]) - n_pos * (n_pos + 1) / 2) / (as.numeric(n_pos) * n_neg)
+  }
+}
+```
+
+```{r rank-finding, results = 'asis'}
+if (!is.na(auc)) {
+  verdict <- if (auc >= 0.9) "the two callers order cells almost identically" else
+             if (auc >= 0.7) "the callers broadly agree on ordering, with real overlap" else
+             if (auc >= 0.55) "the callers agree only weakly on which cells carry CNV" else
+             "**the callers do not agree on which cells carry CNV at all**"
+  scratch_finding(sprintf(paste(
+    "inferCNV scores a random Numbat-malignant cell above a random",
+    "Numbat-diploid one **%.1f%%** of the time (AUC, n = %s vs %s): %s.",
+    "This comparison uses no threshold, so it is unaffected by where either",
+    "caller's cutoff was drawn."),
+    100 * auc, format(n_pos, big.mark = ","), format(n_neg, big.mark = ","), verdict),
+    type = if (!is.na(auc) && auc < 0.7) "caution" else "note",
+    title = "Threshold-free agreement")
+}
+```
+
+```{r fig-score-by-numbat, fig.width = 9, fig.height = 5}
+#| label: fig-score-by-numbat
+#| fig-cap: "inferCNV CNV load, split by Numbat's call"
+if (have_ic && have_nb) {
+  d <- cmp[!is.na(infercnv_score) & !is.na(numbat_call)]
+  if (nrow(d)) {
+    p <- ggplot(d, aes(x = numbat_call, y = infercnv_score, fill = numbat_call)) +
+      geom_violin(scale = "width", colour = NA, alpha = .85) +
+      geom_boxplot(width = .16, outlier.shape = NA, fill = "white", colour = "grey25") +
+      scale_fill_scratch(guide = "none") +
+      labs(title = "inferCNV CNV load, split by Numbat's call",
+           subtitle = sprintf("Separation here is the agreement; AUC = %.3f", auc),
+           x = "Numbat call", y = "inferCNV genome-wide CNV load") +
+      theme_scratch()
+    # The plot is the chunk VALUE, deliberately not print()-wrapped: ggplot2 4.0
+    # dispatches print() through S7, which bypasses knit_print.ggplot — so a
+    # print()ed plot renders STATIC and never reaches the PNG/PDF export hooked
+    # into that method. This notebook's first render produced 3 static images and
+    # an empty figures/ directory for exactly that reason.
+    p
+  }
+} else cat("Needs both callers; skipped.\n")
+```
+
+## Where they disagree, cell by cell
+
+```{r binarise}
+#| code-fold: true
+
+# inferCNV emits a continuous load, so a comparison against Numbat's categorical
+# call needs a cutoff. This MIRRORS the rule STRATIFY uses — the null built from
+# reference (non-malignant) lineages, mean + k*SD — so the confusion matrix below
+# describes the same decision the pipeline actually makes. It is duplicated
+# rather than shared because this module runs INSIDE the CNV stage, before
+# STRATIFY exists; keep the two rules in step if either changes.
+# The matcher and the cutoff rule come from assets/viz/scratch_report.R and are
+# the SAME functions stratify_compartments.qmd uses. That is the point: this
+# confusion matrix claims to describe the decision STRATIFY makes, so it has to
+# be built from the identical rule. It was duplicated here at first; two copies
+# of one threshold diverge the moment either is touched.
+match_labels <- scratch_match_labels
+
+ref_labels <- trimws(unlist(strsplit(as.character(params$reference_labels), "[;,|]")))
+k <- as.numeric(params$infercnv_sd_threshold)
+
+if (have_ic) {
+  cmp[, is_ref := !is.na(celltype) & match_labels(celltype, ref_labels)]
+  cmp[, infercnv_call := NA_character_]
+  cut_basis <- list()
+  for (s_i in unique(cmp$sample)) {
+    d <- cmp[sample == s_i]
+    r <- scratch_cnv_cutoff(d$infercnv_score, d$is_ref, k = k)
+    cut_basis[[s_i]] <- r
+    cmp[sample == s_i & !is.na(infercnv_score),
+        infercnv_call := fifelse(infercnv_score > r$cutoff, "malignant", "non_malignant")]
+  }
+  cat("Cutoffs used (same rule as STRATIFY):\n")
+  for (nm in names(cut_basis))
+    cat(sprintf("  %-14s cutoff %.4f  n_ref %d  basis %s\n", nm,
+                cut_basis[[nm]]$cutoff, cut_basis[[nm]]$n_ref, cut_basis[[nm]]$basis))
+}
+```
+
+```{r fig-confusion, fig.width = 7.5, fig.height = 5}
+#| label: fig-confusion
+#| fig-cap: "inferCNV vs Numbat, per cell"
+conf <- NULL
+if (have_ic && have_nb) {
+  d <- cmp[!is.na(infercnv_call) & !is.na(numbat_call)]
+  if (nrow(d)) {
+    conf <- d[, .N, by = .(infercnv_call, numbat_call)]
+    conf[, frac := N / sum(N)]
+    p <- ggplot(conf, aes(x = numbat_call, y = infercnv_call, fill = N)) +
+      geom_tile(colour = "white", linewidth = 1.5) +
+      geom_text(aes(label = sprintf("%s\n%.1f%%", format(N, big.mark = ","), 100 * frac)),
+                colour = "grey15", size = 4) +
+      scale_fill_gradient(low = "#eef3f9", high = "#3b6ea5", guide = "none") +
+      labs(title = "inferCNV vs Numbat, per cell",
+           subtitle = "Off-diagonal cells are where the two callers disagree",
+           x = "Numbat call", y = "inferCNV call") +
+      theme_scratch() + theme(panel.grid = element_blank())
+    p
+  }
+} else cat("Needs both callers; skipped.\n")
+```
+
+```{r agreement-finding, results = 'asis'}
+if (!is.null(conf) && nrow(conf)) {
+  tot   <- sum(conf$N)
+  agree <- sum(conf[infercnv_call == numbat_call, N])
+  pct   <- 100 * agree / tot
+
+  # Cohen's kappa: agreement corrected for what chance alone would produce. With
+  # unbalanced compartments raw agreement flatters — 90% of cells non-malignant
+  # means two callers that both say "non-malignant" always look 90% concordant.
+  m <- dcast(conf, infercnv_call ~ numbat_call, value.var = "N", fill = 0)
+  mm <- as.matrix(m[, -1, with = FALSE]); rownames(mm) <- m$infercnv_call
+  common <- intersect(rownames(mm), colnames(mm))
+  po <- if (length(common)) sum(diag(mm[common, common, drop = FALSE])) / sum(mm) else 0
+  # pe uses only the classes both callers can express; when one caller emits a
+  # SINGLE class its marginal is 1, pe collapses to 1, and (po-pe)/(1-pe) divides
+  # by zero — the first render reported "Cohen's kappa -Inf" because inferCNV
+  # called nothing malignant among the cells Numbat scored. Kappa is genuinely
+  # undefined there, so report NA and say why rather than printing an infinity.
+  pe <- sum((rowSums(mm) / sum(mm))[common] * (colSums(mm) / sum(mm))[common])
+  kappa <- if (is.finite(pe) && pe < 1) (po - pe) / (1 - pe) else NA_real_
+  one_class <- length(unique(d$infercnv_call)) < 2 || length(unique(d$numbat_call)) < 2
+
+  only_ic <- conf[infercnv_call == "malignant" & numbat_call == "non_malignant", sum(N)]
+  only_nb <- conf[infercnv_call == "non_malignant" & numbat_call == "malignant", sum(N)]
+
+  kappa_txt <- if (is.na(kappa))
+      "Cohen's kappa is **undefined** here: one caller assigned every shared cell to a single class, so there is no chance-agreement baseline to correct against."
+    else sprintf("Cohen's kappa **%.2f**.%s", kappa,
+      if (kappa < 0.4) " **Below 0.4 is poor agreement** — the raw percentage is carried by the majority class, not by the callers finding the same cells." else "")
+
+  scratch_finding(sprintf(paste(
+    "The callers agree on **%.1f%%** of the %s cells both scored. %s",
+    "They disagree on **%s**: **%s** called malignant by inferCNV only,",
+    "**%s** by Numbat only.%s"),
+    pct, format(tot, big.mark = ","), kappa_txt,
+    format(tot - agree, big.mark = ","),
+    format(only_ic, big.mark = ","), format(only_nb, big.mark = ","),
+    if (one_class) paste(" One caller made a single call across every shared cell.",
+                         "Combined with a high rank AUC that is a THRESHOLD problem, not a",
+                         "disagreement about which cells carry CNV.") else ""),
+    type = if (is.na(kappa) || kappa < 0.4) "caution" else "note",
+    title = "Caller agreement")
+}
+```
+
+## What threshold would agree with Numbat?
+
+inferCNV's cutoff is `mean + k * SD` of the reference-lineage null, with `k` set
+by `--stratify_infercnv_sd`. Numbat needs no such choice — it calls from allelic
+evidence directly. So Numbat's calls can be used to ask what `k` *would* have
+agreed, which turns an arbitrary constant into a measured one.
+
+This is an **advisory**. It reports the number; it does not change the threshold,
+because doing so silently would move every downstream result without anything
+saying why.
+
+```{r k-calibration}
+#| code-fold: true
+kcal <- NULL
+if (have_ic && have_nb && "is_ref" %in% names(cmp)) {
+  per <- lapply(unique(cmp$sample), function(s_i) {
+    d <- cmp[sample == s_i & !is.na(infercnv_score) & !is.na(numbat_call)]
+    nulls <- cmp[sample == s_i & is_ref & is.finite(infercnv_score), infercnv_score]
+    if (nrow(d) < 50 || length(nulls) < 30 || stats::sd(nulls) == 0) return(NULL)
+    mu <- mean(nulls); sdv <- stats::sd(nulls)
+    P <- sum(d$numbat_call == "malignant"); N <- sum(d$numbat_call == "non_malignant")
+    if (!P || !N) return(NULL)
+    grid <- seq(0, 6, by = 0.1)
+    J <- vapply(grid, function(k_i) {
+      thr <- mu + k_i * sdv
+      tp <- sum(d$infercnv_score > thr & d$numbat_call == "malignant")
+      fp <- sum(d$infercnv_score > thr & d$numbat_call == "non_malignant")
+      tp / P - fp / N
+    }, numeric(1))
+    # The best k is often a PLATEAU, not a point: scores cluster, so a range of
+    # thresholds separates the same cells. Report the plateau and take its
+    # stringent end — the highest k that still achieves the best separation.
+    best <- max(J)
+    plateau <- grid[J >= best - 1e-9]
+    data.table(sample = s_i, k_lo = min(plateau), k_hi = max(plateau),
+               J = best, n_cells = nrow(d))
+  })
+  kcal <- rbindlist(Filter(Negate(is.null), per))
+}
+```
+
+```{r k-calibration-finding, results = 'asis'}
+if (!is.null(kcal) && nrow(kcal)) {
+  cfg <- as.numeric(params$infercnv_sd_threshold)
+  rec <- max(kcal$k_hi)
+  scratch_finding(sprintf(paste(
+    "Calibrated against Numbat, the SD multiplier that best separates its calls is",
+    "**k = %s**%s (Youden J %.3f). The pipeline is configured at **k = %s**.%s"),
+    paste(sprintf("%.1f", unique(kcal$k_hi)), collapse = " / "),
+    if (any(kcal$k_hi > kcal$k_lo))
+      sprintf(" (a plateau from %.1f; the stringent end is quoted)", min(kcal$k_lo)) else "",
+    max(kcal$J), format(cfg, digits = 2),
+    if (abs(rec - cfg) >= 0.5)
+      sprintf(paste(" **That is %.1f SD from the configured value.** At k = %s the",
+                    "threshold and Numbat disagree materially; consider",
+                    "--stratify_infercnv_sd %.1f."),
+              abs(rec - cfg), format(cfg, digits = 2), rec)
+    else " The configured value is close to the calibrated one."),
+    type = if (abs(rec - cfg) >= 0.5) "caution" else "note",
+    title = "Calibrated CNV threshold")
+
+  scratch_table(kcal[, .(sample, `best k (low)` = k_lo, `best k (high)` = k_hi,
+                         `Youden J` = round(J, 3), cells = n_cells)],
+                caption = "SD multiplier calibrated against Numbat, per sample")
+
+  if (nrow(kcal) == 1)
+    scratch_finding(paste("Only **one sample** had both an inferCNV score and Numbat",
+      "calls, so this calibration rests on that sample alone. Treat it as",
+      "indicative until a second sample confirms it."),
+      type = "caution", title = "Calibration is single-sample")
+}
+```
+
+## Disagreement by cell type
+
+Where the callers split is more informative than how often. Disagreement
+concentrated in the tumour lineage is a threshold argument; disagreement spread
+across immune lineages means one caller is calling normal cells aneuploid.
+
+```{r fig-agreement-by-celltype, fig.width = 9.5, fig.height = 5.5}
+#| label: fig-agreement-by-celltype
+#| fig-cap: "Per-cell-type agreement between the callers"
+bycell <- NULL
+if (have_ic && have_nb && !is.na(col_ct)) {
+  d <- cmp[!is.na(infercnv_call) & !is.na(numbat_call) & !is.na(celltype)]
+  if (nrow(d)) {
+    bycell <- d[, .(n = .N,
+                    agree = sum(infercnv_call == numbat_call),
+                    infercnv_only = sum(infercnv_call == "malignant" & numbat_call == "non_malignant"),
+                    numbat_only   = sum(infercnv_call == "non_malignant" & numbat_call == "malignant")),
+                by = celltype]
+    bycell[, pct_agree := round(100 * agree / n, 1)]
+    setorder(bycell, -n)
+
+    pl <- melt(bycell[, .(celltype, agree, infercnv_only, numbat_only)],
+               id.vars = "celltype", variable.name = "outcome", value.name = "cells")
+    pl[, outcome := factor(outcome, levels = c("agree", "infercnv_only", "numbat_only"),
+                           labels = c("agree", "inferCNV only", "Numbat only"))]
+    p <- ggplot(pl, aes(x = reorder(celltype, cells, sum), y = cells, fill = outcome)) +
+      geom_col(width = .72) + coord_flip() +
+      scale_fill_scratch(name = NULL) +
+      labs(title = "Per-cell-type agreement between the CNV callers",
+           subtitle = "Bars are cells; colour is which caller called malignant when they differed",
+           x = NULL, y = "cells") +
+      theme_scratch()
+    p
+  }
+} else cat("Needs both callers and a cell-type column; skipped.\n")
+```
+
+```{r bycell-finding, results = 'asis'}
+if (!is.null(bycell) && nrow(bycell)) {
+  worst <- bycell[order(pct_agree)][1]
+  scratch_finding(sprintf(paste(
+    "Lowest agreement is in **%s** (%.1f%% over %s cells: %s inferCNV-only,",
+    "%s Numbat-only). Highest is **%s** at %.1f%%."),
+    worst$celltype, worst$pct_agree, format(worst$n, big.mark = ","),
+    format(worst$infercnv_only, big.mark = ","), format(worst$numbat_only, big.mark = ","),
+    bycell[order(-pct_agree)][1]$celltype, bycell[order(-pct_agree)][1]$pct_agree),
+    type = "note", title = "Where the callers diverge")
+  scratch_table(bycell[, .(celltype, cells = n, agree, `inferCNV only` = infercnv_only,
+                           `Numbat only` = numbat_only, `% agree` = pct_agree)],
+                caption = "Caller agreement per annotated cell type")
+}
+```
+
+## Coverage
+
+A caller that scored no cells cannot disagree with anything, and a comparison
+run over a small overlap says little about the rest.
+
+```{r coverage, results = 'asis'}
+n_all  <- nrow(cmp)
+n_both <- if (have_ic && have_nb) cmp[!is.na(infercnv_score) & !is.na(numbat_call), .N] else 0L
+scratch_finding(sprintf(paste(
+  "inferCNV scored **%s** of %s cells; Numbat called **%s**. Both scored the",
+  "same **%s** (%.1f%%) — the comparison above covers only those."),
+  format(if (have_ic) cmp[!is.na(infercnv_score), .N] else 0L, big.mark = ","),
+  format(n_all, big.mark = ","),
+  format(if (have_nb) cmp[!is.na(numbat_call), .N] else 0L, big.mark = ","),
+  format(n_both, big.mark = ","), 100 * n_both / max(1L, n_all)),
+  type = if (n_both < 0.5 * n_all) "caution" else "note",
+  title = "Comparison coverage")
+```
+
+## Saving
+
+```{r save}
+if (isTRUE(as.logical(params$auto_save))) {
+  out_cols <- intersect(c("cell_id", "sample", "celltype", "infercnv_score",
+                          "infercnv_call", "numbat_call", "p_cnv", "clone_opt"),
+                        names(cmp))
+  fwrite(cmp[, ..out_cols],
+         file.path("data", paste0(project_name, "_cnv_caller_comparison.csv")))
+
+  summary_dt <- data.table(
+    metric = c("cells_total", "cells_infercnv", "cells_numbat", "cells_both",
+               "pct_agree", "cohens_kappa", "auc_rank", "infercnv_only", "numbat_only"),
+    value  = c(n_all,
+               if (have_ic) cmp[!is.na(infercnv_score), .N] else 0L,
+               if (have_nb) cmp[!is.na(numbat_call), .N] else 0L,
+               n_both,
+               if (exists("pct")) round(pct, 2) else NA_real_,
+               if (exists("kappa")) round(kappa, 4) else NA_real_,
+               if (!is.na(auc)) round(auc, 4) else NA_real_,
+               if (exists("only_ic")) only_ic else NA_integer_,
+               if (exists("only_nb")) only_nb else NA_integer_))
+  fwrite(summary_dt, file.path("data", paste0(project_name, "_cnv_caller_summary.csv")))
+  if (!is.null(bycell)) fwrite(bycell, file.path("data", paste0(project_name, "_cnv_agreement_by_celltype.csv")))
+
+  # ---- The cumulative object ------------------------------------------------
+  # Write both callers' per-cell results back onto the object before handing it
+  # downstream. Without this the CNV stage is a dead end for the object: its
+  # results live only in side files, STRATIFY re-reads them, and everything the
+  # object gained upstream has to be re-joined at the very end by INTEGRATION.
+  add <- cmp[match(colnames(obj), cmp$cell_id)]
+  for (cn in intersect(c("infercnv_score", "infercnv_call", "numbat_call",
+                         "p_cnv", "clone_opt"), names(add))) {
+    obj[[cn]] <- add[[cn]]
+  }
+  saveRDS(obj, file.path("data", paste0(project_name, "_cnv_object.RDS")))
+  cat("Saved CNV-enriched object with columns:",
+      paste(intersect(c("infercnv_score","infercnv_call","numbat_call","p_cnv","clone_opt"),
+                      colnames(obj@meta.data)), collapse = ", "), "\n")
+}
+```
+
+## Session info
+
+```{r session, echo = FALSE}
+sessionInfo()
+```

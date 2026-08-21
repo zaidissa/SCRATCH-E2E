@@ -274,6 +274,17 @@ workflow {
         ch_bpcells_store = Channel.value(file("${projectDir}/assets/NO_FILE_bpcells"))
     }
 
+    // ---- Artefacts feeding the per-stage smart reports ---------------------
+    // Declared HERE, before the first stage that fills one. They used to sit
+    // between ANNOTATION and CNV, which meant `rep_qc`, `rep_cluster` and
+    // `rep_annot` were assigned by their stages and then immediately reset to
+    // Channel.empty() — so the QC, clustering and annotation stage reports were
+    // built from nothing, every run, however much those stages published.
+    rep_qc = Channel.empty(); rep_cluster = Channel.empty(); rep_annot = Channel.empty()
+    rep_cnv = Channel.empty(); rep_strat = Channel.empty(); rep_meta = Channel.empty()
+    rep_bc = Channel.empty();  rep_traj = Channel.empty();  rep_cc = Channel.empty()
+    rep_tme = Channel.empty(); rep_tcr = Channel.empty()
+
     // ---- ALIGN -----------------------------------------------------------
     if (run['align']) {
         if (!params.input_samplesheet)
@@ -316,6 +327,10 @@ workflow {
 
     // ---- ANNOTATION ------------------------------------------------------
     ch_annotated = ch_seurat
+    // Per-cell annotation tables for the integration join. The master object is
+    // built on the AZIMUTH output, so without this it carries azimuth_labels and
+    // nothing from scType — this pipeline's own annotator.
+    ch_annotation_tables = Channel.empty()
     if (run['annotation']) {
         ANNOTATION(
             ch_seurat,
@@ -327,35 +342,37 @@ workflow {
         ch_annotated = ANNOTATION.out.seurat_rds
         ch_seurat    = ANNOTATION.out.seurat_rds
         rep_annot    = ANNOTATION.out.seurat_rds
+        ch_annotation_tables = ANNOTATION.out.concordance
     }
 
     // ---- CNV -------------------------------------------------------------
     // On the backbone, not a terminal branch: STRATIFY consumes its calls.
-    ch_cnv_infercnv = Channel.empty()
-    ch_cnv_scevan   = Channel.empty()
-    ch_cnv_evidence = Channel.empty()
+    // inferCNV and Numbat both live inside the CNV subworkflow and start from the
+    // same annotated object, so they run CONCURRENTLY; CNV_CONCORDANCE compares
+    // them at the end of the stage.
+    ch_cnv_infercnv    = Channel.empty()
+    ch_cnv_evidence    = Channel.empty()
+    ch_cnv_concordance = Channel.empty()
+    ch_cnv_object      = Channel.empty()
 
-    // Artefacts feeding the per-stage smart reports.
-    rep_qc = Channel.empty(); rep_cluster = Channel.empty(); rep_annot = Channel.empty()
-    rep_cnv = Channel.empty(); rep_strat = Channel.empty(); rep_meta = Channel.empty()
-    rep_bc = Channel.empty();  rep_traj = Channel.empty();  rep_cc = Channel.empty()
-    rep_tme = Channel.empty(); rep_tcr = Channel.empty()
-
-    if (run['cnv']) {
-        CNV(ch_annotated, ch_page_config)
-        ch_cnv_infercnv = CNV.out.infercnv
-        ch_cnv_scevan   = CNV.out.scevan
-        // Per-cell calls for the split; the raw caller directories stay behind.
-        ch_cnv_evidence = CNV.out.infercnv_meta
-            .mix(CNV.out.scevan_meta)
-            .mix(CNV.out.copykat)
-        rep_cnv = CNV.out.infercnv.mix(CNV.out.scevan).flatten()
+    // Numbat needs the BAM. Resolved here because --input_bam_path is a pipeline
+    // input, not a CNV-stage concern; ALIGN's own emission is already a
+    // (sample, bam, bai) tuple.
+    //
+    // Numbat is on by default but cannot run without a BAM. Switching it off with
+    // a warning — rather than letting it reach the pileup and die on "no sample
+    // matched between the supplied BAMs and the annotated object" — is the same
+    // treatment TCR gets when there is no VDJ input.
+    def numbat_has_bam = params.input_bam_path || run['align']
+    if (params.run_numbat && !numbat_has_bam) {
+        log.warn "Numbat skipped: no BAM (--input_bam_path unset and ALIGN not running). " +
+                 "It phases reads at heterozygous SNPs, so it needs the aligned BAM; " +
+                 "inferCNV does not. CNV will run inferCNV alone and the caller " +
+                 "comparison will report that only one caller was available."
     }
 
-    // ---- NUMBAT (opt-in, allele-aware) -------------------------------------
-    // Needs the BAM, so it can only run when ALIGN produced one (or when
-    // --input_bam_path supplies them). Its calls join the same evidence pool.
-    if (params.run_numbat) {
+    ch_numbat_bam = Channel.empty()
+    if (params.run_numbat && numbat_has_bam) {
         ch_numbat_bam = ch_bam
         if (params.input_bam_path) {
             // Carry the .bai alongside the BAM. Without it the pileup re-indexes an
@@ -371,9 +388,27 @@ workflow {
                     // "input file name collision" failure.
                 }
         }
+    }
 
-        NUMBAT(ch_annotated, ch_numbat_bam)
-        ch_cnv_evidence = ch_cnv_evidence.mix(NUMBAT.out.calls)
+    if (run['cnv']) {
+        CNV(ch_annotated, ch_numbat_bam, (params.run_numbat && numbat_has_bam), ch_page_config)
+        ch_cnv_infercnv = CNV.out.infercnv
+        // Per-cell calls for the split; the raw caller directories stay behind.
+        ch_cnv_evidence = CNV.out.infercnv_meta
+            .mix(CNV.out.numbat)
+            .mix(CNV.out.copykat)
+        ch_cnv_concordance = CNV.out.concordance_csv
+
+        // The annotated object with BOTH callers' per-cell calls written into it.
+        // This is what keeps the backbone cumulative: STRATIFY reads this rather
+        // than the pre-CNV object, so nothing upstream is dropped on the way.
+        ch_cnv_object = CNV.out.seurat_rds
+
+        rep_cnv = CNV.out.infercnv
+            .mix(CNV.out.numbat)
+            .mix(CNV.out.concordance)
+            .mix(CNV.out.concordance_csv)
+            .flatten()
     }
 
     // ---- STRATIFY ---------------------------------------------------------
@@ -383,7 +418,12 @@ workflow {
     ch_stratify_fig = Channel.empty()
 
     if (run['stratify']) {
-        STRATIFY(ch_annotated, ch_cnv_evidence.collect().ifEmpty([]), ch_page_config)
+        // Feed the CNV-enriched object when CNV ran, so the compartment objects
+        // inherit both callers' per-cell calls instead of STRATIFY re-deriving
+        // them and dropping the rest. Falls back to the annotated object when the
+        // stage is entered directly.
+        def ch_strat_in = run['cnv'] ? ch_cnv_object : ch_annotated
+        STRATIFY(ch_strat_in, ch_cnv_evidence.collect().ifEmpty([]), ch_page_config)
         ch_tumor        = STRATIFY.out.tumor_rds
         ch_nonmalignant = STRATIFY.out.nonmalignant_rds
         ch_assignment   = STRATIFY.out.assignment
@@ -419,6 +459,10 @@ workflow {
     // across a mixed object would regress out genuine tumour heterogeneity
     // along with the batch effect.
     ch_corrected  = ch_nonmalignant
+    // Falls back through the arm: trajectory's object if it ran, else the
+    // corrected object, else the raw compartment. Whichever it ends up being,
+    // this is the object that represents the microenvironment compartment.
+    ch_nonmalignant_final = ch_nonmalignant
     ch_trajectory = Channel.empty()
     ch_liana      = Channel.empty()
     ch_cellchat   = Channel.empty()
@@ -427,6 +471,7 @@ workflow {
     if (run['batchcorrect']) {
         BATCH_CORRECTION(ch_nonmalignant, ch_page_config)
         ch_corrected = BATCH_CORRECTION.out.seurat_rds
+        ch_nonmalignant_final = BATCH_CORRECTION.out.seurat_rds
         rep_bc = BATCH_CORRECTION.out.data.flatten().mix(BATCH_CORRECTION.out.figures.flatten())
     }
 
@@ -434,6 +479,18 @@ workflow {
         TRAJECTORY(ch_corrected, ch_page_config)
         ch_trajectory = TRAJECTORY.out.rds
         rep_traj = TRAJECTORY.out.rds.flatten()
+
+        // Object 3 of the three the pipeline produces: the NON-MALIGNANT object,
+        // now carrying its inherited history (QC, clustering, annotation, both CNV
+        // callers, the compartment call) plus the batch-corrected reduction and
+        // per-cell pseudotime.
+        //
+        // Cell communication and TME results are deliberately NOT written onto it:
+        // LIANA/CellChat produce per-cell-type-PAIR interactions and TME produces
+        // per-cell-type composition and signature scores (89 rows, not 19,657).
+        // Neither is a per-cell quantity, so attaching them would invent a value
+        // for each cell that the analysis never computed.
+        ch_nonmalignant_final = TRAJECTORY.out.seurat_rds.ifEmpty(null).filter { it != null }
     }
 
     if (run['cellcomm']) {
@@ -521,17 +578,28 @@ workflow {
         // because any stage that saves a figure now carries the same payload.
         // Inlined rather than factored into a `def` closure: a helper closure
         // referenced from inside another closure does not resolve reliably here.
+        // `.flatten()` BEFORE `.filter{}` is load-bearing, not tidying.
+        //
+        // An output declared `path "data/**"` emits ONE channel item holding a
+        // LIST of every matched file. Calling `.filter{}` on that emission tests
+        // the LIST's toString(), which is the concatenation of all the paths — so
+        // a single `_figlibs` entry anywhere in it discarded the ENTIRE stage.
+        // That is what happened to TRAJECTORY: it ran, published four figlib
+        // directories among its data, and reached INTEGRATE_OBJECTS with nothing
+        // at all — `stage_inputs/trajectory/` was never even created, while the
+        // trajectory STAGE REPORT got its files because it flattens first.
+        // Flattening makes the filter a per-file test, which is what it meant.
         INTEGRATION(
             ch_annotated,
             ch_annotated,
-            ch_cnv_infercnv.filter { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
-            ch_cnv_scevan.filter   { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
-            ch_metaprog.filter     { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
-            ch_trajectory.filter   { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
-            ch_liana.filter        { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
-            ch_cellchat.filter     { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
-            ch_tcr_summary.filter  { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
-            ch_assignment.mix(ch_tme).filter { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_cnv_infercnv.flatten().filter { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_metaprog.flatten().filter     { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_trajectory.flatten().filter   { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_liana.flatten().filter        { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_cellchat.flatten().filter     { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_tcr_summary.flatten().filter  { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_assignment.mix(ch_tme).flatten().filter { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
+            ch_annotation_tables.flatten().filter { !it.toString().contains('_figlibs') }.collect().ifEmpty([]),
             ch_page_config
         )
     }

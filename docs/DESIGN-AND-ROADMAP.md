@@ -93,7 +93,7 @@ scale, long before anything looks wrong locally.
 | ANNOTATION | **verified** end to end on real data (24,439 cells) |
 | ANNOTATION_CONCORDANCE | **verified**; 5 findings, 5 tables, 3 figures |
 | CNV / inferCNV | subsetting bug fixed; **unverified** — not run since the fix |
-| CNV / SCEVAN | works; slow (hours); default `cnv_scevan_max_cells = 0` is a latent break |
+| CNV / SCEVAN | **REMOVED 2026-08-20** — expression-only like inferCNV so it added no independent evidence, slow enough to dominate a run, a ~5,000-cell ceiling, and a silent-failure history |
 | CNV / Numbat | **verified** end to end; see §5 |
 | STRATIFY | not run since the CNV work. Concordance computed but not reported. |
 | METAPROG, BATCHCORRECT, TRAJECTORY, CELLCOMM, TME | ran in earlier sessions |
@@ -176,9 +176,8 @@ Threshold is ruled out. Test a cohort-internal expression reference against
 `ref_hca`, and check the sample's actual tumour content.
 
 **2. Fix the CNV defaults.**
-- `cnv_scevan_max_cells: 0 → 5000` — this is a straight bug. `0` means uncapped,
-  and SCEVAN breaks above ~5,000 cells per sample.
-- `skip_scevan: false → true` — slow, has a cell ceiling, and a history of
+- ~~`cnv_scevan_max_cells`~~ — moot: SCEVAN is gone.
+- ~~`skip_scevan`~~ — superseded by removal. Slow, cell-capped, and a history of
   silent failure.
 - Add a **caution finding in STRATIFY when only one caller ran.** With SCEVAN off
   and Numbat opt-in, the default becomes a single caller with no cross-check —

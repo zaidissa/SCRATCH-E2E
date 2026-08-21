@@ -179,7 +179,18 @@ Joins the CNV calls to the annotation labels: what fraction of each annotated
 population is called aneuploid, and does that agree between callers.
 
 ```{r cnv-celltype, fig.width = 9, fig.height = 5.5}
-mal_col <- grep("malig|pred|copykat|subclone|class", cnv_cols, value = TRUE, ignore.case = TRUE)
+# STRATIFY's `malignant_status` is the pipeline's actual malignancy call — a
+# consensus over every caller that ran, with the annotation label as tie-break —
+# so prefer it outright. The `cnv_*` grep is the fallback for a run where the
+# split did not happen.
+#
+# It also has to BE here: this used to search only columns starting with "cnv",
+# and inferCNV's per-cell table names its clone column `subcluster` while the
+# pattern said `subclone`. One letter, and "CNV x cell type" reported FALSE on a
+# run whose CNV stage had contributed 219 columns.
+mal_col <- if ("malignant_status" %in% names(cells)) "malignant_status" else
+  grep("malig|pred|copykat|subclone|subcluster|class", cnv_cols,
+       value = TRUE, ignore.case = TRUE)
 
 if (length(mal_col) && !is.na(col_ct)) {
   mc <- mal_col[1]
@@ -252,7 +263,12 @@ confined to a single sample is more likely patient-specific.
 
 ```{r mp-recurrence, fig.width = 9, fig.height = 5}
 if ("metaprog_assigned" %in% names(cells) && !is.na(col_sample)) {
-  dt <- cells[!is.na(metaprog_assigned)]
+  # NOT just is.na(): the cell table reaches this notebook via fwrite/fread, and
+  # an NA assignment round-trips as an EMPTY STRING. Filtering on NA alone let the
+  # 14,182 unassigned (non-malignant) cells through as a nameless "" programme,
+  # which then appeared as a blank row in the recurrence table and a blank bar in
+  # the figure.
+  dt <- cells[!is.na(metaprog_assigned) & nzchar(as.character(metaprog_assigned))]
   rec <- dt[, .(samples = uniqueN(get(col_sample)), cells = .N), by = metaprog_assigned]
   setorder(rec, -samples, -cells)
 

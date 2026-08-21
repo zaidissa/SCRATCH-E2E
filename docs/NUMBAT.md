@@ -13,7 +13,7 @@ nextflow run . -profile docker \
 
 ## What it adds
 
-inferCNV, SCEVAN and CopyKAT all infer copy number from **expression** smoothed
+inferCNV and CopyKAT infer copy number from **expression** smoothed
 along the genome. That makes them structurally blind to **copy-neutral LOH**: an
 event that changes allele ratios without changing dosage produces no expression
 signal at all, so no amount of tuning will reveal it.
@@ -126,7 +126,7 @@ coverage per cell for the allelic channel to be informative. Low-cellularity,
 low-tumour-content material — CSF aspirates in particular — is exactly where
 allele-aware methods degrade. Expect it to behave well on resections and to be
 marginal on CSF. Run it on one solid sample first and compare against
-inferCNV/SCEVAN in the concordance table before extending to the whole cohort.
+inferCNV in the concordance table before extending to the whole cohort.
 
 **The expression reference is generic.** `numbat_run.R` uses the package's
 bundled `ref_hca` profile. A cohort-internal reference built from your own
