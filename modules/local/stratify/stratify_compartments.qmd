@@ -211,8 +211,6 @@ cat("Tumour-lineage labels:", paste(tumor_labels, collapse = ", "), "\n")
 # decision, and two copies of one rule diverge silently.
 match_labels <- scratch_match_labels
 
-}
-
 .observed <- sort(unique(as.character(meta[[col_ct]])))
 .ref_hit  <- .observed[match_labels(.observed, ref_labels)]
 .tum_hit  <- .observed[match_labels(.observed, tumor_labels)]
@@ -300,6 +298,38 @@ scratch_match_cell_ids <- function(ids, target, caller) {
 evidence <- data.table(cell_id = meta$cell_id)
 callers  <- character(0)
 
+# ---- Calls already carried ON the object ----------------------------------
+# The CNV stage writes each caller's per-cell result into the object it hands
+# on, so an object arriving here may already know what the callers decided.
+# Reading it means `--from stratify --input_seurat_object <cnv_object>` works on
+# its own, without the caller artefacts being re-staged.
+#
+# This is not a convenience: without it that entry point silently produced a
+# split with NO CNV evidence at all -- every cell voted (0,0) and the compartments
+# came from the annotation labels alone, while the calls sat unread in the
+# object's own metadata. Staged files still win, since a re-run of the callers
+# should override what an older object remembers.
+# A staged file must be able to REPLACE a carried column, not collide with it.
+# data.table's merge suffixes duplicate names to .x/.y, so carrying
+# `infercnv_score` from the object and then merging the file's own copy left
+# NEITHER column called `infercnv_score` -- and the per-sample threshold block
+# died with "object 'infercnv_score' not found" after 28 tasks had succeeded.
+.take_from_file <- function(dt, cols) {
+  dup <- intersect(cols, names(dt))
+  if (length(dup)) dt[, (dup) := NULL]
+  invisible(dt)
+}
+
+for (.cc in intersect(c("infercnv_call", "numbat_call", "copykat_call"), names(meta))) {
+  .vals <- as.character(meta[[.cc]])
+  if (all(is.na(.vals))) next
+  evidence[[.cc]] <- .vals
+  callers <- c(callers, sub("_call$", "", .cc))
+  cat(sprintf("Carried %s from the object: %d call(s)\n", .cc, sum(!is.na(.vals))))
+}
+if ("infercnv_score" %in% names(meta) && !all(is.na(meta$infercnv_score)))
+  evidence[, infercnv_score := as.numeric(meta$infercnv_score)]
+
 # ---- inferCNV: a continuous genome-wide CNV load ---------------------------
 # There is no hard call, so the cutoff is set from the reference lineages: the
 # score distribution of cells that cannot be malignant is the null, and cells
@@ -319,6 +349,7 @@ if (length(f)) {
   if (!is.null(ic_meta) && !is.na(score_col)) {
     ic_meta[, cell_id := as.character(cell_id)]
     sc <- ic_meta[, .(cell_id, infercnv_score = as.numeric(get(score_col)))]
+    .take_from_file(evidence, setdiff(names(sc), "cell_id"))
     evidence <- merge(evidence, sc, by = "cell_id", all.x = TRUE, sort = FALSE)
 
     # --- Per-sample thresholds -------------------------------------------
@@ -374,6 +405,7 @@ if (length(f)) {
     ev[, call := fifelse(is.na(infercnv_score), NA_character_,
                   fifelse(infercnv_score > cutoff, "malignant", "non_malignant"))]
 
+    .take_from_file(evidence, "infercnv_call")
     evidence <- merge(evidence, ev[, .(cell_id, infercnv_call = call)],
                       by = "cell_id", all.x = TRUE, sort = FALSE)
     callers <- c(callers, "infercnv")
@@ -399,6 +431,7 @@ if (length(f)) {
         ck[, cell_id := matched]
         ck[, copykat_call := fifelse(grepl("aneuploid", tolower(raw)), "malignant",
                               fifelse(grepl("diploid", tolower(raw)), "non_malignant", NA_character_))]
+        .take_from_file(evidence, "copykat_call")
         evidence <- merge(evidence, ck[, .(cell_id, copykat_call)], by = "cell_id", all.x = TRUE, sort = FALSE)
         callers <- c(callers, "copykat")
       }
@@ -417,12 +450,14 @@ if (length(f)) {
   if (!is.null(nb) && nrow(nb) && all(c("cell_id", "numbat_call") %in% names(nb))) {
     nb[, cell_id := as.character(cell_id)]
     nb <- unique(nb[, .(cell_id, numbat_call)], by = "cell_id")
+    .take_from_file(evidence, setdiff(names(nb), "cell_id"))
     evidence <- merge(evidence, nb, by = "cell_id", all.x = TRUE, sort = FALSE)
     callers <- c(callers, "numbat")
     cat(sprintf("Numbat: %d cells called across %d sample file(s)\n", nrow(nb), length(f)))
   }
 } else cat("No Numbat evidence.\n")
 
+callers <- unique(callers)   # a caller carried on the object AND staged as a file is ONE caller
 cat("\nCNV callers contributing:", if (length(callers)) paste(callers, collapse = ", ") else "none", "\n")
 ```
 

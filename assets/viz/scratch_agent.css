@@ -56,7 +56,29 @@
   transition:transform .22s ease;background:var(--sxa-bg,#fff);
   border-left:1px solid rgba(128,128,128,.3);box-shadow:-8px 0 26px rgba(0,0,0,.13)}
 #scratch-agent.sxa-open{transform:translateX(0)}
-#scratch-agent .sxa-log{flex:1;max-height:none}
+/* The flex chain has to be unbroken or the log cannot scroll.
+   #scratch-agent is the flex column, but its CHILD is .sxa -- so `flex:1` on
+   .sxa-log was addressing a parent that was not a flex container, while
+   max-height:none removed the 340px cap the inline version relied on. The log
+   then grew past the viewport with no scrollbar at all.
+   min-height:0 is the part everyone forgets: a flex item's default
+   min-height:auto refuses to shrink below its content, so overflow never
+   engages no matter what overflow-y says. */
+#scratch-agent > .sxa{display:flex;flex-direction:column;height:100%;min-height:0;
+  margin:0;border:0;border-radius:0}
+#scratch-agent .sxa-head,
+#scratch-agent .sxa-chips,
+#scratch-agent .sxa-form{flex:0 0 auto}
+#scratch-agent .sxa-log{flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto;
+  /* keep a scroll gesture inside the panel instead of chaining to the report */
+  overscroll-behavior:contain}
+
+/* Make room for the panel rather than covering the report.
+   Docked at position:fixed it sat on top of Quarto's right-hand table of
+   contents. Padding the body compresses the page grid, so the TOC moves left
+   instead of disappearing under the panel. */
+body.sxa-shifted{padding-right:min(420px,92vw);transition:padding-right .22s ease}
+@media (max-width:640px){ body.sxa-shifted{padding-right:0} }
 
 .sxa-launch{position:fixed;right:18px;bottom:18px;z-index:10000;
   display:flex;align-items:center;gap:9px;padding:11px 17px;border:0;cursor:pointer;

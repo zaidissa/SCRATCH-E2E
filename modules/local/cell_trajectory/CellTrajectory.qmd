@@ -286,14 +286,50 @@ n_cores        <- min(8L, max(1L, parallel::detectCores() - 1L))
 n_subsamples   <- 1L
 subsample_size <- min(8000L, ncol(expr_mat))
 
-scores_raw <- run_cytotrace(
-  expr_mat,
-  species        = "human",
-  n_subsamples   = n_subsamples,
-  subsample_size = subsample_size,
-  n_cores        = n_cores
-)
-scores <- get_ct_scores(scores_raw, expr_mat)
+# CytoTRACE2 HANGS here, and it hangs SILENTLY.
+#
+# Observed: 19,657 cells, chunk stuck at 0.02% CPU for six hours with no output.
+# It had always run on ~5,900 cells before — that was a bug elsewhere (batch
+# correction was publishing a 30% downsample), and fixing it tripled the input
+# into this step. Forked parallel workers inside an emulated amd64 container are
+# the likely culprit; either way a deadlock produces no error, no output and no
+# end.
+#
+# Nextflow does NOT save us: `time` in conf/base.config is advisory for the local
+# executor, so a hung task blocks the pipeline indefinitely rather than being
+# killed at 4 h.
+#
+# So: one core (forking is the suspect), a hard wall-clock limit, and a graceful
+# degradation. CytoTRACE only supplies ROOT CELLS for the trajectory — losing it
+# costs the root heuristic, not the trajectory, so it must never cost the run.
+ct_cores   <- as.integer(Sys.getenv("SCRATCH_CYTOTRACE_CORES", "1"))
+ct_timeout <- as.numeric(Sys.getenv("SCRATCH_CYTOTRACE_TIMEOUT", "3600"))
+
+scores_raw <- tryCatch(
+  R.utils::withTimeout(
+    run_cytotrace(
+      expr_mat,
+      species        = "human",
+      n_subsamples   = n_subsamples,
+      subsample_size = subsample_size,
+      n_cores        = ct_cores
+    ),
+    timeout = ct_timeout, onTimeout = "error"),
+  error = function(e) { message("CytoTRACE failed or timed out: ", conditionMessage(e)); NULL })
+
+if (is.null(scores_raw)) {
+  # Fallback root signal: gene-detection rate. Less differentiated cells express
+  # more genes, which is the same monotonic signal CytoTRACE exploits — good
+  # enough to pick a root, and explicitly labelled so nobody reads it as CytoTRACE.
+  cytotrace_ok <- FALSE
+  scores <- Matrix::colSums(expr_mat > 0)
+  scores <- scores / max(scores, na.rm = TRUE)
+  names(scores) <- colnames(expr_mat)
+  message("Using gene-detection rate as the root-cell proxy for ", length(scores), " cells.")
+} else {
+  cytotrace_ok <- TRUE
+  scores <- get_ct_scores(scores_raw, expr_mat)
+}
 
 # --- Attach to Seurat (safe matching) ---
 cn <- colnames(obj_nonmal); idx <- match(cn, names(scores)); over <- sum(!is.na(idx))
@@ -356,11 +392,50 @@ saveRDS(list(root_cells = root_cells_ct, score = obj_nonmal$CytoTRACE),
 
 message("[2/6] Slingshot ...")
 
-sce <- as.SingleCellExperiment(obj_nonmal)
-reducedDims(sce)$UMAP <- obj_nonmal@reductions$umap@cell.embeddings
-cl  <- Idents(obj_nonmal)
-start.clus <- names(which.max(tapply(obj_nonmal$CytoTRACE, cl, median)))
-sce <- slingshot(sce, clusterLabels = cl, reducedDim = "UMAP", start.clus = start.clus)
+# Slingshot builds a minimum spanning tree over CLUSTER CENTROIDS. A cluster with
+# one or two cells has no meaningful centroid spread, createClusterMST emits NA
+# distances, and igraph aborts with "adjacency matrix contains NA". That is how
+# this failed: 18 clusters, the smallest holding a SINGLE cell.
+#
+# The tiny clusters only appeared because the non-malignant compartment grew from
+# 5,896 to 19,657 cells when the batch-correction downsample bug was fixed —
+# more cells, finer clustering, more singletons.
+#
+# Cells in undersized clusters are excluded from the TRAJECTORY only. They keep
+# their place in every other analysis; a lineage cannot be drawn through a
+# cluster of one either way.
+.min_clus <- as.integer(Sys.getenv("SCRATCH_SLINGSHOT_MIN_CLUSTER", "10"))
+cl_all    <- droplevels(factor(Idents(obj_nonmal)))
+tb_clus   <- table(cl_all)
+small     <- names(tb_clus)[tb_clus < .min_clus]
+keep_cells <- colnames(obj_nonmal)[!(as.character(cl_all) %in% small)]
+
+if (length(small)) {
+  message(sprintf("Slingshot: dropping %d cluster(s) with <%d cells (%s) — %d cells excluded from the trajectory.",
+                  length(small), .min_clus, paste(small, collapse = ","),
+                  ncol(obj_nonmal) - length(keep_cells)))
+}
+obj_slingshot <- if (length(small)) subset(obj_nonmal, cells = keep_cells) else obj_nonmal
+
+sce <- as.SingleCellExperiment(obj_slingshot)
+reducedDims(sce)$UMAP <- obj_slingshot@reductions$umap@cell.embeddings
+cl  <- droplevels(factor(Idents(obj_slingshot)))
+
+# The root cluster is the one with the highest median CytoTRACE (least
+# differentiated). Guard it: with a failed CytoTRACE the medians can be all-NA,
+# and which.max() on that returns integer(0) -> start.clus becomes character(0),
+# which slingshot accepts and then behaves unpredictably.
+.med <- tapply(obj_slingshot$CytoTRACE, cl, median, na.rm = TRUE)
+start.clus <- if (all(is.na(.med))) {
+  message("Slingshot: no usable CytoTRACE medians; letting slingshot choose the root.")
+  NULL
+} else names(which.max(.med))
+
+sce <- if (is.null(start.clus)) {
+  slingshot(sce, clusterLabels = cl, reducedDim = "UMAP")
+} else {
+  slingshot(sce, clusterLabels = cl, reducedDim = "UMAP", start.clus = start.clus)
+}
 
 # --- Figure-style panel with curves & origin ---
 get_embed <- function(sce, prefer = c("UMAP","TSNE","PCA")) {
@@ -377,7 +452,7 @@ patient_vec <- get_cd(cd, "patient", rep("All", ncol(sce)))
 pt_mat <- slingPseudotime(sce)
 pt_vec <- apply(pt_mat, 1, function(x) suppressWarnings(min(x, na.rm = TRUE))); pt_vec[!is.finite(pt_vec)] <- NA_real_
 
-meta_df <- obj_nonmal@meta.data
+meta_df <- obj_nonmal@meta.data   # full object: emb rownames are a subset of it
 plotdf <- dplyr::bind_cols(emb[, 1:2], meta_df[rownames(emb), , drop = FALSE]) |>
   dplyr::mutate(pseudotime = pt_vec, patient = if ("patient" %in% names(meta_df)) patient else "All")
 
@@ -410,8 +485,28 @@ p_pseudo
 # --- Back to Seurat: UMAP colored by Slingshot pseudotime ---
 pt_list <- slingPseudotime(sce)
 pt_df   <- as.data.frame(pt_list)
+
+# apply() over a ONE-column data frame returns a vector, not a matrix, and
+# rowMeans() then fails. Force a matrix so a single-lineage trajectory works.
 pt_rank <- apply(pt_df, 2, function(x) rank01(x))
-obj_nonmal$slingshot_pseudotime <- rowMeans(pt_rank, na.rm = TRUE)[colnames(obj_nonmal)]
+if (is.null(dim(pt_rank))) pt_rank <- matrix(pt_rank, ncol = 1,
+                                             dimnames = list(rownames(pt_df), colnames(pt_df)))
+pt_mean <- rowMeans(pt_rank, na.rm = TRUE)
+
+# Align to the FULL object explicitly. Slingshot ran on a subset (undersized
+# clusters were excluded above), so `pt_mean[colnames(obj_nonmal)]` yields an
+# element with an NA NAME for every excluded cell, and SeuratObject's `[[<-`
+# rejects that with "missing value where TRUE/FALSE needed" -- an error that
+# says nothing about the actual cause. Build the vector by name instead, leaving
+# excluded cells as NA, which is what they are: no pseudotime was computed.
+sl_vec <- stats::setNames(rep(NA_real_, ncol(obj_nonmal)), colnames(obj_nonmal))
+.shared <- intersect(names(pt_mean), names(sl_vec))
+sl_vec[.shared] <- pt_mean[.shared]
+obj_nonmal$slingshot_pseudotime <- sl_vec
+
+if (length(.shared) < ncol(obj_nonmal))
+  message(sprintf("Slingshot pseudotime assigned to %d of %d cells; %d were in clusters too small for a lineage.",
+                  length(.shared), ncol(obj_nonmal), ncol(obj_nonmal) - length(.shared)))
 
 df_umap <- data.frame(Embeddings(obj_nonmal, "umap"),
                       sl_pt = obj_nonmal$slingshot_pseudotime[colnames(obj_nonmal)])

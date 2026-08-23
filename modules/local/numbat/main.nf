@@ -220,6 +220,12 @@ process NUMBAT_RUN {
         // undeclared files stay in the work dir and publishDir copies nothing.
         path "numbat/${sample_id}_numbat_nocalls.txt", emit: nocalls, optional: true
         path "numbat/${sample_id}/**",               emit: detail,  optional: true
+        // The EVENT-level table: one row per CNV segment, with cnv_state
+        // (loh/amp/del/bamp), coordinates, LLR and gene/SNP support. The
+        // per-cell calls above answer "how many cells", not "how many CNVs" --
+        // a distinction worth keeping, since they differ by two orders of
+        // magnitude (9,227 cells vs 66 segments on this data).
+        path "numbat/${sample_id}/segs_consensus_*.tsv", emit: segments, optional: true
         path "figures/numbat/**",                    emit: figures, optional: true
 
     when:

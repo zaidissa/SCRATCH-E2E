@@ -1393,6 +1393,21 @@ if (identical(input_integration_method, "all")) {
     params$input_label_key
   } else label_col
 
+  # The evaluation block below mutates `seurat_object` -- it downsamples, then
+  # re-clusters and re-embeds it once per method. That is fine for computing
+  # kBET/silhouette/LISI, which is all it is for.
+  #
+  # It is NOT fine for the object the pipeline publishes. `seurat_object` is what
+  # the Autosave chunk writes as *_batch_object.RDS, and that object is the sole
+  # input to TRAJECTORY, CELL_COMMUNICATION and TME. With thr_cell_proportion at
+  # 0.30 the microenvironment handed to all three arrived at 5,896 of 19,657
+  # cells -- 70% discarded, silently, by a sampling step meant for a metrics
+  # table. It showed up as trajectory joining only 24% of cells at integration.
+  #
+  # Keep the full object aside here and publish THAT.
+  seurat_object_full <- seurat_object
+  .eval_downsampled <- FALSE
+
   # optional downsample per (batch,label)
   if (thr_frac > 0 && thr_frac < 1) {
     meta <- seurat_object@meta.data |>
@@ -1404,6 +1419,10 @@ if (identical(input_integration_method, "all")) {
       dplyr::pull(cell)
     seurat_object <- subset(seurat_object, cells = keep)
     seurat_object[["barcode"]] <- colnames(seurat_object)
+    .eval_downsampled <- TRUE
+    message(sprintf("Evaluation downsample: %d of %d cells (%.0f%%) per (batch,label). The PUBLISHED object keeps all %d.",
+                    ncol(seurat_object), ncol(seurat_object_full),
+                    100 * thr_frac, ncol(seurat_object_full)))
   }
   op <- options(future.globals.maxSize = 8 * 1024^3)
   on.exit(options(op), add = TRUE)
@@ -1766,7 +1785,29 @@ if (identical(input_integration_method, "all")) {
 ```{r Autosave, error=TRUE}
 #| echo: false
 if (auto_save) {
-  saveRDS(seurat_object, file = file.path('data', paste0(project_name, '_', input_batch_step, '_batch_object.RDS')))
+  # Publish the FULL object, not the evaluation copy. `seurat_object` may have
+  # been downsampled above for metrics; `seurat_object_full` is the same object
+  # with every cell. Falls back cleanly when the evaluation block did not run.
+  .to_save <- if (exists("seurat_object_full")) seurat_object_full else seurat_object
+  saveRDS(.to_save, file = file.path('data', paste0(project_name, '_', input_batch_step, '_batch_object.RDS')))
+  cat(sprintf("Published batch object: %d cells, reductions: %s\n",
+              ncol(.to_save), paste(SeuratObject::Reductions(.to_save), collapse = ", ")))
+}
+```
+
+```{r eval-downsample-finding, results = 'asis'}
+if (exists(".eval_downsampled") && isTRUE(.eval_downsampled)) {
+  scratch_finding(sprintf(paste(
+    "Integration metrics were computed on a **%.0f%% downsample** (%s of %s cells),",
+    "stratified by batch and cell label. That keeps four integrations' worth of",
+    "clustering and kBET affordable. **The published object keeps all %s cells** —",
+    "the downsample never leaves this report. Set `thr_cell_proportion` to 1 to",
+    "evaluate on everything."),
+    100 * thr_frac,
+    format(ncol(seurat_object), big.mark = ","),
+    format(ncol(seurat_object_full), big.mark = ","),
+    format(ncol(seurat_object_full), big.mark = ",")),
+    type = "note", title = "Metrics computed on a downsample")
 }
 ```
 

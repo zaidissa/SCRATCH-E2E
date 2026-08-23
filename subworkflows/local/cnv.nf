@@ -37,6 +37,12 @@ workflow CNV {
         ch_infercnv = Channel.empty()
         ch_copykat  = Channel.empty()
         ch_numbat   = Channel.empty()
+        // Per-SEGMENT CNV events, as opposed to per-cell calls. Both go to the
+        // concordance module: "how many cells did Numbat call" and "how many
+        // CNVs did Numbat find" are different questions with answers two orders
+        // of magnitude apart, and a report that can only answer the first
+        // invites the second being answered wrongly.
+        ch_numbat_segments = Channel.empty()
 
         // Per-cell calls, kept separate from the raw caller output directories.
         // These are what the stratification step consumes.
@@ -62,6 +68,7 @@ workflow CNV {
         if (run_numbat) {
             NUMBAT(ch_seurat_object, ch_bam)
             ch_numbat = NUMBAT.out.calls
+            ch_numbat_segments = NUMBAT.out.segments
         }
 
         if (!params.skip_copykat) {
@@ -90,7 +97,7 @@ workflow CNV {
             CNV_CONCORDANCE(
                 ch_seurat_object,
                 ch_infercnv_meta.collect().ifEmpty([]),
-                ch_numbat.collect().ifEmpty([]),
+                ch_numbat.mix(ch_numbat_segments).collect().ifEmpty([]),
                 Channel.fromPath(params.notebook_cnv_concordance, checkIfExists: true),
                 ch_page_config
             )

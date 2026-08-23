@@ -170,6 +170,90 @@ if (!have_ic || !have_nb) {
 }
 ```
 
+## What CNVs did Numbat actually find?
+
+The per-cell table says how many **cells** carry CNV evidence. It does not say
+what those events *are*. Numbat's segment consensus does: one row per copy-number
+segment, with its state (LOH, amplification, deletion), coordinates, and the
+log-likelihood ratio supporting it.
+
+Registering this matters beyond completeness — "how many CNVs did Numbat
+identify" is an obvious question, and the answers differ by two orders of
+magnitude (thousands of cells versus tens of segments). A report that can only
+answer the first invites the second being answered wrongly.
+
+```{r numbat-segments}
+#| code-fold: true
+segs <- NULL
+seg_files <- nb_files[grepl("segs_consensus_.*\\.tsv$", nb_files)]
+if (length(seg_files)) {
+  # Numbat writes one consensus per iteration (segs_consensus_1, _2, ...).
+  # The LAST is the converged one; earlier iterations are intermediate.
+  by_sample <- split(seg_files, sub("^.*/([^/]+)/segs_consensus_.*$", "\\1", seg_files))
+  parts <- lapply(names(by_sample), function(smp) {
+    f <- sort(by_sample[[smp]]); f <- f[length(f)]
+    d <- tryCatch(fread(f), error = function(e) NULL)
+    if (is.null(d) || !nrow(d)) return(NULL)
+    keep <- intersect(c("CHROM", "seg", "cnv_state_post", "cnv_state",
+                        "seg_start", "seg_end", "LLR", "n_genes", "n_snps"), names(d))
+    d <- d[, ..keep]
+    d[, sample := smp]
+    d[, iteration := sub("^.*segs_consensus_(\\d+)\\.tsv$", "\\1", f)]
+    d
+  })
+  segs <- rbindlist(Filter(Negate(is.null), parts), fill = TRUE)
+}
+```
+
+```{r numbat-segments-report, results = 'asis'}
+if (!is.null(segs) && nrow(segs)) {
+  state_col <- intersect(c("cnv_state_post", "cnv_state"), names(segs))[1]
+  segs[, state := as.character(get(state_col))]
+  by_state <- segs[, .N, by = .(sample, state)][order(sample, -N)]
+  tally <- paste(sprintf("**%s** in %s", by_state$N, by_state$state), collapse = ", ")
+
+  scratch_finding(sprintf(paste(
+    "Numbat resolved **%s copy-number segment(s)** across %s sample(s): %s.",
+    "These are EVENTS, not cells — %s cells carry evidence of them.",
+    "Segment size ranges %.1f–%.1f Mb."),
+    format(nrow(segs), big.mark = ","), uniqueN(segs$sample), tally,
+    format(if (have_nb) cmp[!is.na(numbat_call), .N] else 0L, big.mark = ","),
+    min(segs$seg_end - segs$seg_start) / 1e6,
+    max(segs$seg_end - segs$seg_start) / 1e6),
+    type = "note", title = "Numbat CNV segments")
+
+  scratch_table(segs[order(sample, CHROM)][, .(sample, CHROM, seg, state,
+                   start_Mb = round(seg_start / 1e6, 2), end_Mb = round(seg_end / 1e6, 2),
+                   size_Mb = round((seg_end - seg_start) / 1e6, 2),
+                   LLR = round(LLR, 1), n_genes, n_snps)],
+                caption = "Numbat CNV segments (consensus)")
+  fwrite(segs, file.path("data", paste0(project_name, "_numbat_segments.csv")))
+} else {
+  scratch_finding(paste("No Numbat segment consensus was staged, so this report can",
+    "state how many CELLS carry CNV evidence but not how many distinct CNV events",
+    "were resolved. The file is `segs_consensus_*.tsv` in Numbat's output."),
+    type = "note", title = "Segment-level calls unavailable")
+}
+```
+
+```{r fig-numbat-segments, fig.width = 9.5, fig.height = 5}
+#| label: fig-numbat-segments
+#| fig-cap: "Numbat CNV segments by chromosome"
+if (!is.null(segs) && nrow(segs)) {
+  d <- copy(segs)
+  d[, chr := factor(as.character(CHROM), levels = c(as.character(1:22), "X", "Y"))]
+  ggplot(d, aes(x = chr, y = (seg_end - seg_start) / 1e6, fill = state,
+                text = sprintf("%s %s\n%s\n%.1f Mb, LLR %.0f",
+                               sample, seg, state, (seg_end - seg_start) / 1e6, LLR))) +
+    geom_col(width = .72) +
+    scale_fill_scratch(name = NULL) +
+    labs(title = "Numbat CNV segments by chromosome",
+         subtitle = "Bar height is segment size; colour is the inferred state",
+         x = NULL, y = "Mb") +
+    theme_scratch()
+}
+```
+
 ## Do the callers rank cells the same way?
 
 The threshold-free question, and the one worth asking first: **ignoring where

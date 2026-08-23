@@ -21,6 +21,7 @@ workflow NUMBAT {
     main:
 
         ch_calls = Channel.empty()
+        ch_segments = Channel.empty()
 
         if (params.run_numbat) {
 
@@ -115,8 +116,12 @@ workflow NUMBAT {
 
             NUMBAT_RUN(ch_run_in)
             ch_calls = NUMBAT_RUN.out.calls
+            ch_segments = NUMBAT_RUN.out.segments
         }
 
     emit:
         calls = ch_calls
+        // Per-SEGMENT consensus calls, keyed by sample. Distinct from `calls`,
+        // which is per cell.
+        segments = ch_segments
 }

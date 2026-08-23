@@ -54,6 +54,9 @@ process BATCHCORRECTION {
     parts << "-P input_batch_step:${params.bc_batch_step}"
     parts << "-P exclude_labels:'${params.bc_exclude_labels.replaceAll(',', ';')}'"
     parts << "-P label_candidates:'${params.bc_label_candidates.replaceAll(',', ';')}'"
+    // Evaluation-only downsample. Previously the notebook's own default (0.30)
+    // was the only way to set it, and it silently shrank the PUBLISHED object.
+    parts << "-P thr_cell_proportion:${params.bc_eval_cell_proportion}"
     parts << "-P n_hvgs:${params.bc_n_hvgs}"
     parts << "-P n_pcs:${params.bc_n_pcs}"
     parts << "-P n_threads:${task.cpus}"
