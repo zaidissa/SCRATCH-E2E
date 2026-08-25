@@ -1063,3 +1063,183 @@ saveRDS(obj_nonmal, file.path(PseudotimeDir, "final_obj_nonmal_with_pseudotime.r
 message("Pipeline completed. | Results in ", normalizePath(data))
 
 ```
+
+
+# Do the three methods agree?
+
+Three pseudotime estimates were computed — CytoTRACE (differentiation potency),
+Slingshot (lineage curves through cluster centroids) and Monocle3 (principal
+graph). They rest on different assumptions, so **their agreement is the evidence
+that any of them is measuring biology rather than an artefact of its own model.**
+That correlation matrix was written to disk and never reported.
+
+```{r traj-report-prepare}
+#| code-fold: true
+suppressPackageStartupMessages({library(data.table); library(ggplot2)})
+
+# The correlation matrix written by the concordance block.
+cor_f <- list.files("data", pattern = "pseudotime_spearman_correlations\\.csv$",
+                    recursive = TRUE, full.names = TRUE)
+cmat <- NULL
+if (length(cor_f)) {
+  cm <- tryCatch(as.matrix(read.csv(cor_f[1], check.names = FALSE)), error = function(e) NULL)
+  if (!is.null(cm) && nrow(cm) == ncol(cm)) {
+    rownames(cm) <- colnames(cm)
+    cmat <- cm
+  }
+}
+
+# Per-cell Monocle3 pseudotime, to measure how much of the object it reached.
+pt_f <- list.files("data", pattern = "monocle3_celllevel_pseudotime\\.tsv$",
+                   recursive = TRUE, full.names = TRUE)
+pt <- if (length(pt_f)) tryCatch(fread(pt_f[1]), error = function(e) NULL) else NULL
+
+# Genes varying along the graph.
+gt_f <- list.files("data", pattern = "monocle3_graph_test_all\\.csv$",
+                   recursive = TRUE, full.names = TRUE)
+gt <- if (length(gt_f)) tryCatch(fread(gt_f[1]), error = function(e) NULL) else NULL
+cat("correlation matrix:", !is.null(cmat), "| pseudotime rows:",
+    if (is.null(pt)) 0 else nrow(pt), "| graph-test genes:", if (is.null(gt)) 0 else nrow(gt), "\n")
+```
+
+```{r traj-concordance-finding, results = 'asis'}
+if (!is.null(cmat) && nrow(cmat) >= 2) {
+  # Pseudotime DIRECTION is arbitrary -- it depends which cell was chosen as the
+  # root -- so a negative correlation can simply mean opposite roots. What matters
+  # is the MAGNITUDE: |r| near zero means the methods disagree about the ordering
+  # itself, which no choice of root can fix.
+  pairs <- which(upper.tri(cmat), arr.ind = TRUE)
+  pr <- data.table(a = rownames(cmat)[pairs[, 1]],
+                   b = colnames(cmat)[pairs[, 2]],
+                   r = cmat[upper.tri(cmat)])
+  pr[, absr := abs(r)]
+  setorder(pr, -absr)
+  worst <- pr[.N]; best <- pr[1]
+
+  verdict <- if (best$absr >= 0.7) "the methods broadly agree on the ordering"
+             else if (best$absr >= 0.4) "the methods agree only moderately"
+             else "**the methods do not agree on the ordering of cells at all**"
+
+  scratch_finding(sprintf(paste(
+    "Pairwise Spearman correlation between the pseudotime estimates: %s.",
+    "Strongest agreement is %s vs %s at |r| = %.3f; weakest is %s vs %s at",
+    "|r| = %.3f. %s.%s"),
+    paste(sprintf("%s/%s %.3f", pr$a, pr$b, pr$r), collapse = "; "),
+    best$a, best$b, best$absr, worst$a, worst$b, worst$absr, verdict,
+    if (best$absr < 0.4)
+      paste(" Direction is arbitrary (it follows the root cell), so the sign can be",
+            "ignored — but a magnitude this low means the three models are ordering",
+            "cells differently, not merely in opposite directions. A trajectory that",
+            "only one method supports is a property of that method. Treat any",
+            "pseudotime-dependent result below as unvalidated.")
+    else ""),
+    type = if (best$absr < 0.4) "caution" else "note",
+    title = "Pseudotime method concordance")
+}
+```
+
+```{r}
+#| label: fig-traj-concordance
+#| fig-cap: "Agreement between pseudotime methods"
+#| fig-width: 6.5
+#| fig-height: 5
+if (!is.null(cmat) && nrow(cmat) >= 2) {
+  d <- as.data.table(as.table(cmat)); setnames(d, c("method_a", "method_b", "r"))
+  ggplot(d, aes(x = method_a, y = method_b, fill = r,
+                text = sprintf("%s vs %s\nSpearman r = %.3f", method_a, method_b, r))) +
+    geom_tile(colour = "white", linewidth = 1) +
+    geom_text(aes(label = sprintf("%.2f", r)), colour = "grey15", size = 4) +
+    scale_fill_gradient2(low = "#8c1d18", mid = "#f2f2f2", high = "#1f4e79",
+                         midpoint = 0, limits = c(-1, 1), name = "Spearman r") +
+    labs(title = "Do the pseudotime methods agree?",
+         subtitle = "Near zero means the methods order cells differently; sign follows the arbitrary root choice",
+         x = NULL, y = NULL) +
+    theme_scratch() + theme(panel.grid = element_blank())
+}
+```
+
+```{r traj-coverage-finding, results = 'asis'}
+if (!is.null(pt) && "pseudotime" %in% names(pt)) {
+  v <- suppressWarnings(as.numeric(pt$pseudotime))
+  n_inf <- sum(!is.finite(v)); n_fin <- sum(is.finite(v)); n <- length(v)
+
+  if (n_inf > 0) {
+    scratch_finding(sprintf(paste(
+      "Monocle3 assigned a finite pseudotime to **%s of %s cells (%.1f%%)**;",
+      "the remaining **%s (%.1f%%) are infinite**. In Monocle3 an infinite",
+      "pseudotime means the cell sits in a partition with no path to the root, so",
+      "the trajectory never reached it.%s"),
+      format(n_fin, big.mark = ","), format(n, big.mark = ","), 100 * n_fin / n,
+      format(n_inf, big.mark = ","), 100 * n_inf / n,
+      if (n_inf > 0.5 * n)
+        paste(" **Most of the object is not on this trajectory.** The lineage",
+              "describes a minority of cells; any statement about 'the trajectory of",
+              "this compartment' applies to that minority only. A disconnected graph",
+              "usually means the populations are genuinely distinct rather than",
+              "continuous — worth asking whether a trajectory is the right model here.")
+      else ""),
+      type = if (n_inf > 0.5 * n) "caution" else "note",
+      title = "Trajectory coverage")
+  }
+}
+```
+
+```{r}
+#| label: fig-traj-coverage
+#| fig-cap: "Pseudotime distribution among cells the trajectory reached"
+#| fig-width: 9
+#| fig-height: 4.5
+if (!is.null(pt) && "pseudotime" %in% names(pt)) {
+  d <- copy(pt)
+  d[, pseudotime := suppressWarnings(as.numeric(pseudotime))]
+  fin <- d[is.finite(pseudotime)]
+  if (nrow(fin)) {
+    grp <- intersect(c("cluster", "patient"), names(fin))[1]
+    if (is.na(grp)) { fin[, .grp := "all cells"]; grp <- ".grp" }
+    fin[, g := as.character(get(grp))]
+    ggplot(fin, aes(x = pseudotime, fill = g,
+                    text = sprintf("%s\npseudotime %.2f", g, pseudotime))) +
+      geom_histogram(bins = 50, colour = NA) +
+      scale_fill_scratch(name = grp) +
+      labs(title = "Where the reachable cells sit along the trajectory",
+           subtitle = sprintf("%s of %s cells; the rest have infinite pseudotime and are not shown",
+                              format(nrow(fin), big.mark = ","), format(nrow(d), big.mark = ",")),
+           x = "pseudotime", y = "cells") +
+      theme_scratch()
+  }
+}
+```
+
+```{r traj-genes-finding, results = 'asis'}
+if (!is.null(gt) && all(c("q_value", "morans_I") %in% names(gt))) {
+  sig <- gt[!is.na(q_value) & q_value < 0.05]
+  top <- sig[order(-morans_I)][1:min(8, nrow(sig))]
+
+  # Moran's I near 0 means no spatial autocorrelation along the graph: the gene is
+  # not actually structured by pseudotime even if its q-value is small, which is
+  # easy with tens of thousands of cells.
+  strong <- sig[morans_I >= 0.25]
+
+  scratch_finding(sprintf(paste(
+    "**%s of %s genes** vary significantly along the graph (q < 0.05), but only",
+    "**%s** have Moran's I >= 0.25 — with this many cells a small q-value is easy",
+    "to reach, and Moran's I is the measure of whether the gene is actually",
+    "structured along the trajectory. Strongest: %s."),
+    format(nrow(sig), big.mark = ","), format(nrow(gt), big.mark = ","),
+    format(nrow(strong), big.mark = ","),
+    paste(sprintf("**%s** (I=%.2f)", top$gene_id, top$morans_I), collapse = ", ")),
+    type = "note", title = "Genes varying along the trajectory")
+}
+```
+
+```{r traj-genes-table}
+if (!is.null(gt) && all(c("q_value", "morans_I") %in% names(gt))) {
+  sig <- gt[!is.na(q_value) & q_value < 0.05][order(-morans_I)]
+  keep <- intersect(c("gene_id", "morans_I", "morans_test_statistic", "p_value", "q_value"),
+                    names(sig))
+  out <- sig[1:min(200, nrow(sig)), ..keep]
+  num <- setdiff(keep, "gene_id")
+  out[, (num) := lapply(.SD, function(x) signif(as.numeric(x), 4)), .SDcols = num]
+  scratch_table(out, caption = "Genes varying along the Monocle3 graph (top 200 by Moran's I)")
+}
+```
