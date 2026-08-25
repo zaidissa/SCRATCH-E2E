@@ -483,9 +483,158 @@ if (!length(Cluster_list) && ncol(sim_mat) > 0) {
   MP_list[[ "MP_1" ]] <- nmf_programs_sig[, seed_prog]
 }
 
+# Record HOW the metaprograms were obtained. The fallback above is not a normal
+# result: it fires when NOTHING met the clustering criteria and seeds a single
+# "metaprogram" from one NMF program. Downstream that is indistinguishable from a
+# genuine recurrent programme unless the report says so.
+mp_from_fallback <- length(Cluster_list) == 1 &&
+                    identical(names(Cluster_list), "Cluster_1") &&
+                    length(Cluster_list[["Cluster_1"]]) == 1
+
 saveRDS(Cluster_list, file = file.path(fit_dir, "Cluster_list_final.rds"))
 saveRDS(MP_list,      file = file.path(fit_dir, "MP_list_final.rds"))
 write.csv(MP_list,    file = file.path(fit_dir, "MP_list_final.csv"))
+```
+
+# What the metaprograms are
+
+An NMF metaprogram is only meaningful if it **recurs across samples** — that is
+the whole claim. A programme found in one sample is that sample's expression
+structure, and a programme made of mitochondrial and ribosomal genes is a
+technical axis regardless of how many samples it appears in. Neither check was
+reported, so this stage could return a single mitochondrial programme from a
+single sample and describe itself as "completed with nothing flagged".
+
+```{r mp-report-prepare}
+#| code-fold: true
+suppressPackageStartupMessages({library(data.table); library(ggplot2)})
+
+mp_tbl <- NULL
+if (length(MP_list)) {
+  mp_tbl <- rbindlist(lapply(names(MP_list), function(nm) {
+    g <- as.character(MP_list[[nm]])
+    g <- g[!is.na(g) & nzchar(g)]
+    if (!length(g)) return(NULL)
+    data.table(MP = nm, gene = g, rank = seq_along(g))
+  }), fill = TRUE)
+  if (!is.null(mp_tbl) && !nrow(mp_tbl)) mp_tbl <- NULL
+}
+
+# Per-sample cell counts drive the recurrence claim.
+sc <- NULL
+for (f in c(file.path(dirname(fit_dir), "_sample_cell_counts.tsv"),
+            file.path("data", "per_sample_mat", "_sample_cell_counts.tsv"))) {
+  if (is.null(sc) && file.exists(f)) sc <- tryCatch(fread(f), error = function(e) NULL)
+}
+
+# Gene-class composition: the check that separates biology from technical signal.
+classify_gene <- function(g) {
+  fifelse(grepl("^MT-",  g), "mitochondrial",
+  fifelse(grepl("^RP[LS]", g), "ribosomal",
+  fifelse(grepl("^(MALAT1|NEAT1|XIST|TALAM1)$", g) | grepl("^(LINC|ENSG)", g), "lncRNA / unannotated",
+          "protein-coding / other")))
+}
+if (!is.null(mp_tbl)) mp_tbl[, class := classify_gene(toupper(gene))]
+cat("metaprograms:", if (is.null(mp_tbl)) 0 else uniqueN(mp_tbl$MP),
+    "| genes:", if (is.null(mp_tbl)) 0 else nrow(mp_tbl), "\n")
+```
+
+```{r mp-provenance-finding, results = 'asis'}
+n_mp <- if (is.null(mp_tbl)) 0 else uniqueN(mp_tbl$MP)
+n_samples_used <- if (!is.null(sc)) nrow(sc) else NA_integer_
+
+if (exists("mp_from_fallback") && isTRUE(mp_from_fallback)) {
+  scratch_finding(paste(
+    "**No metaprogram met the clustering criteria.** The single programme below was",
+    "seeded from one NMF program by the fallback path — it is one sample's",
+    "expression structure, not a recurrent metaprogram. Treat it as a placeholder:",
+    "the recurrence claim that makes a metaprogram meaningful has not been made here."),
+    type = "caution", title = "Metaprograms came from the fallback path")
+} else if (n_mp > 0) {
+  scratch_finding(sprintf("**%d metaprogram(s)** derived by iterative clustering of the per-sample NMF programs.",
+                          n_mp), type = "note", title = "Metaprograms")
+}
+```
+
+```{r mp-sample-finding, results = 'asis'}
+if (!is.null(sc) && nrow(sc)) {
+  cc <- intersect(c("cells", "n_cells", "epithelial_cells"), names(sc))[1]
+  scn <- intersect(c("sample", "sample_id"), names(sc))[1]
+  if (!is.na(cc) && !is.na(scn)) {
+    d <- sc[order(-get(cc))]
+    thr <- tryCatch(as.integer(params$min_cells_per_sample_epith), error = function(e) NA_integer_)
+    if (is.na(thr)) thr <- 150L
+    kept <- d[get(cc) >= thr]; dropped <- d[get(cc) < thr]
+
+    scratch_finding(sprintf(paste(
+      "NMF ran on **%d of %d sample(s)** (%s). %s%s"),
+      nrow(kept), nrow(d),
+      paste(sprintf("%s: %s cells", kept[[scn]], format(kept[[cc]], big.mark = ",")), collapse = "; "),
+      if (nrow(dropped))
+        sprintf("**%s contributed too few cells (%s) and was excluded at the %d-cell threshold.** ",
+                paste(dropped[[scn]], collapse = ", "),
+                paste(format(dropped[[cc]], big.mark = ","), collapse = ", "), thr)
+      else "",
+      if (nrow(kept) < 2)
+        paste("**With one sample there is no recurrence to measure** — a metaprogram is",
+              "defined by appearing in several samples independently, so nothing here",
+              "distinguishes a shared programme from this sample's own structure.")
+      else ""),
+      type = if (nrow(kept) < 2) "caution" else "note",
+      title = "Samples entering the NMF")
+  }
+}
+```
+
+```{r mp-composition-finding, results = 'asis'}
+if (!is.null(mp_tbl)) {
+  comp <- mp_tbl[, .N, by = .(MP, class)][, frac := N / sum(N), by = MP]
+  tech <- comp[class %in% c("mitochondrial", "ribosomal", "lncRNA / unannotated"),
+               .(tech_frac = sum(frac)), by = MP][order(-tech_frac)]
+  worst <- tech[1]
+
+  if (nrow(tech) && worst$tech_frac >= 0.3) {
+    scratch_finding(sprintf(paste(
+      "**%s is %.0f%% mitochondrial, ribosomal or unannotated transcripts.** Those",
+      "track cell quality and library composition, not a biological programme —",
+      "a metaprogram dominated by them usually means the input was not filtered on",
+      "percent-mito, or that the NMF is fitting a depth axis. Check the QC",
+      "thresholds before interpreting it as tumour biology."),
+      worst$MP, 100 * worst$tech_frac),
+      type = "caution", title = "Metaprogram is technical, not biological")
+  } else if (nrow(tech)) {
+    scratch_finding(sprintf(
+      "Highest technical-gene content is **%s** at %.0f%% (mitochondrial, ribosomal or unannotated) — below the 30%% concern threshold.",
+      worst$MP, 100 * worst$tech_frac), type = "note", title = "Metaprogram composition")
+  }
+}
+```
+
+```{r}
+#| label: fig-mp-composition
+#| fig-cap: "Gene-class composition of each metaprogram"
+#| fig-width: 9
+#| fig-height: 4.5
+if (!is.null(mp_tbl)) {
+  comp <- mp_tbl[, .N, by = .(MP, class)][, frac := N / sum(N), by = MP]
+  ggplot(comp, aes(x = MP, y = frac, fill = class,
+                   text = sprintf("%s\n%s: %d genes (%.0f%%)", MP, class, N, 100 * frac))) +
+    geom_col(width = .7) +
+    coord_flip() +
+    scale_fill_scratch(name = NULL) +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+    labs(title = "What each metaprogram is made of",
+         subtitle = "Mitochondrial, ribosomal and unannotated transcripts are technical signal, not programme biology",
+         x = NULL, y = "share of genes") +
+    theme_scratch()
+}
+```
+
+```{r mp-genes-table}
+if (!is.null(mp_tbl)) {
+  scratch_table(mp_tbl[order(MP, rank), .(metaprogram = MP, rank, gene, class)],
+                caption = "Metaprogram gene membership")
+}
 ```
 
 ``` {r Iterative clustering to derive Meta-Programs (MPs)}

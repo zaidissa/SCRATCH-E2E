@@ -1513,8 +1513,28 @@ if (identical(input_integration_method, "all")) {
     PCinvR2       = TRUE,
     ARI_label     = TRUE
   )
+  # An NA metric must not be silently dropped. `.sum_z` uses rowSums(na.rm=TRUE),
+  # so a method missing one metric is summed over FOUR z-scores while its rivals
+  # are summed over five -- it is neither penalised nor excluded, just quietly
+  # scored on a different scale. Harmony's kBET came back NA on this data and it
+  # was ranked against methods that had all five, which is not a comparison.
+  #
+  # Count what each method was actually scored on, so the report can say when the
+  # winner was chosen against incomplete competitors.
+  metrics_df$n_metrics_scored <- rowSums(!is.na(metrics_df[, names(higher_better), drop = FALSE]))
+  metrics_df$metrics_missing  <- vapply(seq_len(nrow(metrics_df)), function(i) {
+    mm <- names(higher_better)[is.na(metrics_df[i, names(higher_better)])]
+    if (!length(mm)) "" else paste(mm, collapse = ", ")
+  }, character(1))
+
   score <- .sum_z(metrics_df[ , names(higher_better)], higher_better = higher_better)
   metrics_df$CompositeZ <- as.numeric(score)
+
+  # Mean z rather than sum: comparable across methods scored on different numbers
+  # of metrics. Reported alongside, not instead of, so the original ranking stays
+  # inspectable.
+  metrics_df$CompositeZ_mean <- metrics_df$CompositeZ / pmax(metrics_df$n_metrics_scored, 1)
+
   best_integration <- metrics_df$method[which.max(metrics_df$CompositeZ)]
   message(sprintf("Selected best integration (no scPOP/lisi): %s", best_integration))
 
@@ -1624,7 +1644,16 @@ if (identical(input_integration_method, "all")) {
 
   if (isTRUE(params$auto_save)) {
     saveRDS(metrics_df, file = file.path("data", paste0(project_name, "_evaluation_table.RDS")))
+    utils::write.csv(metrics_df,
+                     file.path("data", paste0(project_name, "_evaluation_table.csv")),
+                     row.names = FALSE)
   }
+
+  # Carry what the findings below need out of this block's local scope.
+  .bc_metrics  <- metrics_df
+  .bc_best     <- best_integration
+  .bc_batchkey <- batch_key
+  .bc_labelkey <- if (exists("label_key")) label_key else label_col
 
   # ================================
   # ADD-ON: extra evaluation metrics
@@ -1781,6 +1810,174 @@ if (identical(input_integration_method, "all")) {
 ```
 
 
+
+# Is this batch correction trustworthy?
+
+Batch correction assumes the batch is a *technical* nuisance to remove. When the
+batch variable is also the biological one, correcting it removes the signal along
+with the noise — and the standard metrics cannot tell the difference, because they
+reward batches mixing regardless of whether they should.
+
+```{r bc-trust-prepare}
+#| code-fold: true
+suppressPackageStartupMessages({library(data.table)})
+
+.md_bc <- tryCatch(as.data.table(seurat_object_full@meta.data), error = function(e) NULL)
+if (is.null(.md_bc)) .md_bc <- tryCatch(as.data.table(seurat_object@meta.data), error = function(e) NULL)
+
+.bkey <- if (exists(".bc_batchkey")) .bc_batchkey else NA_character_
+.lkey <- if (exists(".bc_labelkey")) .bc_labelkey else NA_character_
+```
+
+```{r bc-confounding-finding, results = 'asis'}
+# Two variables are collinear if knowing one tells you the other exactly. When
+# batch, condition and patient are collinear, "removing the batch effect" and
+# "removing the biological difference" are the same operation.
+if (!is.null(.md_bc) && !is.na(.bkey) && .bkey %in% names(.md_bc)) {
+  cands <- intersect(c("orig.ident", "sample_id", "sample", "patient_id",
+                       "condition", "timepoint", "batch"), names(.md_bc))
+  cands <- setdiff(cands, .bkey)
+  bv <- as.character(.md_bc[[.bkey]])
+
+  collinear <- character(0); constant <- character(0)
+  for (cc in cands) {
+    v <- as.character(.md_bc[[cc]])
+    if (length(unique(v)) < 2) { constant <- c(constant, cc); next }
+    # collinear == a 1:1 mapping in both directions
+    n_pairs <- nrow(unique(data.table(a = bv, b = v)))
+    if (n_pairs == length(unique(bv)) && n_pairs == length(unique(v)))
+      collinear <- c(collinear, cc)
+  }
+
+  if (length(collinear)) {
+    scratch_finding(sprintf(paste(
+      "**`%s` is perfectly collinear with %s.** Every cell's batch is determined by",
+      "its %s and vice versa, so correcting the batch effect also removes any real",
+      "difference between those groups. Nothing downstream — trajectory, cell",
+      "communication, TME composition — can attribute a difference to biology rather",
+      "than to batch, because in this design they are the same variable.%s"),
+      .bkey, paste(sprintf("`%s`", collinear), collapse = ", "),
+      collinear[1],
+      if (length(constant))
+        sprintf(" (`%s` is constant across all cells and carries no information.)",
+                paste(constant, collapse = "`, `")) else ""),
+      type = "caution", title = "Batch is confounded with biology")
+  }
+}
+```
+
+```{r bc-composition-finding, results = 'asis'}
+# kBET and neighbourhood-mixing metrics reward batches being interspersed. If the
+# batches genuinely differ in composition, maximising that is over-correction:
+# the method is being scored on how well it erases a real difference.
+if (!is.null(.md_bc) && !is.na(.bkey) && !is.na(.lkey) &&
+    all(c(.bkey, .lkey) %in% names(.md_bc))) {
+  comp <- .md_bc[, .N, by = c(.bkey, .lkey)]
+  setnames(comp, c("batch", "label", "n"))
+  comp[, pct := 100 * n / sum(n), by = batch]
+  wide <- dcast(comp, label ~ batch, value.var = "pct", fill = 0)
+  bcols <- setdiff(names(wide), "label")
+
+  if (length(bcols) == 2) {
+    wide[, fold := pmax(get(bcols[1]), get(bcols[2])) /
+                   pmax(pmin(get(bcols[1]), get(bcols[2])), 0.1)]
+    wide[, span := pmax(get(bcols[1]), get(bcols[2]))]
+    big <- wide[span >= 5][order(-fold)]          # only populations big enough to matter
+    sizes <- .md_bc[, .N, by = c(.bkey)]
+    imb <- max(sizes$N) / max(min(sizes$N), 1)
+
+    if (nrow(big) && big$fold[1] >= 3) {
+      scratch_finding(sprintf(paste(
+        "The batches differ in composition, not just in technical signal: %s.",
+        "Cell counts are also imbalanced **%.1f:1** (%s). Mixing metrics such as kBET",
+        "reward batches being interspersed, so a method that forces these",
+        "populations together will score WELL while erasing a real difference.",
+        "Read the selected method as the best available compromise, not as evidence",
+        "that the batches ought to look alike."),
+        paste(sprintf("**%s** %.1f%% vs %.1f%% (%.0fx)", big$label[seq_len(min(3, nrow(big)))],
+                      big[[bcols[1]]][seq_len(min(3, nrow(big)))],
+                      big[[bcols[2]]][seq_len(min(3, nrow(big)))],
+                      big$fold[seq_len(min(3, nrow(big)))]), collapse = "; "),
+        imb, paste(sprintf("%s: %s", sizes[[.bkey]], format(sizes$N, big.mark = ",")),
+                   collapse = ", ")),
+        type = "caution", title = "Over-correction risk: batches differ biologically")
+    }
+  }
+}
+```
+
+```{r bc-metric-quality-finding, results = 'asis'}
+if (exists(".bc_metrics")) {
+  m <- as.data.table(.bc_metrics)
+
+  # (a) methods scored on incomplete metric sets
+  if ("n_metrics_scored" %in% names(m)) {
+    incomplete <- m[n_metrics_scored < max(n_metrics_scored)]
+    if (nrow(incomplete)) {
+      scratch_finding(sprintf(paste(
+        "**%s scored on %s of %d metrics** (missing: %s). The composite sums",
+        "z-scores with `na.rm = TRUE`, so a method with a missing metric is summed",
+        "over fewer terms rather than penalised — it is not comparable with the",
+        "others. The winner **%s** was chosen against an incomplete field."),
+        paste(incomplete$method, collapse = ", "),
+        paste(incomplete$n_metrics_scored, collapse = "/"),
+        max(m$n_metrics_scored),
+        paste(unique(incomplete$metrics_missing), collapse = "; "),
+        if (exists(".bc_best")) .bc_best else "n/a"),
+        type = "caution", title = "Method ranking used incomplete metrics")
+    }
+  }
+
+  # (b) how decisive the win actually is
+  if ("CompositeZ" %in% names(m) && nrow(m) >= 2) {
+    o <- m[order(-CompositeZ)]
+    gap <- o$CompositeZ[1] - o$CompositeZ[2]
+    spread <- diff(range(o$CompositeZ, na.rm = TRUE))
+    rel <- if (spread > 0) gap / spread else NA_real_
+
+    # Where does the winner rank on each individual metric?
+    mets <- intersect(c("kBET_observed","kNN_batchH","kNN_labelAgree","PCinvR2","ARI_label"),
+                      names(m))
+    hb <- c(kBET_observed = FALSE, kNN_batchH = TRUE, kNN_labelAgree = TRUE,
+            PCinvR2 = TRUE, ARI_label = TRUE)
+    worst_on <- character(0)
+    for (mm in mets) {
+      v <- m[[mm]]
+      if (all(is.na(v))) next
+      best_i <- if (isTRUE(hb[[mm]])) which.max(v) else which.min(v)
+      worst_i <- if (isTRUE(hb[[mm]])) which.min(v) else which.max(v)
+      if (!is.na(worst_i) && m$method[worst_i] == o$method[1]) worst_on <- c(worst_on, mm)
+    }
+
+    scratch_finding(sprintf(paste(
+      "**%s** was selected (composite %.3f) ahead of **%s** (%.3f) — a gap of %.3f,",
+      "%.0f%% of the full spread across methods.%s%s"),
+      o$method[1], o$CompositeZ[1], o$method[2], o$CompositeZ[2], gap,
+      100 * ifelse(is.na(rel), 0, rel),
+      if (length(worst_on))
+        sprintf(" It ranks **worst of all methods** on %s.", paste(sprintf("`%s`", worst_on), collapse = ", "))
+      else "",
+      if (!is.na(rel) && rel < 0.25)
+        " The methods are close enough that this choice is weakly supported; re-running with a different seed or cell subset could reorder them."
+      else ""),
+      type = if ((!is.na(rel) && rel < 0.25) || length(worst_on)) "caution" else "note",
+      title = "How decisive is the method choice?")
+  }
+}
+```
+
+```{r bc-metrics-table}
+if (exists(".bc_metrics")) {
+  m <- as.data.table(.bc_metrics)
+  keep <- intersect(c("method", "kBET_observed", "kNN_batchH", "kNN_labelAgree",
+                      "PCinvR2", "ARI_label", "n_metrics_scored", "CompositeZ",
+                      "CompositeZ_mean"), names(m))
+  num <- setdiff(keep, c("method", "n_metrics_scored"))
+  mm <- copy(m)[, (num) := lapply(.SD, function(x) round(as.numeric(x), 4)), .SDcols = num]
+  scratch_table(mm[order(-CompositeZ), ..keep],
+                caption = "Integration methods: per-metric scores and composite")
+}
+```
 
 ```{r Autosave, error=TRUE}
 #| echo: false
