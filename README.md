@@ -17,7 +17,6 @@ ALIGN ──┬── GEX ──> QC ──> CLUSTER ──> ANNOTATION ──> 
                       all stages ────────────────────────────────────────────────────────────┴──> INTEGRATION
 ```
 
-\* not implemented — see [docs/MICROBIOME.md](docs/MICROBIOME.md).
 
 CNV calling runs inferCNV and SCEVAN by default, with CopyKAT and
 [Numbat](docs/NUMBAT.md) available. Numbat is opt-in because it needs the BAM
