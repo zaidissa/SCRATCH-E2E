@@ -151,16 +151,22 @@ guess_rank_col <- function(df, preferred = "aggregate_rank") {
   candidates[1]
 }
 
-# method-specific score columns differ; pick what exists in that method table
+# Method-specific score columns differ; pick the one THIS method populated.
+# Presence is not enough -- the per-method table carries every method's score
+# column, NA outside its own rows, so "first present" always resolved to
+# LRscore and silently reduced a five-method consensus to one. See the longer
+# note on the second copy of this function below.
 pick_score_col <- function(df) {
   candidates <- c("LRscore", "lrscore", "LRScore",
                   "lr.mean", "lr_mean",
                   "prod_weight", "weight_sc", "edge_specificity",
                   "logfc_comb", "global_mean",
                   "pvalue", "p_val", "p.value")
-  hit <- intersect(candidates, colnames(df))[1]
-  if (is.na(hit)) return(NA_character_)
-  hit
+  present <- intersect(candidates, colnames(df))
+  if (!length(present)) return(NA_character_)
+  filled <- vapply(present, function(cc) sum(!is.na(df[[cc]])), integer(1))
+  if (all(filled == 0)) return(NA_character_)
+  present[which.max(filled)]
 }
 
 score_direction <- function(score_col) {
@@ -610,6 +616,27 @@ guess_rank_col <- function(df, preferred = "aggregate_rank") {
 # =========================
 fallback_aggregate_from_per_method <- function(liana_res_tbl) {
 
+  # Each LIANA method names its score differently -- natmi prod_weight,
+  # connectome weight_sc, logfc logfc_comb, cellphonedb lr.mean/pvalue, sca
+  # LRscore -- but the per-method result is ONE WIDE TABLE carrying all of those
+  # columns, NA outside the method that produced them.
+  #
+  # Taking the first candidate PRESENT therefore returned "LRscore" for every
+  # method, and four of the five contributed nothing but NA. The diagnostics said
+  # so plainly and nobody was reading them:
+  #
+  #   method       score_col  n      n_score_non_na
+  #   cellphonedb  LRscore    14317  0
+  #   connectome   LRscore    14317  0
+  #   logfc        LRscore    14317  0
+  #   natmi        LRscore    14317  0
+  #   sca          LRscore    14317  14317
+  #
+  # So n_methods_ranked was 1 for all 14,317 interactions and a "consensus of
+  # five methods" was one method wearing five names.
+  #
+  # Choose by POPULATION, not by presence: the candidate this method actually
+  # filled. That also survives LIANA renaming its columns between versions.
   pick_score_col <- function(df) {
     candidates <- c(
       "LRscore", "lrscore", "LRScore",
@@ -618,9 +645,11 @@ fallback_aggregate_from_per_method <- function(liana_res_tbl) {
       "logfc_comb", "global_mean",
       "pvalue", "p_val", "p.value"
     )
-    hit <- intersect(candidates, colnames(df))[1]
-    if (is.na(hit)) return(NA_character_)
-    hit
+    present <- intersect(candidates, colnames(df))
+    if (!length(present)) return(NA_character_)
+    filled <- vapply(present, function(cc) sum(!is.na(df[[cc]])), integer(1))
+    if (all(filled == 0)) return(NA_character_)
+    present[which.max(filled)]
   }
 
   score_direction <- function(score_col) {
@@ -1082,6 +1111,202 @@ ht
 
 out_rds <- paste0(params$project_name, "_liana_done.rds")
 saveRDS(list(done=TRUE, timestamp=Sys.time()), file = out_rds)
+```
+
+# Who is talking to whom?
+
+LIANA ranks ligand-receptor interactions between every pair of populations. The
+report used to stop at the ranked table: 14,317 interactions, no statement about
+which populations dominate, which pairs lead, or how well the five scoring
+methods agree. The sections below read `liana_results.csv` directly.
+
+```{r cc-prepare}
+#| code-fold: true
+suppressPackageStartupMessages({library(data.table); library(ggplot2)})
+
+cc <- tryCatch(fread(file.path("data", "liana_results.csv")), error = function(e) NULL)
+if (!is.null(cc) && nrow(cc)) {
+  setnames(cc, old = intersect(c("ligand.complex", "receptor.complex"), names(cc)),
+               new = intersect(c("ligand_c", "receptor_c"), c("ligand_c", "receptor_c")),
+           skip_absent = TRUE)
+  if (!"ligand" %in% names(cc) && "ligand_c" %in% names(cc))     cc[, ligand := ligand_c]
+  if (!"receptor" %in% names(cc) && "receptor_c" %in% names(cc)) cc[, receptor := receptor_c]
+  cc[, pair := paste0(ligand, " \u2192 ", receptor)]
+  cc[, edge := paste0(source, " \u2192 ", target)]
+  # aggregate_rank: lower is better. Guard against it being absent or all-NA.
+  rank_col <- intersect(c("aggregate_rank", "rank", "score_mean"), names(cc))[1]
+  cc[, rank_val := as.numeric(get(rank_col))]
+}
+cat("interactions:", if (is.null(cc)) 0 else nrow(cc),
+    "| populations:", if (is.null(cc)) 0 else uniqueN(c(cc$source, cc$target)), "\n")
+```
+
+```{r cc-method-agreement, results = 'asis'}
+if (!is.null(cc) && nrow(cc) && "n_methods_ranked" %in% names(cc)) {
+  tot  <- if ("n_methods_total" %in% names(cc)) max(cc$n_methods_total, na.rm = TRUE) else NA_integer_
+  dist <- cc[, .N, by = n_methods_ranked][order(-n_methods_ranked)]
+  solo <- cc[n_methods_ranked <= 1, .N]
+
+  scratch_finding(sprintf(paste(
+    "**%s interactions** across %s populations. Method support: %s.%s"),
+    format(nrow(cc), big.mark = ","), uniqueN(c(cc$source, cc$target)),
+    paste(sprintf("%s ranked by %s method(s)", format(dist$N, big.mark = ","),
+                  dist$n_methods_ranked), collapse = "; "),
+    if (!is.na(tot) && solo == nrow(cc))
+      sprintf(paste(" **Every interaction is ranked by a single method of %s.** The aggregate is",
+                    "not a consensus: check `data/liana_score_diagnostics.csv` for methods whose",
+                    "score column resolved to all-NA."), tot)
+    else if (solo > 0.5 * nrow(cc))
+      sprintf(" **%.0f%% rest on one method** — treat the ranking as that method's, not a consensus.",
+              100 * solo / nrow(cc))
+    else ""),
+    type = if (solo > 0.5 * nrow(cc)) "caution" else "note",
+    title = "Interactions and method support")
+}
+```
+
+## Communication load per population
+
+```{r}
+#| label: fig-cc-load
+#| fig-cap: "Interactions sent and received by each population"
+#| fig-width: 10
+#| fig-height: 5.5
+if (!is.null(cc) && nrow(cc)) {
+  snd <- cc[, .(n = .N), by = .(population = source)][, role := "as sender"]
+  rcv <- cc[, .(n = .N), by = .(population = target)][, role := "as receiver"]
+  ld  <- rbind(snd, rcv)
+  ord <- ld[, .(t = sum(n)), by = population][order(-t)]
+  ld[, population := factor(population, levels = rev(ord$population))]
+
+  ggplot(ld, aes(x = population, y = n, fill = role,
+                 text = sprintf("%s\n%s: %s interactions", population, role,
+                                format(n, big.mark = ",")))) +
+    geom_col(position = "dodge", width = .74) +
+    coord_flip() +
+    scale_fill_scratch(name = NULL) +
+    labs(title = "Communication load per population",
+         subtitle = "Number of ranked ligand-receptor interactions in which each population participates",
+         x = NULL, y = "interactions") +
+    theme_scratch()
+}
+```
+
+```{r cc-load-finding, results = 'asis'}
+if (!is.null(cc) && nrow(cc)) {
+  snd <- cc[, .N, by = source][order(-N)]
+  rcv <- cc[, .N, by = target][order(-N)]
+  net <- merge(snd[, .(pop = source, sent = N)], rcv[, .(pop = target, received = N)],
+               by = "pop", all = TRUE)
+  net[is.na(sent), sent := 0][is.na(received), received := 0]
+  net[, balance := sent - received]
+  setorder(net, -balance)
+
+  scratch_finding(sprintf(paste(
+    "Busiest sender is **%s** (%s interactions); busiest receiver is **%s** (%s).",
+    "The most sender-skewed population is **%s** (%+d), the most receiver-skewed",
+    "is **%s** (%+d) — a population that mostly receives is being acted upon rather",
+    "than driving the microenvironment."),
+    snd$source[1], format(snd$N[1], big.mark = ","),
+    rcv$target[1], format(rcv$N[1], big.mark = ","),
+    # nrow(net), NOT .N: `.N` is only bound inside a data.table [...] expression.
+    # Outside one it is not the row count, the index returns nothing, and sprintf
+    # given a zero-length argument returns character(0) -- so scratch_finding
+    # cat()s an empty string and the callout silently never appears.
+    net$pop[1], net$balance[1], net$pop[nrow(net)], net$balance[nrow(net)]),
+    type = "note", title = "Senders and receivers")
+}
+```
+
+```{r cc-load-table}
+if (!is.null(cc) && nrow(cc)) {
+  snd <- cc[, .N, by = source][order(-N)]
+  rcv <- cc[, .N, by = target][order(-N)]
+  net <- merge(snd[, .(population = source, sent = N)], rcv[, .(population = target, received = N)],
+               by = "population", all = TRUE)
+  net[is.na(sent), sent := 0][is.na(received), received := 0]
+  net[, `sender-receiver balance` := sent - received]
+  scratch_table(net[order(-sent)], caption = "Interactions sent and received per population")
+}
+```
+
+## Which population pairs interact most?
+
+```{r}
+#| label: fig-cc-heatmap
+#| fig-cap: "Interaction count between population pairs"
+#| fig-width: 9.5
+#| fig-height: 7
+if (!is.null(cc) && nrow(cc)) {
+  hm <- cc[, .N, by = .(source, target)]
+  lv <- hm[, .(t = sum(N)), by = source][order(-t)]$source
+  hm[, source := factor(source, levels = lv)]
+  hm[, target := factor(target, levels = rev(lv))]
+
+  ggplot(hm, aes(x = source, y = target, fill = N,
+                 text = sprintf("%s \u2192 %s\n%s interactions",
+                                source, target, format(N, big.mark = ",")))) +
+    geom_tile(colour = "white", linewidth = .5) +
+    scale_fill_gradient(low = "#eef3f9", high = "#1f4e79", name = "interactions") +
+    labs(title = "Interaction count between population pairs",
+         subtitle = "Rows receive, columns send",
+         x = "sender", y = "receiver") +
+    theme_scratch() +
+    theme(axis.text.x = element_text(angle = 35, hjust = 1), panel.grid = element_blank())
+}
+```
+
+## Top-ranked interactions
+
+The canonical view: which ligand-receptor pairs lead, and between which
+populations. Rank is LIANA's aggregate (lower is stronger).
+
+```{r}
+#| label: fig-cc-dotplot
+#| fig-cap: "Top ligand-receptor interactions"
+#| fig-width: 10
+#| fig-height: 7.5
+if (!is.null(cc) && nrow(cc) && !all(is.na(cc$rank_val))) {
+  top <- cc[!is.na(rank_val)][order(rank_val)][1:min(25, .N)]
+  top[, pair := factor(pair, levels = rev(unique(pair)))]
+
+  ggplot(top, aes(x = edge, y = pair, size = -log10(pmax(rank_val, 1e-6)),
+                  colour = -log10(pmax(rank_val, 1e-6)),
+                  text = sprintf("%s\n%s\naggregate rank: %.4g\nmethods ranking it: %s",
+                                 pair, edge, rank_val,
+                                 if ("n_methods_ranked" %in% names(top)) n_methods_ranked else "n/a"))) +
+    geom_point() +
+    scale_colour_gradient(low = "#9ecae1", high = "#08306b", guide = "none") +
+    scale_size_continuous(name = "-log10 rank", range = c(2, 7)) +
+    labs(title = "Top-ranked ligand-receptor interactions",
+         subtitle = "Larger and darker is more strongly ranked",
+         x = NULL, y = NULL) +
+    theme_scratch() +
+    theme(axis.text.x = element_text(angle = 40, hjust = 1))
+}
+```
+
+```{r cc-top-finding, results = 'asis'}
+if (!is.null(cc) && nrow(cc) && !all(is.na(cc$rank_val))) {
+  top <- cc[!is.na(rank_val)][order(rank_val)]
+  t1 <- top[1]
+  edges <- top[1:min(50, nrow(top))][, .N, by = edge][order(-N)]
+  scratch_finding(sprintf(paste(
+    "Strongest interaction is **%s** from **%s** (aggregate rank %.4g).",
+    "Among the top 50, the most frequent population pair is **%s** with %d of them."),
+    t1$pair, t1$edge, t1$rank_val, edges$edge[1], edges$N[1]),
+    type = "note", title = "Leading interactions")
+}
+```
+
+```{r cc-top-table}
+if (!is.null(cc) && nrow(cc) && !all(is.na(cc$rank_val))) {
+  keep <- intersect(c("source", "target", "ligand", "receptor", "rank_val",
+                      "n_methods_ranked", "score_mean"), names(cc))
+  tt <- cc[!is.na(rank_val)][order(rank_val)][1:min(200, .N), ..keep]
+  setnames(tt, "rank_val", "aggregate rank")
+  scratch_table(tt, caption = "Top 200 ligand-receptor interactions")
+}
 ```
 
 ```{r}

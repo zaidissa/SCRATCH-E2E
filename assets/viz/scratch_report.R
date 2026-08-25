@@ -232,9 +232,85 @@ scratch_table <- function(df, caption = NULL, page = 10, searchable = TRUE,
       ))
     return(w)
   }
-  # Fallback: a plain table, truncated so a lean container does not emit
-  # thousands of rows into the HTML.
-  knitr::kable(utils::head(df, max_static), caption = caption)
+  # DT is absent from FIVE of the eight analysis images (cnv, celltrajectory,
+  # cellcommunication, tumorheterogenity, batchcorr), so this fallback is not an
+  # edge case -- it is what most of the pipeline actually renders. A static kable
+  # meant those stages lost search, sort and download without anything saying so.
+  #
+  # This emits a self-contained interactive table instead: no R package, no CDN,
+  # ~2 KB of inline JS per table. Search, click-to-sort (numeric-aware) and CSV
+  # download, working identically in every container.
+  .sx_interactive_table(df, caption = caption, page = page)
+}
+
+.sx_interactive_table <- function(df, caption = NULL, page = 10) {
+  esc <- function(x) {
+    x <- as.character(x); x[is.na(x)] <- ""
+    x <- gsub("&", "&amp;", x, fixed = TRUE)
+    x <- gsub("<", "&lt;",  x, fixed = TRUE)
+    gsub(">", "&gt;", x, fixed = TRUE)
+  }
+  id   <- paste0("sxt", substr(gsub("[^a-z0-9]", "", tolower(paste0(caption, runif(1)))), 1, 12),
+                 sample(1000:9999, 1))
+  cols <- names(df)
+  head_html <- paste0("<th data-c='", seq_along(cols) - 1L, "'>", esc(cols), "</th>", collapse = "")
+  body_html <- paste0(
+    apply(df, 1, function(r) paste0("<tr>", paste0("<td>", esc(r), "</td>", collapse = ""), "</tr>")),
+    collapse = "")
+  csv <- paste0(paste(cols, collapse = ","), "\n",
+                paste(apply(df, 1, function(r)
+                  paste(ifelse(grepl("[,\"]", r), paste0('"', gsub('"', '""', r), '"'), r),
+                        collapse = ",")), collapse = "\n"))
+  csv_uri <- paste0("data:text/csv;charset=utf-8,", utils::URLencode(csv, reserved = TRUE))
+
+  knitr::asis_output(paste0(
+    "\n```{=html}\n",
+    "<div class='sxt-wrap' id='", id, "'>",
+    if (!is.null(caption)) paste0("<div class='sxt-cap'>", esc(caption), "</div>") else "",
+    "<div class='sxt-bar'>",
+      "<input class='sxt-q' placeholder='Filter rows…' aria-label='Filter rows'>",
+      "<span class='sxt-n'></span>",
+      "<a class='sxt-dl' download='", gsub("[^A-Za-z0-9]+", "_", caption %||% "table"),
+        ".csv' href='", csv_uri, "'>Download CSV</a>",
+    "</div>",
+    "<div class='sxt-scroll'><table class='sxt'><thead><tr>", head_html,
+    "</tr></thead><tbody>", body_html, "</tbody></table></div></div>",
+    "<style>",
+    ".sxt-wrap{margin:1rem 0;font-size:.86rem}",
+    ".sxt-cap{font-weight:600;margin-bottom:.4rem}",
+    ".sxt-bar{display:flex;gap:.6rem;align-items:center;margin-bottom:.35rem}",
+    ".sxt-q{flex:0 1 240px;padding:4px 8px;border:1px solid rgba(128,128,128,.4);border-radius:6px;font:inherit}",
+    ".sxt-n{opacity:.6;font-size:.8em}",
+    ".sxt-dl{margin-left:auto;font-size:.8em;text-decoration:none;border:1px solid rgba(128,128,128,.4);",
+      "padding:3px 9px;border-radius:6px}",
+    ".sxt-scroll{max-height:", 34 * max(page, 5), "px;overflow:auto;",
+      "border:1px solid rgba(128,128,128,.25);border-radius:8px}",
+    "table.sxt{border-collapse:collapse;width:100%}",
+    "table.sxt th{position:sticky;top:0;background:var(--bs-body-bg,#fff);cursor:pointer;",
+      "text-align:left;padding:6px 9px;border-bottom:2px solid rgba(128,128,128,.35);white-space:nowrap}",
+    "table.sxt th:hover{background:rgba(128,128,128,.12)}",
+    "table.sxt td{padding:5px 9px;border-bottom:1px solid rgba(128,128,128,.15);white-space:nowrap}",
+    "table.sxt tr:hover td{background:rgba(42,120,214,.07)}",
+    "</style>",
+    "<script>(function(){",
+    "var w=document.getElementById('", id, "');if(!w)return;",
+    "var tb=w.querySelector('tbody'),rows=[].slice.call(tb.rows),n=w.querySelector('.sxt-n');",
+    "function count(v){n.textContent=v+' of ", nrow(df), " rows';}count(rows.length);",
+    "w.querySelector('.sxt-q').addEventListener('input',function(e){",
+      "var q=e.target.value.toLowerCase(),k=0;",
+      "rows.forEach(function(r){var hit=r.textContent.toLowerCase().indexOf(q)>-1;",
+        "r.style.display=hit?'':'none';if(hit)k++;});count(k);});",
+    # Numeric-aware sort: a column of numbers must not sort as text, or 10 lands
+    # between 1 and 2 -- which is exactly how a 'top N' table misleads.
+    "var dir={};w.querySelectorAll('th').forEach(function(th){th.addEventListener('click',function(){",
+      "var c=+th.dataset.c;dir[c]=!dir[c];var s=dir[c]?1:-1;",
+      "rows.sort(function(a,b){var x=a.cells[c].textContent,y=b.cells[c].textContent;",
+        "var nx=parseFloat(x.replace(/[, ]/g,'')),ny=parseFloat(y.replace(/[, ]/g,''));",
+        "if(!isNaN(nx)&&!isNaN(ny))return (nx-ny)*s;",
+        "return x.localeCompare(y)*s;});",
+      "rows.forEach(function(r){tb.appendChild(r);});});});",
+    "})();</script>",
+    "\n```\n"))
 }
 
 # -----------------------------------------------------------------------------

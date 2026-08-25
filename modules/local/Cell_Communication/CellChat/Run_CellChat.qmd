@@ -552,6 +552,100 @@ saveRDS(list(done=TRUE, timestamp=Sys.time()), file = out_rds)
 
 ```
 
+# What CellChat found
+
+CellChat aggregates ligand-receptor pairs into signalling **pathways** and
+quantifies how much signal flows between populations. Its `net` holds two
+matrices: the number of inferred interactions between each sender-receiver pair,
+and their summed probability. Neither was reported here.
+
+```{r cc-net-prepare}
+#| code-fold: true
+suppressPackageStartupMessages({library(data.table); library(ggplot2)})
+
+cco <- NULL
+for (f in c(file.path("data", "cellchat_object.rds"),
+            file.path("data", "cellchat", "cellchat_object_with_centrality.rds"))) {
+  if (is.null(cco) && file.exists(f)) cco <- tryCatch(readRDS(f), error = function(e) NULL)
+}
+
+net_count <- NULL; net_weight <- NULL; pathways <- NULL
+if (!is.null(cco)) {
+  net_count  <- tryCatch(cco@net$count,  error = function(e) NULL)
+  net_weight <- tryCatch(cco@net$weight, error = function(e) NULL)
+  pathways   <- tryCatch(cco@netP$pathways, error = function(e) NULL)
+}
+cat("populations:", if (is.null(net_count)) 0 else nrow(net_count),
+    "| pathways:", if (is.null(pathways)) 0 else length(pathways), "\n")
+```
+
+```{r}
+#| label: fig-cc-net
+#| fig-cap: "Inferred interactions between populations"
+#| fig-width: 9.5
+#| fig-height: 7
+if (!is.null(net_count)) {
+  m <- as.data.table(as.table(net_count))
+  setnames(m, c("sender", "receiver", "n"))
+  lv <- m[, .(t = sum(n)), by = sender][order(-t)]$sender
+  m[, sender := factor(sender, levels = lv)][, receiver := factor(receiver, levels = rev(lv))]
+
+  ggplot(m, aes(x = sender, y = receiver, fill = n,
+                text = sprintf("%s \u2192 %s\n%s inferred interactions", sender, receiver, n))) +
+    geom_tile(colour = "white", linewidth = .5) +
+    scale_fill_gradient(low = "#f2f6fa", high = "#1f4e79", name = "interactions") +
+    labs(title = "CellChat: inferred interactions between populations",
+         subtitle = "Rows receive, columns send",
+         x = "sender", y = "receiver") +
+    theme_scratch() +
+    theme(axis.text.x = element_text(angle = 35, hjust = 1), panel.grid = element_blank())
+}
+```
+
+```{r cc-net-finding, results = 'asis'}
+if (!is.null(net_count)) {
+  m <- as.data.table(as.table(net_count)); setnames(m, c("sender", "receiver", "n"))
+  out <- m[, .(sent = sum(n)), by = sender][order(-sent)]
+  inn <- m[, .(recv = sum(n)), by = receiver][order(-recv)]
+  self <- m[as.character(sender) == as.character(receiver), sum(n)]
+  tot  <- sum(m$n)
+
+  scratch_finding(sprintf(paste(
+    "CellChat inferred **%s interactions** across %d populations%s. Busiest sender",
+    "**%s** (%s), busiest receiver **%s** (%s). **%.0f%%** are autocrine",
+    "(a population signalling to itself)."),
+    format(tot, big.mark = ","), nrow(net_count),
+    if (!is.null(pathways)) sprintf(" over **%d signalling pathways**", length(pathways)) else "",
+    out$sender[1], format(out$sent[1], big.mark = ","),
+    inn$receiver[1], format(inn$recv[1], big.mark = ","),
+    100 * self / max(tot, 1)),
+    type = "note", title = "CellChat interaction network")
+}
+```
+
+```{r cc-net-table}
+if (!is.null(net_count)) {
+  m <- as.data.table(as.table(net_count)); setnames(m, c("sender", "receiver", "n"))
+  if (!is.null(net_weight)) {
+    w <- as.data.table(as.table(net_weight)); setnames(w, c("sender", "receiver", "weight"))
+    m <- merge(m, w, by = c("sender", "receiver"), all.x = TRUE)
+    m[, weight := round(weight, 5)]
+  }
+  scratch_table(m[order(-n)][1:min(200, nrow(m))],
+                caption = "CellChat interactions per sender-receiver pair")
+}
+```
+
+```{r cc-pathway-finding, results = 'asis'}
+if (!is.null(pathways) && length(pathways)) {
+  scratch_finding(sprintf(
+    "Pathways with inferred communication: **%s**%s.",
+    paste(head(pathways, 12), collapse = ", "),
+    if (length(pathways) > 12) sprintf(" and %d more", length(pathways) - 12) else ""),
+    type = "note", title = "Signalling pathways")
+}
+```
+
 ```{r}
 #| label: Params
 #| warning: false

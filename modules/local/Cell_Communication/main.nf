@@ -24,6 +24,14 @@ process CELLCOMM_LIANA {
 
   input:
     tuple path(seurat_object), path(notebook)
+    // The shared Quarto/figure assets. Every other notebook-rendering process
+    // takes these; cell communication did not, so scratch_viz.R and
+    // scratch_report.R were never staged here. Consequence: scratch_finding()
+    // did not exist, the knit_print interactivity hook was absent, and all
+    // three reports rendered with zero findings, zero interactive figures and
+    // no in-page agent -- the entire stage was outside the reporting system
+    // without anything saying so.
+    path page_config
 
   output:
 
@@ -64,7 +72,7 @@ process CELLCOMM_LIANA {
       ${extras}
 
     mkdir -p report
-    [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/
+    [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/ || true
     """
 
 
@@ -103,6 +111,14 @@ process CELLCOMM_CELLCHAT {
 
   input:
     tuple path(seurat_object), path(notebook)
+    // The shared Quarto/figure assets. Every other notebook-rendering process
+    // takes these; cell communication did not, so scratch_viz.R and
+    // scratch_report.R were never staged here. Consequence: scratch_finding()
+    // did not exist, the knit_print interactivity hook was absent, and all
+    // three reports rendered with zero findings, zero interactive figures and
+    // no in-page agent -- the entire stage was outside the reporting system
+    // without anything saying so.
+    path page_config
 
   output:
     path "report/${notebook.baseName}.html"         , emit: report,  optional: true
@@ -136,7 +152,7 @@ process CELLCOMM_CELLCHAT {
       ${extras}
 
     mkdir -p report
-    [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/
+    [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/ || true
     """
 
 
@@ -170,6 +186,7 @@ process CELLCOMM_NICHENET {
   input:
     tuple path(seurat_object), path(notebook), path(liana_csv), path(cellchat_rds)
     path nichenet_assets_dir
+    path page_config
 
 
   output:
@@ -230,7 +247,7 @@ process CELLCOMM_NICHENET {
       ${extras}
 
     mkdir -p report
-    [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/
+    [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/ || true
     """
 
     stub:
@@ -307,6 +324,6 @@ process CELLCOMM_NICHENET {
 //       -P work_directory:\$PWD
 
 //     # Normalize to report/index.html
-//     [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/index.html
+//     [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/index.html || true
 //     """
 // }

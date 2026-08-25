@@ -367,6 +367,295 @@ FeaturePlot(seurat_infercnv_object, features = 'genomwide_cnv_proportion') +
 The @fig-feat-cnv displays CNV load on the UMAP dimensions
 :::
 
+## Copy-number landscape
+
+inferCNV writes far more than the heatmap it is known for: a per-cell,
+per-chromosome table of how much of each chromosome is altered and in which
+direction, and an HMM segmentation naming the regions themselves. None of it was
+reported here — the stage produced one UMAP and no computed statement at all.
+The sections below read those outputs directly.
+
+```{r cnv-landscape-prepare}
+#| code-fold: true
+suppressPackageStartupMessages({library(data.table); library(ggplot2)})
+
+.md <- as.data.table(seurat_infercnv_object@meta.data, keep.rownames = "cell_id")
+
+# Resolve the annotation column with the same candidate order the rest of the
+# pipeline uses, so "cell type" means one thing across every stage.
+.ct_cand <- c("celltype", "azimuth_labels", "cell_type", "annotation",
+              "sctype", "sctype_agg", "cell_label")
+.col_ct  <- .ct_cand[.ct_cand %in% names(.md)][1]
+.col_smp <- c("sample_id", "orig.ident", "sample", "patient_id")[
+              c("sample_id", "orig.ident", "sample", "patient_id") %in% names(.md)][1]
+
+# Long form: one row per cell x chromosome. The wide table carries ~220 columns
+# (has_/proportion_/proportion_scaled_ x loss/dupli/cnv x 22 autosomes), which is
+# unreadable as a table and unplottable as-is.
+.melt_metric <- function(prefix, value_name) {
+  cols <- grep(paste0("^", prefix, "_chr[0-9XY]+$"), names(.md), value = TRUE)
+  if (!length(cols)) return(NULL)
+  d <- melt(.md[, c("cell_id", cols), with = FALSE], id.vars = "cell_id",
+            variable.name = "col", value.name = value_name)
+  d[, chr := sub(paste0("^", prefix, "_chr"), "", as.character(col))][, col := NULL]
+  d
+}
+
+.cnv   <- .melt_metric("proportion_cnv",   "prop_cnv")
+.loss  <- .melt_metric("proportion_loss",  "prop_loss")
+.dupli <- .melt_metric("proportion_dupli", "prop_dupli")
+
+cnv_long <- NULL
+if (!is.null(.cnv)) {
+  cnv_long <- .cnv
+  if (!is.null(.loss))  cnv_long <- merge(cnv_long, .loss,  by = c("cell_id", "chr"), all.x = TRUE)
+  if (!is.null(.dupli)) cnv_long <- merge(cnv_long, .dupli, by = c("cell_id", "chr"), all.x = TRUE)
+  cnv_long <- merge(cnv_long,
+                    .md[, .(cell_id,
+                            celltype = if (!is.na(.col_ct)) as.character(get(.col_ct)) else "all cells",
+                            sample   = if (!is.na(.col_smp)) as.character(get(.col_smp)) else "all")],
+                    by = "cell_id", all.x = TRUE)
+  cnv_long[, chr := factor(chr, levels = c(as.character(1:22), "X", "Y"))]
+  cnv_long <- cnv_long[!is.na(chr)]
+}
+cat("Cells:", nrow(.md), "| cell-type column:", .col_ct,
+    "| chromosomes:", if (!is.null(cnv_long)) uniqueN(cnv_long$chr) else 0, "\n")
+```
+
+### Which populations carry copy-number burden?
+
+```{r fig.width = 10, fig.height = 5.5}
+#| label: fig-cnv-burden
+#| fig-cap: "Genome-wide CNV burden by annotated cell type"
+if (!is.na(.col_ct) && "genomwide_cnv_proportion" %in% names(.md)) {
+  d <- .md[, .(celltype = as.character(get(.col_ct)),
+               burden = as.numeric(genomwide_cnv_proportion))][!is.na(burden)]
+  ord <- d[, .(m = median(burden, na.rm = TRUE), n = .N), by = celltype][order(-m)]
+  d[, celltype := factor(celltype, levels = ord$celltype)]
+  d <- merge(d, ord[, .(celltype, n)], by = "celltype")
+
+  ggplot(d, aes(x = celltype, y = burden, fill = celltype,
+                text = sprintf("%s\nn = %s cells\nmedian burden = %.3f",
+                               celltype, format(n, big.mark = ","),
+                               median(burden, na.rm = TRUE)))) +
+    geom_violin(scale = "width", colour = NA, alpha = .85) +
+    geom_boxplot(width = .14, outlier.shape = NA, fill = "white", colour = "grey30") +
+    scale_fill_scratch(guide = "none") +
+    labs(title = "Genome-wide CNV burden by cell type",
+         subtitle = "Ordered by median. Malignant populations should separate from the reference lineages.",
+         x = NULL, y = "genome-wide CNV proportion (log1p)") +
+    theme_scratch() +
+    theme(axis.text.x = element_text(angle = 35, hjust = 1))
+}
+```
+
+```{r cnv-burden-finding, results = 'asis'}
+if (!is.na(.col_ct) && "genomwide_cnv_proportion" %in% names(.md)) {
+  d <- .md[, .(ct = as.character(get(.col_ct)), b = as.numeric(genomwide_cnv_proportion))][!is.na(b)]
+  st <- d[, .(n = .N, med = median(b), q75 = quantile(b, .75)), by = ct][order(-med)]
+  top <- st[1]; bot <- st[.N]
+
+  # Reference lineages are supposed to be diploid. If one of them carries burden
+  # comparable to the top population, the baseline itself is contaminated and
+  # every downstream call inherits that.
+  ref_like <- st[grepl("T cell|B cell|NK|Macrophage|Fibroblast|Endothel|Dendritic|Mast|pDC|Plasma",
+                       ct, ignore.case = TRUE)]
+  worst_ref <- if (nrow(ref_like)) ref_like[order(-med)][1] else NULL
+  ratio <- if (!is.null(worst_ref) && bot$med > 0) worst_ref$med / bot$med else NA_real_
+
+  # A zero-median population makes the ratio infinite, and sprintf renders that
+  # as "NAx". State the separation in absolute terms when the floor is zero --
+  # which is the healthy case: a reference lineage with no detectable CNV.
+  spread <- if (bot$med > 0) sprintf("**%.1fx**", top$med / bot$med)
+            else sprintf("unbounded — **%s has no detectable CNV at all** (median 0)", bot$ct)
+
+  scratch_finding(sprintf(paste(
+    "Highest CNV burden is **%s** (median %.3f over %s cells); lowest is **%s**",
+    "(median %.3f). The separation between them is %s.%s"),
+    top$ct, top$med, format(top$n, big.mark = ","), bot$ct, bot$med, spread,
+    if (!is.null(worst_ref) && !is.na(ratio) && ratio > 3)
+      sprintf(paste(" **%s is a reference-type lineage yet carries %.1fx the lowest burden** —",
+                    "check that the reference set is genuinely diploid before trusting the calls."),
+              worst_ref$ct, ratio) else ""),
+    type = if (!is.null(worst_ref) && !is.na(ratio) && ratio > 3) "caution" else "note",
+    title = "CNV burden by population")
+}
+```
+
+```{r cnv-burden-table}
+# scratch_table() returns an htmlwidget, and a `results='asis'` chunk suppresses
+# auto-printing -- so a table called from inside a findings chunk renders as
+# NOTHING. Both tables in this section vanished that way. Findings and tables
+# belong in separate chunks for exactly this reason.
+if (!is.na(.col_ct) && "genomwide_cnv_proportion" %in% names(.md)) {
+  d <- .md[, .(ct = as.character(get(.col_ct)), b = as.numeric(genomwide_cnv_proportion))][!is.na(b)]
+  st <- d[, .(n = .N, med = median(b), q75 = quantile(b, .75)), by = ct][order(-med)]
+  scratch_table(st[, .(`cell type` = ct, cells = n,
+                       `median burden` = round(med, 4), `75th pct` = round(q75, 4))],
+                caption = "Genome-wide CNV burden per annotated population")
+}
+```
+
+### Where in the genome, and in which direction?
+
+A chromosome carrying amplification in one population and deletion in another is
+a different statement from one that is simply noisy, so gains and losses are kept
+apart rather than summed into a single "altered" score.
+
+```{r fig.width = 11, fig.height = 6}
+#| label: fig-cnv-chr-heatmap
+#| fig-cap: "Mean CNV proportion per chromosome and cell type"
+if (!is.null(cnv_long)) {
+  hm <- cnv_long[, .(prop = mean(prop_cnv, na.rm = TRUE), n = .N), by = .(celltype, chr)]
+  ord <- hm[, .(m = mean(prop, na.rm = TRUE)), by = celltype][order(-m)]
+  hm[, celltype := factor(celltype, levels = rev(ord$celltype))]
+
+  ggplot(hm, aes(x = chr, y = celltype, fill = prop,
+                 text = sprintf("chr%s — %s\nmean altered: %.1f%%\ncells: %s",
+                                chr, celltype, 100 * prop, format(n, big.mark = ",")))) +
+    geom_tile(colour = "white", linewidth = .4) +
+    scale_fill_gradient(low = "#f2f6fa", high = "#8c1d18", name = "fraction\naltered",
+                        labels = scales::percent_format(accuracy = 1)) +
+    labs(title = "Copy-number alteration by chromosome and population",
+         subtitle = "Fraction of each chromosome called altered, averaged over cells",
+         x = "chromosome", y = NULL) +
+    theme_scratch() +
+    theme(panel.grid = element_blank())
+}
+```
+
+```{r fig.width = 10, fig.height = 5}
+#| label: fig-cnv-ampdel
+#| fig-cap: "Amplification versus deletion per chromosome"
+if (!is.null(cnv_long) && all(c("prop_dupli", "prop_loss") %in% names(cnv_long))) {
+  ad <- cnv_long[, .(amp = mean(prop_dupli, na.rm = TRUE),
+                     del = mean(prop_loss,  na.rm = TRUE)), by = chr]
+  adl <- rbind(ad[, .(chr, direction = "amplification", value =  amp)],
+               ad[, .(chr, direction = "deletion",      value = -del)])
+
+  ggplot(adl, aes(x = chr, y = value, fill = direction,
+                  text = sprintf("chr%s\n%s: %.1f%% of the chromosome",
+                                 chr, direction, 100 * abs(value)))) +
+    geom_col(width = .74) +
+    geom_hline(yintercept = 0, colour = "grey40", linewidth = .4) +
+    scale_fill_scratch(name = NULL) +
+    scale_y_continuous(labels = function(x) scales::percent(abs(x), accuracy = 1)) +
+    labs(title = "Gains and losses per chromosome",
+         subtitle = "Above the line: amplification. Below: deletion. Mean fraction of the chromosome affected.",
+         x = "chromosome", y = "fraction of chromosome") +
+    theme_scratch()
+}
+```
+
+```{r cnv-chr-finding, results = 'asis'}
+if (!is.null(cnv_long)) {
+  bychr <- cnv_long[, .(prop = mean(prop_cnv, na.rm = TRUE),
+                        amp  = mean(prop_dupli, na.rm = TRUE),
+                        del  = mean(prop_loss,  na.rm = TRUE)), by = chr][order(-prop)]
+  top3 <- bychr[1:min(3, .N)]
+  amp_tot <- sum(bychr$amp, na.rm = TRUE); del_tot <- sum(bychr$del, na.rm = TRUE)
+  skew <- if (del_tot > 0) amp_tot / del_tot else NA_real_
+
+  scratch_finding(sprintf(paste(
+    "Most-altered chromosomes: %s. Across the genome the calls are **%.1fx more",
+    "%s than %s** (%.1f%% vs %.1f%% of chromosome content on average).%s"),
+    paste(sprintf("**chr%s** (%.1f%%)", top3$chr, 100 * top3$prop), collapse = ", "),
+    if (!is.na(skew)) max(skew, 1 / skew) else NA_real_,
+    if (!is.na(skew) && skew >= 1) "amplified" else "deleted",
+    if (!is.na(skew) && skew >= 1) "deleted" else "amplified",
+    100 * amp_tot / nrow(bychr), 100 * del_tot / nrow(bychr),
+    if (!is.na(skew) && (skew > 5 || skew < 0.2))
+      " A strong one-sided skew usually means the reference baseline is offset rather than that the tumour is uniformly gained or lost."
+    else ""),
+    type = if (!is.na(skew) && (skew > 5 || skew < 0.2)) "caution" else "note",
+    title = "Genomic distribution of alterations")
+}
+```
+
+```{r cnv-chr-table}
+if (!is.null(cnv_long)) {
+  bychr <- cnv_long[, .(prop = mean(prop_cnv, na.rm = TRUE),
+                        amp  = mean(prop_dupli, na.rm = TRUE),
+                        del  = mean(prop_loss,  na.rm = TRUE)), by = chr][order(-prop)]
+  scratch_table(bychr[, .(chromosome = paste0("chr", chr),
+                          `altered %` = round(100 * prop, 2),
+                          `amplified %` = round(100 * amp, 2),
+                          `deleted %` = round(100 * del, 2))],
+                caption = "Per-chromosome alteration summary")
+}
+```
+
+### HMM-segmented regions
+
+The heatmap shows intensity; the HMM says where the boundaries are. These are the
+discrete calls, comparable to Numbat's segments in the caller-concordance report.
+
+```{r cnv-hmm-regions}
+#| code-fold: true
+hmm <- NULL
+.rf <- list.files("data/infercnv", pattern = "pred_cnv_regions\\.dat$",
+                  full.names = TRUE, recursive = TRUE)
+if (length(.rf)) {
+  hmm <- tryCatch(fread(.rf[1]), error = function(e) NULL)
+  if (!is.null(hmm) && nrow(hmm)) {
+    hmm[, size_Mb := (end - start) / 1e6]
+    # inferCNV i6 states: 1-2 loss, 3 neutral, 4-6 gain.
+    hmm[, direction := fifelse(state < 3, "loss", fifelse(state > 3, "gain", "neutral"))]
+    hmm[, population := sub("\\..*$", "", cell_group_name)]
+  }
+}
+```
+
+```{r fig.width = 10.5, fig.height = 5.5}
+#| label: fig-cnv-hmm
+#| fig-cap: "HMM-predicted CNV regions by chromosome"
+if (!is.null(hmm) && nrow(hmm)) {
+  d <- copy(hmm)
+  d[, chr_n := factor(sub("^chr", "", chr), levels = c(as.character(1:22), "X", "Y"))]
+  ggplot(d[!is.na(chr_n)], aes(x = chr_n, y = size_Mb, fill = direction,
+             text = sprintf("%s\n%s %s\n%.1f Mb (%.1f–%.1f Mb)\nstate %s",
+                            population, chr, direction, size_Mb,
+                            start / 1e6, end / 1e6, state))) +
+    geom_col(width = .74) +
+    scale_fill_scratch(name = NULL) +
+    labs(title = "HMM-predicted copy-number regions",
+         subtitle = "Total segment length called per chromosome, split by direction",
+         x = "chromosome", y = "Mb called") +
+    theme_scratch()
+}
+```
+
+```{r cnv-hmm-finding, results = 'asis'}
+if (!is.null(hmm) && nrow(hmm)) {
+  bydir <- hmm[, .N, by = direction][order(-N)]
+  scratch_finding(sprintf(paste(
+    "The HMM resolved **%s regions** across %s population group(s): %s.",
+    "Median segment **%.1f Mb** (range %.1f–%.1f). These are discrete calls and",
+    "are directly comparable with Numbat's segments in the caller-concordance report."),
+    format(nrow(hmm), big.mark = ","), uniqueN(hmm$population),
+    paste(sprintf("%s %s", bydir$N, bydir$direction), collapse = ", "),
+    median(hmm$size_Mb), min(hmm$size_Mb), max(hmm$size_Mb)),
+    type = "note", title = "HMM segmentation")
+}
+```
+
+```{r cnv-hmm-table}
+if (!is.null(hmm) && nrow(hmm)) {
+  # Side effects FIRST. scratch_table() returns a widget, and a chunk renders its
+  # LAST value — with fwrite() after it, the table was computed, the CSV was
+  # written, and nothing appeared in the report. Same rule that governs ggplot
+  # objects, and just as silent when broken.
+  fwrite(hmm, file.path("data", paste0(project_name, "_infercnv_hmm_regions.csv")))
+
+  scratch_table(hmm[order(-size_Mb)][1:min(50, .N),
+                    .(population, chromosome = chr, state, direction,
+                      `start Mb` = round(start / 1e6, 2),
+                      `end Mb` = round(end / 1e6, 2),
+                      `size Mb` = round(size_Mb, 2))],
+                caption = "Largest HMM-predicted CNV regions")
+}
+```
+
 ## Saving Seurat object
 
 ```{r object_dump}

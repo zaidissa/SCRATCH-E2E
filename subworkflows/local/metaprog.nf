@@ -32,6 +32,7 @@ workflow METAPROG {
 
     take:
         ch_seurat_object   // value channel
+        ch_page_config     // shared quarto template + figure/report library
 
     main:
 
@@ -45,8 +46,8 @@ workflow METAPROG {
         nb_nmf    = Channel.fromPath(params.nmf_qmd,     checkIfExists: true)
 
         // Leiden and NMF preprocessing are independent; run them concurrently.
-        METAPROG_LEIDEN(ch_seurat_object.combine(nb_leiden))
-        METAPROG_NMF_PREP(ch_seurat_object.combine(nb_prep))
+        METAPROG_LEIDEN(ch_seurat_object.combine(nb_leiden), ch_page_config)
+        METAPROG_NMF_PREP(ch_seurat_object.combine(nb_prep), ch_page_config)
 
         // Fan out: one task per <sample>_preprocessed.rds
         ch_samples = METAPROG_NMF_PREP.out.preprocessed
@@ -56,7 +57,7 @@ workflow METAPROG {
         ch_fits = Channel.empty()
 
         if (engine in ['r', 'both']) {
-            METAPROG_NMF(ch_samples.combine(nb_nmf))
+            METAPROG_NMF(ch_samples.combine(nb_nmf), ch_page_config)
             ch_fits = ch_fits.mix(METAPROG_NMF.out.nmf_rds)
         }
 
@@ -72,7 +73,7 @@ workflow METAPROG {
             .collect()
             .map { fits -> tuple(file(params.postnmf_qmd), fits) }
 
-        METAPROG_POST(ch_post_in)
+        METAPROG_POST(ch_post_in, ch_page_config)
 
     emit:
         leiden_rds = METAPROG_LEIDEN.out.leiden_rds

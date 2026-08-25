@@ -677,7 +677,13 @@ compute_de_burden <- function(ct) {
   ct_cells <- rownames(seu@meta.data)[seu@meta.data[[celltype_col]] == ct]
   if (length(ct_cells) < params$min_cells_per_group) return(0)
 
-  grp_vec <- seu@meta.data[[condition_col]]
+  # NAMED, because ct_cells are cell names. Indexing an unnamed vector by
+  # character gives NA for every element, sum(NA == x, na.rm = TRUE) is 0, and
+  # this function returned 0 at the guard below WITHOUT ever calling
+  # de_wilcox_layer -- so fixing the same bug inside that function did not help.
+  # Every cell type looked like it had zero cells per condition, de_burden was 0
+  # across the board, and receivers were effectively chosen at random.
+  grp_vec <- stats::setNames(seu@meta.data[[condition_col]], rownames(seu@meta.data))
   n_ref  <- sum(grp_vec[ct_cells] == condition_ref, na.rm = TRUE)
   n_test <- sum(grp_vec[ct_cells] == condition_test, na.rm = TRUE)
 
@@ -718,8 +724,33 @@ de_wilcox_layer <- function(seu, cells_use, group_vec, group1, group2,
                             assay = "RNA", layer = "data",
                             min_pct = 0.1, logfc_min = 0.25) {
 
+  # `cells_use` holds CELL NAMES, so group_vec must be indexable by name.
+  # Both call sites pass `seu@meta.data[[condition_col]]`, which is an UNNAMED
+  # vector -- and indexing an unnamed atomic vector by character returns NA for
+  # every element. group_vec became all-NA, `keep` all-FALSE, cells_use emptied,
+  # and this function returned NULL on every call.
+  #
+  # That is why NicheNet produced 0 differentially expressed genes for every
+  # receiver on a dataset where the same contrast yields 1,190 genes for T cells
+  # alone, wrote a 0-byte nichenet_summary.csv, and exited 0. Nothing failed
+  # loudly enough to notice.
+  if (is.null(names(group_vec))) {
+    if (length(group_vec) == ncol(seu)) {
+      names(group_vec) <- colnames(seu)
+    } else if (length(group_vec) == length(cells_use)) {
+      names(group_vec) <- cells_use     # already aligned, just unnamed
+    } else {
+      stop("de_wilcox_layer: group_vec has no names and its length (", length(group_vec),
+           ") matches neither ncol(seu) (", ncol(seu), ") nor cells_use (",
+           length(cells_use), ").")
+    }
+  }
+
   # subset metadata to cells
   group_vec <- as.character(group_vec[cells_use])
+  if (all(is.na(group_vec)))
+    stop("de_wilcox_layer: no cell in cells_use matched a name in group_vec — ",
+         "the grouping vector and the cells are not the same population.")
   keep <- group_vec %in% c(group1, group2)
   cells_use <- cells_use[keep]
   group_vec <- group_vec[keep]
@@ -1426,3 +1457,151 @@ out_rds
 sessionInfo()
 ```
 
+
+
+# What NicheNet found
+
+NicheNet asks a different question from LIANA. LIANA ranks ligand-receptor pairs
+by co-expression; NicheNet asks which **sender ligands best explain the genes a
+receiver population actually changed**, by propagating through a prior
+signalling network. Its output is a ranked ligand list per receiver, not a pair
+list — so the two are complementary rather than competing.
+
+```{r nn-report-prepare}
+#| code-fold: true
+suppressPackageStartupMessages({library(data.table); library(ggplot2)})
+
+nn_sum <- tryCatch(fread(file.path("data", "nichenet_summary.csv")), error = function(e) NULL)
+if (!is.null(nn_sum) && !nrow(nn_sum)) nn_sum <- NULL
+
+# Per-receiver ligand activities, if the receiver directories were written.
+act_files <- list.files(file.path("data", "nichenet"), pattern = "^ligand_activities\\.csv$",
+                        recursive = TRUE, full.names = TRUE)
+acts <- NULL
+if (length(act_files)) {
+  acts <- rbindlist(lapply(act_files, function(f) {
+    d <- tryCatch(fread(f), error = function(e) NULL)
+    if (is.null(d) || !nrow(d)) return(NULL)
+    d[, receiver := sub("^receiver_", "", basename(dirname(f)))]
+    d
+  }), fill = TRUE)
+  if (!is.null(acts) && !nrow(acts)) acts <- NULL
+}
+cat("receivers summarised:", if (is.null(nn_sum)) 0 else nrow(nn_sum),
+    "| ligand activity rows:", if (is.null(acts)) 0 else nrow(acts), "\n")
+```
+
+```{r nn-empty-guard, results = 'asis'}
+if (is.null(nn_sum)) {
+  scratch_finding(paste(
+    "**NicheNet produced no summary.** The stage completed, but",
+    "`data/nichenet_summary.csv` is empty — so no receiver got a gene set of",
+    "interest. The usual cause is that the differential expression underlying the",
+    "receiver programme returned nothing; check `receiver_*/receiver_DE.csv` and",
+    "`auto_receiver_metrics.csv`. An empty summary with a zero exit code is the",
+    "shape this failure takes."),
+    type = "caution", title = "No NicheNet output")
+}
+```
+
+```{r nn-design-caveat, results = 'asis'}
+# The contrast is only as strong as the design behind it. This cohort has ONE
+# sample per condition, so "condition" and "patient" are the same variable and
+# nothing here can separate them.
+if (!is.null(nn_sum) && all(c("condition_ref", "condition_test") %in% names(nn_sum))) {
+  n_samples <- tryCatch({
+    smp_col <- intersect(c("sample_id", "orig.ident", "sample", "patient_id"),
+                         names(seu@meta.data))[1]
+    if (is.na(smp_col)) NA_integer_ else length(unique(seu@meta.data[[smp_col]]))
+  }, error = function(e) NA_integer_)
+  n_cond <- length(unique(c(nn_sum$condition_ref, nn_sum$condition_test)))
+
+  if (!is.na(n_samples) && n_samples <= n_cond) {
+    scratch_finding(sprintf(paste(
+      "The receiver programmes come from a **%s vs %s** contrast, but this cohort has",
+      "**%d sample(s) across %d condition(s)** — one sample per group. Condition and",
+      "patient are the same variable here, so these genes are differences between",
+      "individuals, not a replicated condition effect. The ligand rankings below are",
+      "still a valid description of *this* pair of samples; they are not evidence of",
+      "a treatment or subtype effect."),
+      unique(nn_sum$condition_test)[1], unique(nn_sum$condition_ref)[1], n_samples, n_cond),
+      type = "caution", title = "Unreplicated design")
+  }
+}
+```
+
+```{r nn-summary-finding, results = 'asis'}
+if (!is.null(nn_sum)) {
+  top_recv <- nn_sum[order(-n_geneset_oi)][1]
+  scratch_finding(sprintf(paste(
+    "**%d receiver population(s)** analysed against %s sender(s). The largest",
+    "response is in **%s**: %s genes in its gene set of interest, %s expressed",
+    "receptors, and %s candidate ligands retained. Its top ligands are **%s**."),
+    nrow(nn_sum),
+    length(unique(unlist(strsplit(paste(nn_sum$senders, collapse = "; "), "\\s*;\\s*")))),
+    top_recv$receiver, format(top_recv$n_geneset_oi, big.mark = ","),
+    format(top_recv$n_receptors_expressed_receiver, big.mark = ","),
+    format(top_recv$n_candidate_ligands_final, big.mark = ","),
+    paste(head(strsplit(as.character(top_recv$top_ligands), "\\s*;\\s*")[[1]], 5), collapse = ", ")),
+    type = "note", title = "Receiver programmes")
+}
+```
+
+```{r nn-summary-table}
+if (!is.null(nn_sum)) {
+  keep <- intersect(c("receiver", "n_receiver_cells", "n_geneset_oi",
+                      "n_receptors_expressed_receiver", "n_candidate_ligands_final",
+                      "top_ligands"), names(nn_sum))
+  scratch_table(nn_sum[, ..keep], caption = "NicheNet receiver summary")
+}
+```
+
+```{r}
+#| label: fig-nn-activity
+#| fig-cap: "Top ligands by predicted activity, per receiver"
+#| fig-width: 10
+#| fig-height: 6.5
+if (!is.null(acts) && "aupr_corrected" %in% names(acts)) {
+  top <- acts[order(receiver, -aupr_corrected)][, head(.SD, 12), by = receiver]
+  top[, lig := factor(test_ligand, levels = rev(unique(test_ligand)))]
+
+  ggplot(top, aes(x = aupr_corrected, y = lig, fill = receiver,
+                  text = sprintf("%s \u2192 %s\nAUPR (corrected): %.4f\nAUROC: %.3f",
+                                 test_ligand, receiver, aupr_corrected, auroc))) +
+    geom_col(width = .72) +
+    facet_wrap(~ receiver, scales = "free_y") +
+    scale_fill_scratch(guide = "none") +
+    labs(title = "Predicted ligand activity per receiver",
+         subtitle = "AUPR corrected for the background rate — higher means the ligand better explains the receiver's response",
+         x = "AUPR (corrected)", y = NULL) +
+    theme_scratch()
+}
+```
+
+```{r nn-activity-finding, results = 'asis'}
+if (!is.null(acts) && "aupr_corrected" %in% names(acts)) {
+  best <- acts[order(-aupr_corrected)][1]
+  # AUROC near 0.5 means the ligand explains the response no better than chance.
+  weak <- acts[, .(m = max(auroc, na.rm = TRUE)), by = receiver][m < 0.6]
+  scratch_finding(sprintf(paste(
+    "Strongest predicted ligand overall is **%s** for **%s** (AUPR corrected %.4f,",
+    "AUROC %.3f).%s"),
+    best$test_ligand, best$receiver, best$aupr_corrected, best$auroc,
+    if (nrow(weak))
+      sprintf(paste(" **%s** peak below AUROC 0.6 — for those receivers no ligand explains",
+                    "the response much better than chance, and the ranking should not be",
+                    "read as causal."), paste(weak$receiver, collapse = ", "))
+    else ""),
+    type = if (nrow(weak)) "caution" else "note",
+    title = "Ligand activity")
+}
+```
+
+```{r nn-activity-table}
+if (!is.null(acts)) {
+  keep <- intersect(c("receiver", "test_ligand", "auroc", "aupr", "aupr_corrected", "pearson"),
+                    names(acts))
+  scratch_table(acts[order(-aupr_corrected)][1:min(200, nrow(acts)), ..keep],
+                caption = "Ligand activities across receivers")
+}
+```

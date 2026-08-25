@@ -449,7 +449,7 @@ workflow {
     // ---- Malignant arm ----------------------------------------------------
     ch_metaprog = Channel.empty()
     if (run['metaprog']) {
-        METAPROG(ch_tumor.first())
+        METAPROG(ch_tumor.first(), ch_page_config)
         ch_metaprog = METAPROG.out.post_data
         rep_meta = METAPROG.out.post_data.flatten().mix(METAPROG.out.fits.flatten())
     }
@@ -494,7 +494,7 @@ workflow {
     }
 
     if (run['cellcomm']) {
-        CELL_COMMUNICATION(ch_corrected.first())
+        CELL_COMMUNICATION(ch_corrected.first(), ch_page_config)
         ch_liana    = CELL_COMMUNICATION.out.liana_csv
         ch_cellchat = CELL_COMMUNICATION.out.cellchat_rds
         rep_cc = CELL_COMMUNICATION.out.liana_csv.mix(CELL_COMMUNICATION.out.nichenet.flatten())

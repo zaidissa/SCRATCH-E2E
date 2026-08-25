@@ -24,6 +24,11 @@ process METAPROG_LEIDEN {
 
   input:
     tuple path(seurat_object), path(notebook)
+    // Shared Quarto/figure assets. Without these staged, scratch_finding() does
+    // not exist and the knit_print interactivity hook is absent -- which is why
+    // every metaprogram report rendered with zero findings and zero interactive
+    // figures. Same omission as cell communication had.
+    path page_config
 
   output:
 
@@ -58,7 +63,7 @@ process METAPROG_LEIDEN {
       ${extras}
 
     mkdir -p report
-      [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/
+      [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/ || true
     """
 
 
@@ -90,6 +95,11 @@ process METAPROG_NMF_PREP {
 
   input:
     tuple path(seurat_object), path(notebook)
+    // Shared Quarto/figure assets. Without these staged, scratch_finding() does
+    // not exist and the knit_print interactivity hook is absent -- which is why
+    // every metaprogram report rendered with zero findings and zero interactive
+    // figures. Same omission as cell communication had.
+    path page_config
 
   output:
     // path "_freeze/${notebook.baseName}"                       , emit: cache,  optional: true
@@ -121,7 +131,7 @@ process METAPROG_NMF_PREP {
       ${extras}
 
     mkdir -p report
-    [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/
+    [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/ || true
     """
 
 
@@ -154,6 +164,11 @@ process METAPROG_NMF {
 
   input:
     tuple val(sample_id), path(preprocessed_rds), path(notebook)
+    // Shared Quarto/figure assets. Without these staged, scratch_finding() does
+    // not exist and the knit_print interactivity hook is absent -- which is why
+    // every metaprogram report rendered with zero findings and zero interactive
+    // figures. Same omission as cell communication had.
+    path page_config
    
 
   output:
@@ -186,7 +201,7 @@ process METAPROG_NMF {
       ${extras}
 
     mkdir -p report
-      [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/
+      [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/ || true
     """
 
 
@@ -222,6 +237,11 @@ process METAPROG_POST {
     // tuple path(notebook), val(nmf_list)
     // tuple path(notebook), path(nmf_fits)
     tuple path(notebook), path(nmf_fits, stageAs: 'data/per_sample_mat/nmf_fit/*')
+    // Shared Quarto/figure assets. Without these staged, scratch_finding() does
+    // not exist and the knit_print interactivity hook is absent -- which is why
+    // every metaprogram report rendered with zero findings and zero interactive
+    // figures. Same omission as cell communication had.
+    path page_config
 
   output:
     path "report/${notebook.baseName}.html" , emit: report , optional: true
@@ -253,7 +273,7 @@ process METAPROG_POST {
 
     # Normalize HTML location
     mkdir -p report
-    [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/
+    [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/ || true
   
     """
 

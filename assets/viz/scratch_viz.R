@@ -205,8 +205,25 @@ options(
 # Ready-made scales, for notebooks that want to be explicit
 # -----------------------------------------------------------------------------
 
-scale_fill_scratch    <- function(...) scale_fill_manual(..., values = SCRATCH_PAL$categorical, na.value = "#c9cdc9")
-scale_colour_scratch  <- function(...) scale_colour_manual(..., values = SCRATCH_PAL$categorical, na.value = "#c9cdc9")
+# `scratch_colours(n)` already interpolates past the validated slots and warns
+# once per level-count. These scales did not use it: they handed
+# scale_*_manual a FIXED vector, so any plot with more than
+# length(SCRATCH_PAL$categorical) levels died with
+#   "Insufficient values in manual scale. 11 needed but only 8 provided."
+# and took the whole notebook down with it. A palette that errors on a category
+# count nobody chose is a worse failure than an unvalidated hue -- which is
+# exactly the trade-off scratch_colours() was written to make.
+#
+# Using the discrete-scale palette FUNCTION form means the level count is known
+# at draw time, so the interpolation happens only when it is actually needed.
+scale_fill_scratch <- function(...) {
+  ggplot2::discrete_scale("fill", palette = function(n) scratch_colours(n),
+                          na.value = "#c9cdc9", ...)
+}
+scale_colour_scratch <- function(...) {
+  ggplot2::discrete_scale("colour", palette = function(n) scratch_colours(n),
+                          na.value = "#c9cdc9", ...)
+}
 scale_color_scratch   <- scale_colour_scratch
 
 scale_fill_scratch_c  <- function(...) scale_fill_gradientn(..., colours = SCRATCH_PAL$sequential)

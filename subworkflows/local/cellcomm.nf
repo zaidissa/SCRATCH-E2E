@@ -55,6 +55,7 @@ workflow CELL_COMMUNICATION {
 
     take:
         ch_seurat_object   // value channel
+        ch_page_config     // shared quarto template + figure/report library
 
     main:
         ch_liana_csv    = Channel.empty()
@@ -67,8 +68,8 @@ workflow CELL_COMMUNICATION {
             nb_cellchat = Channel.fromPath(params.cellchat_qmd, checkIfExists: true)
             nb_nichenet = Channel.fromPath(params.nichenet_qmd, checkIfExists: true)
 
-            CELLCOMM_LIANA(ch_seurat_object.combine(nb_liana))
-            CELLCOMM_CELLCHAT(ch_seurat_object.combine(nb_cellchat))
+            CELLCOMM_LIANA(ch_seurat_object.combine(nb_liana), ch_page_config)
+            CELLCOMM_CELLCHAT(ch_seurat_object.combine(nb_cellchat), ch_page_config)
 
             ch_liana_csv    = CELLCOMM_LIANA.out.liana_csv
             ch_cellchat_rds = CELLCOMM_CELLCHAT.out.cellchat_rds
@@ -87,7 +88,8 @@ workflow CELL_COMMUNICATION {
                 // "readRDS(): unknown input format" -- a message that says
                 // nothing about the real cause. Validate content here, before a
                 // container starts.
-                nichenetAssets(params.nichenet_assets_dir)
+                nichenetAssets(params.nichenet_assets_dir),
+                ch_page_config
             )
 
             // NicheNet's `summary_csv` emit is commented out in the module, so
