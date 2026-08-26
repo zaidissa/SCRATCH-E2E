@@ -294,6 +294,72 @@ fwrite(markers_all_df, file.path("data", "markers_all.tsv"))
 
 ```
 
+# Cluster markers
+
+`FindAllMarkers` returns MARKERS, which are positive by definition — genes
+enriched in a cluster relative to the rest. That is a one-sided quantity, so a
+volcano is the wrong instrument for it: the empty left half would imply nothing
+was downregulated when in truth it was never computed. The ranked panel below is
+the honest equivalent — effect size on x, evidence as colour, detection rate as
+size.
+
+```{r mk-report-prepare}
+#| code-fold: true
+suppressPackageStartupMessages({library(data.table); library(ggplot2)})
+mk <- tryCatch(as.data.table(markers_all_df), error = function(e) NULL)
+if (!is.null(mk) && !nrow(mk)) mk <- NULL
+cat("marker rows:", if (is.null(mk)) 0 else nrow(mk),
+    "| clusters:", if (is.null(mk)) 0 else uniqueN(mk$cluster), "\n")
+```
+
+```{r}
+#| label: fig-markers
+#| fig-cap: "Top markers per cluster"
+#| fig-width: 12
+#| fig-height: 8
+if (!is.null(mk) && all(c("cluster", "gene", "avg_log2FC", "p_val_adj") %in% names(mk))) {
+  scratch_marker_panel(mk, group = "cluster", gene = "gene",
+                       lfc = "avg_log2FC", p = "p_val_adj",
+                       pct = if ("pct.1" %in% names(mk)) "pct.1" else NULL,
+                       n_top = 8, n_groups = 9) +
+    labs(title = "Top markers per cluster",
+         subtitle = "Markers are one-sided by construction; ranked by effect size within each cluster")
+}
+```
+
+```{r mk-finding, results = 'asis'}
+if (!is.null(mk) && all(c("cluster", "avg_log2FC", "p_val_adj") %in% names(mk))) {
+  n_neg <- sum(mk$avg_log2FC < 0, na.rm = TRUE)
+  sig   <- mk[!is.na(p_val_adj) & p_val_adj < 0.05]
+  per   <- sig[, .N, by = cluster][order(-N)]
+
+  scratch_finding(sprintf(paste(
+    "**%s marker calls** across %d cluster(s); **%s** reach adjusted P < 0.05.",
+    "Range %s (%s) to %s (%s) per cluster.%s"),
+    format(nrow(mk), big.mark = ","), uniqueN(mk$cluster),
+    format(nrow(sig), big.mark = ","),
+    format(per$N[1], big.mark = ","), per$cluster[1],
+    format(per$N[nrow(per)], big.mark = ","), per$cluster[nrow(per)],
+    if (n_neg == 0)
+      paste(" Every value is positive, confirming these are one-sided marker calls",
+            "(`only.pos`), not a two-sided contrast — they say what distinguishes a",
+            "cluster, not what it lost.")
+    else ""),
+    type = "note", title = "Cluster markers")
+}
+```
+
+```{r mk-table}
+if (!is.null(mk)) {
+  keep <- intersect(c("cluster", "gene", "avg_log2FC", "pct.1", "pct.2", "p_val_adj", "sample"),
+                    names(mk))
+  out <- mk[order(cluster, -avg_log2FC)][, head(.SD, 20), by = cluster][, ..keep]
+  num <- intersect(c("avg_log2FC", "pct.1", "pct.2", "p_val_adj"), names(out))
+  out[, (num) := lapply(.SD, function(x) signif(as.numeric(x), 4)), .SDcols = num]
+  scratch_table(out, caption = "Top 20 markers per cluster")
+}
+```
+
 ```{r}
 #| label: Jaccard
 #| echo: false

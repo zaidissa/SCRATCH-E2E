@@ -119,13 +119,54 @@ read_cell_table <- function(path) {
 # cnv_infercnv: it "joined" a heatmap-threshold file and the status table
 # reported TRUE while the master object gained no CNV column at all.
 join_log <- data.table(stage = character(), file = character(),
-                       matched = integer(), total = integer(), columns = integer())
+                       matched = integer(), total = integer(), columns = integer(),
+                       usable = integer())
 
-record_join <- function(stage, file, matched, total, columns) {
+record_join <- function(stage, file, matched, total, columns, usable = NA_integer_) {
   join_log <<- rbind(join_log, data.table(stage = stage, file = file,
                                           matched = as.integer(matched),
                                           total = as.integer(total),
-                                          columns = as.integer(columns)))
+                                          columns = as.integer(columns),
+                                          usable = as.integer(usable)))
+}
+
+# How many joined cells carry a value you can actually compute on.
+#
+# `matched` counts cell IDs present on both sides -- it says the join WORKED, not
+# that it delivered anything. Monocle3 assigns Inf to every cell in a partition
+# with no path to the root, so trajectory reported "19,657 matched, 80.5%" while
+# 88.6% of those values were Inf and usable pseudotime was ~9% of the dataset.
+# A status table that cannot distinguish those two numbers invites exactly the
+# misreading I made when I first reported that 80.5%.
+count_usable <- function(dt, cols) {
+  if (is.null(dt) || !length(cols)) return(NA_integer_)
+
+  .good <- function(v) {
+    if (is.numeric(v)) return(is.finite(v))
+    x <- toupper(trimws(as.character(v)))
+    !is.na(v) & nzchar(x) & !x %in% c("NA", "NAN", "INF", "-INF")
+  }
+
+  # Score the MEASURE columns, not every column the stage contributed.
+  #
+  # An OR across all columns was wrong: trajectory contributes pseudotime,
+  # cluster and patient, and the latter two are populated for every cell. So a
+  # row with Inf pseudotime still counted as usable and the fix reported 80.5%
+  # -- the same misleading number it was written to replace.
+  #
+  # Prefer columns that look like a measurement; fall back to all columns only
+  # when none is identifiable, and require ALL of them rather than any.
+  measure <- grep("pseudotime|score|rank|prob|value|_p$|pval|time",
+                  cols, value = TRUE, ignore.case = TRUE)
+  if (!length(measure)) {
+    # Nothing obviously a measure: a column that varies is more informative than
+    # a constant label like patient = "All".
+    varying <- cols[vapply(cols, function(cc) length(unique(dt[[cc]])) > 1, logical(1))]
+    measure <- if (length(varying)) varying else cols
+  }
+
+  ok <- Reduce(`&`, lapply(measure, function(cc) .good(dt[[cc]])))
+  sum(ok)
 }
 
 # Left-join a stage table onto the master metadata, prefixing its columns so two
@@ -142,7 +183,9 @@ join_stage <- function(meta, dt, prefix, stage, file = NA_character_) {
   if (matched == 0L) { record_join(stage, file, 0L, nrow(meta), 0L); return(meta) }
 
   setnames(dt, keep, paste0(prefix, "_", keep))
-  record_join(stage, file, matched, nrow(meta), length(keep))
+  # Usable is counted on the rows that will actually land: the intersection.
+  usable <- count_usable(dt[dt$cell_id %in% meta$cell_id, ], paste0(prefix, "_", keep))
+  record_join(stage, file, matched, nrow(meta), length(keep), usable)
   merge(meta, dt, by = "cell_id", all.x = TRUE, sort = FALSE)
 }
 
@@ -221,9 +264,11 @@ if (length(asg)) {
   if (!is.null(dt)) {
     matched <- sum(meta$cell_id %in% dt$cell_id)
     if (matched > 0L) {
+      .cols <- setdiff(names(dt), "cell_id")
+      .usable <- count_usable(dt[dt$cell_id %in% meta$cell_id, ], .cols)
       meta <- merge(meta, dt, by = "cell_id", all.x = TRUE, sort = FALSE)
       record_join("stratify", basename(asg[1]), matched, nrow(meta),
-                  length(setdiff(names(dt), "cell_id")))
+                  length(.cols), .usable)
     } else {
       record_join("stratify", basename(asg[1]), 0L, nrow(meta), 0L)
     }
@@ -287,9 +332,11 @@ if (length(mp_files)) {
       }
 
       matched <- sum(meta$cell_id %in% sc$cell_id)
+      .cols <- setdiff(names(sc), "cell_id")
+      .usable <- count_usable(sc[sc$cell_id %in% meta$cell_id, ], .cols)
       meta <- merge(meta, sc, by = "cell_id", all.x = TRUE, sort = FALSE)
       record_join("metaprog", basename(mp_files[1]), matched, nrow(meta),
-                  length(setdiff(names(sc), "cell_id")))
+                  length(.cols), .usable)
       cat("scored", length(mp_sets), "metaprograms\n")
     }
   }
@@ -359,7 +406,16 @@ status[is.na(matched), `:=`(matched = 0L, columns = 0L)]
 status[, total := nrow(meta)]
 status[, joined := matched > 0L]
 status[, match_pct := round(100 * matched / pmax(1L, total), 1)]
-setcolorder(status, c("stage", "joined", "matched", "total", "match_pct", "columns", "file"))
+
+# `matched` is how many cell ids lined up. `usable` is how many of those carry a
+# finite, non-empty value in at least one contributed column -- which is what a
+# downstream analysis can actually use. They diverge sharply for trajectory:
+# Monocle3 writes Inf for every cell it could not reach, so a 100%-matched join
+# can deliver a usable value for a small minority.
+status[is.na(usable), usable := matched]
+status[, usable_pct := round(100 * usable / pmax(1L, total), 1)]
+setcolorder(status, c("stage", "joined", "matched", "match_pct", "usable",
+                      "usable_pct", "total", "columns", "file"))
 fwrite(status, file.path("data", "stage_join_status.csv"))
 ```
 
@@ -390,12 +446,33 @@ if (nrow(partial)) {
     type = "note", title = "Partial joins")
 }
 
+# A join that matches every cell but delivers a usable value for few of them is
+# the failure this table could not previously express. Report it separately from
+# a partial join, because the causes and the remedies are different: a partial
+# join means the stage saw fewer cells, an unusable one means it saw them and
+# could not compute anything for them.
+thin <- status[joined == TRUE & usable < 0.5 * matched]
+if (nrow(thin)) {
+  scratch_finding(sprintf(paste(
+    "%s matched cells but delivered a usable value for far fewer: %s.",
+    "The join is not the problem — the stage produced NA/Inf for those cells.",
+    "For trajectory that means Monocle3 could not reach them from the root, so",
+    "any pseudotime-dependent result covers the usable fraction only."),
+    paste(sprintf("**%s**", thin$stage), collapse = ", "),
+    paste(sprintf("%s of %s matched (%s%% of all cells)",
+                  format(thin$usable, big.mark = ","),
+                  format(thin$matched, big.mark = ","), thin$usable_pct),
+          collapse = "; ")),
+    type = "caution", title = "Joined but largely unusable")
+}
+
 ok <- status[joined == TRUE]
 if (nrow(ok)) {
   scratch_finding(sprintf(
     "Joined %s stage(s) onto %s cells: %s.",
     nrow(ok), format(nrow(meta), big.mark = ","),
-    paste(sprintf("**%s** (+%s cols)", ok$stage, ok$columns), collapse = ", ")),
+    paste(sprintf("**%s** (+%s cols, %s%% usable)", ok$stage, ok$columns, ok$usable_pct),
+          collapse = ", ")),
     type = "note", title = "Cross-stage join")
 }
 

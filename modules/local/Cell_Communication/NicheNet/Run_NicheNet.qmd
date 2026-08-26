@@ -703,7 +703,8 @@ compute_de_burden <- function(ct) {
   )
 
   if (is.null(de_tbl) || nrow(de_tbl) == 0) return(0)
-  nrow(de_tbl)
+  # Burden = size of the UP response, which is what the receiver programme is.
+  sum(de_tbl$avg_log2FC > 0)
 }
 
 
@@ -780,10 +781,22 @@ de_wilcox_layer <- function(seu, cells_use, group_vec, group1, group2,
   # presto returns one row per feature per group; keep group1 rows and compute log2FC
   res1 <- res[res$group == group1, , drop = FALSE]
 
-  # average expression per group for log2FC
-  avg1 <- Matrix::rowMeans(mat2[, idx1, drop = FALSE])
-  avg2 <- Matrix::rowMeans(mat2[, idx2, drop = FALSE])
-  log2fc <- log2((avg1 + 1e-9) / (avg2 + 1e-9))
+  # Fold change on the LINEAR scale with a pseudocount of 1, as Seurat's
+  # FoldChange() does.
+  #
+  # The previous form averaged the LOG-normalised values and divided with a 1e-9
+  # pseudocount. Two things went wrong. Averaging logs gives a geometric mean,
+  # not the mean expression the ratio is supposed to compare; and 1e-9 means a
+  # gene absent from one group produces log2(x / 1e-9), which saturates at
+  # log2(1/1e-9) = 29.9. On this data 201 genes piled up at |log2FC| > 20 --
+  # pure artefact, no biology, and they dominated both the axis and the labels
+  # because the label ranking multiplies effect size by significance.
+  #
+  # expm1() returns to the linear scale first; +1 bounds a zero denominator to a
+  # meaningful ratio instead of a near-infinite one.
+  lin1 <- Matrix::rowMeans(expm1(mat2[, idx1, drop = FALSE]))
+  lin2 <- Matrix::rowMeans(expm1(mat2[, idx2, drop = FALSE]))
+  log2fc <- log2((lin1 + 1) / (lin2 + 1))
 
   out <- data.frame(
     gene       = res1$feature,
@@ -793,9 +806,21 @@ de_wilcox_layer <- function(seu, cells_use, group_vec, group1, group2,
     stringsAsFactors = FALSE
   )
 
-  # apply thresholds
+  # Thresholds are applied on |log2FC|, not on the signed value.
+  #
+  # `avg_log2FC > logfc_min` silently discarded every DOWNregulated gene, so
+  # receiver_DE.csv came out one-sided -- 3,729 rows for Fibroblast, minimum
+  # log2FC 0.253, not a single negative. That is invisible in a table and
+  # actively misleading in a volcano, which would show an empty left half and
+  # imply nothing went down.
+  #
+  # NicheNet's gene set of interest is the UP programme, so the caller still
+  # selects positives; but the saved table now carries both directions, because
+  # a file named receiver_DE.csv should hold the differential expression, not one
+  # tail of it.
+  out$direction <- ifelse(out$avg_log2FC > 0, "up", "down")
   out <- out[!is.na(out$p_val_adj) & out$p_val_adj < params$padj_max &
-               out$avg_log2FC > logfc_min, , drop = FALSE]
+               abs(out$avg_log2FC) > logfc_min, , drop = FALSE]
   out
 }
 
@@ -1594,6 +1619,83 @@ if (!is.null(acts) && "aupr_corrected" %in% names(acts)) {
     else ""),
     type = if (nrow(weak)) "caution" else "note",
     title = "Ligand activity")
+}
+```
+
+## Differential expression driving each receiver programme
+
+The ligand rankings above are explanations of a **response** — the genes each
+receiver population changed. This is that response, per receiver.
+
+```{r nn-de-prepare}
+#| code-fold: true
+de_files <- list.files(file.path("data", "nichenet"), pattern = "^receiver_DE\\.csv$",
+                       recursive = TRUE, full.names = TRUE)
+de_all <- NULL
+if (length(de_files)) {
+  de_all <- rbindlist(lapply(de_files, function(f) {
+    d <- tryCatch(fread(f), error = function(e) NULL)
+    if (is.null(d) || !nrow(d)) return(NULL)
+    d[, receiver := sub("^receiver_", "", basename(dirname(f)))]
+    d
+  }), fill = TRUE)
+  if (!is.null(de_all) && !nrow(de_all)) de_all <- NULL
+}
+cat("receivers with DE:", if (is.null(de_all)) 0 else uniqueN(de_all$receiver),
+    "| rows:", if (is.null(de_all)) 0 else nrow(de_all), "\n")
+```
+
+```{r}
+#| label: fig-nn-volcano
+#| fig-cap: "Differential expression per receiver population"
+#| fig-width: 12
+#| fig-height: 5.5
+if (!is.null(de_all) && nrow(de_all)) {
+  # One receiver per panel would need facets over a repel layer, which fights
+  # itself; draw the largest response, and the table below carries the rest.
+  top_recv <- de_all[, .N, by = receiver][order(-N)]$receiver[1]
+  d1 <- de_all[receiver == top_recv]
+  scratch_volcano(d1, lfc = "avg_log2FC", p = "p_val_adj", label = "gene",
+                  lfc_cut = as.numeric(params$logfc_min),
+                  p_cut = as.numeric(params$padj_max),
+                  n_label = 24,
+                  direction_labels = c(as.character(params$condition_ref),
+                                       as.character(params$condition_test))) +
+    labs(title = sprintf("%s: genes changed between conditions", top_recv),
+         subtitle = "Red is the direction NicheNet explains with sender ligands")
+}
+```
+
+```{r nn-de-finding, results = 'asis'}
+if (!is.null(de_all) && nrow(de_all)) {
+  bal <- de_all[, .(up = sum(avg_log2FC > 0), down = sum(avg_log2FC < 0),
+                    n = .N), by = receiver][order(-n)]
+  one_sided <- bal[down == 0 | up == 0]
+
+  scratch_finding(sprintf(paste(
+    "Differential expression per receiver: %s.%s"),
+    paste(sprintf("**%s** %s up / %s down", bal$receiver,
+                  format(bal$up, big.mark = ","), format(bal$down, big.mark = ",")),
+          collapse = "; "),
+    if (nrow(one_sided))
+      sprintf(paste(" **%s returned genes in one direction only** — that is a filter,",
+                    "not a result, and a volcano of it would imply the other side is",
+                    "empty. Check `logfc_min` is applied to |log2FC| rather than the",
+                    "signed value."), paste(one_sided$receiver, collapse = ", "))
+    else ""),
+    type = if (nrow(one_sided)) "caution" else "note",
+    title = "Receiver differential expression")
+}
+```
+
+```{r nn-de-table}
+if (!is.null(de_all) && nrow(de_all)) {
+  keep <- intersect(c("receiver", "gene", "avg_log2FC", "p_val", "p_val_adj", "direction"),
+                    names(de_all))
+  out <- de_all[order(p_val_adj)][1:min(300, nrow(de_all)), ..keep]
+  num <- intersect(c("avg_log2FC", "p_val", "p_val_adj"), names(out))
+  out[, (num) := lapply(.SD, function(x) signif(as.numeric(x), 4)), .SDcols = num]
+  scratch_table(out, caption = "Differentially expressed genes per receiver")
 }
 ```
 

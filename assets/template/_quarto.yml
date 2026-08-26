@@ -40,6 +40,18 @@ format:
     fig-responsive: true
     fig-align: center
     theme: litera
+
+    # Quarto's default `article` layout caps the content column at 991px, of
+    # which the body gets ~700px. Figures authored at fig-width 10-18 inches were
+    # being squeezed into that, which is why every plot looked small regardless of
+    # how it was drawn. `full` lets the body use the window, and the explicit grid
+    # gives the body the space rather than the margins.
+    page-layout: full
+    grid:
+      sidebar-width: 260px
+      body-width: 1500px
+      margin-width: 200px
+      gutter-width: 1.4rem
   ipynb: default
 
 format-links: [ipynb]

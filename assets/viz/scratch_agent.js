@@ -297,7 +297,7 @@
   // -- top / rank ---------------------------------------------------------
   add("ranking", (q) => /\b(top|highest|lowest|best|worst|rank|most|least|largest|smallest)\b/.test(q),
     (q) => {
-      const tn = pickTable(q); const rows = T(tn); if (!rows.length) return null;
+      const tn = pickTable(q, { needNumeric: true }); const rows = T(tn); if (!rows.length) return null;
       const col = pickColumn(q, numericCols(rows)); if (!col) return null;
       const asc = /\b(lowest|worst|least|smallest|fewest|bottom)\b/.test(q);
       const n = (q.match(/\btop\s+(\d+)|\b(\d+)\s+(highest|lowest|most|least)/) || [])
@@ -355,6 +355,29 @@
       return null;
     });
 
+  // -- what is in this page ----------------------------------------------
+  add("inventory", (q) => /\bwhat (do you know|can you do|do you have)|what data|which tables|what columns|\bhelp\b|capabilities|what.s (in|on) this (page|report)/.test(q),
+    () => {
+      const t = DATA.tables || {};
+      const lines = Object.keys(t).map((n) => {
+        const rows = t[n] || [];
+        const nums = numericCols(rows);
+        return `- \`${n}\` — ${rows.length} row(s), ${Object.keys(rows[0] || {}).length} column(s)` +
+               (nums.length ? `; numeric: ${nums.map((c) => "`" + c + "`").join(", ")}` : "");
+      });
+      const f = DATA.findings || [];
+      const sev = {};
+      f.forEach((x) => (sev[x.severity] = (sev[x.severity] || 0) + 1));
+      return {
+        text: [`This page is the **${DATA.meta.stage || "unknown"}** stage of` +
+               ` **${DATA.meta.project || "this run"}**.`, "",
+               `**Findings:** ${f.length}` +
+               (Object.keys(sev).length ? ` (${Object.entries(sev).map(([k, v]) => v + " " + k).join(", ")})` : ""),
+               "", lines.length ? "**Tables:**" : "_No tables registered._", ...lines].join("\n"),
+        facts: [],
+      };
+    });
+
   // -- answer from the findings ------------------------------------------
   // Ranked ahead of the table handlers. Most substantive numbers in these
   // reports are stated in findings ("Numbat called 9,227"), not in a registered
@@ -404,7 +427,7 @@
   // -- distribution of a metric ------------------------------------------
   add("distribution", (q) => /\b(distribution|spread|range|median|mean|average|typical|how many|count)\b/.test(q),
     (q) => {
-      const tn = pickTable(q); const rows = T(tn); if (!rows.length) return null;
+      const tn = pickTable(q, { needNumeric: true }); const rows = T(tn); if (!rows.length) return null;
       const col = pickColumn(q, numericCols(rows));
       // Fall through rather than describe an arbitrary column: "how many X" with
       // no recognised column is a question about something this table may not
@@ -460,8 +483,34 @@
   // being answered with statistics about an unrelated calibration column: a
   // confident, plausible, completely wrong number. Guessing is worse than
   // refusing here, because the reader cannot tell the difference.
-  function pickTable(q, { fallback = false } = {}) {
+  function pickTable(q, { fallback = false, needNumeric = false } = {}) {
     for (const tn of Object.keys(DATA.tables)) if (q.includes(tn.toLowerCase())) return tn;
+
+    // Resolve by COLUMN when the question names one. Refusing to guess a table
+    // was right -- it stopped the agent answering "how many CNVs" with statistics
+    // about an unrelated column -- but it also broke the ordinary case:
+    // "top 3 by % agree" names a real column and no table, and got the
+    // "I cannot compute that" fallback. Matching the column is not guessing;
+    // there is exactly one table that has it.
+    const hits = [];
+    for (const tn of Object.keys(DATA.tables)) {
+      const rows = DATA.tables[tn] || [];
+      if (!rows.length) continue;
+      const cols = needNumeric ? numericCols(rows) : Object.keys(rows[0]);
+      for (const c of cols) {
+        const cl = c.toLowerCase();
+        if (q.includes(cl) || q.includes(cl.replace(/[_.]/g, " "))) {
+          hits.push({ tn, len: c.length });
+          break;
+        }
+      }
+    }
+    if (hits.length) {
+      // Longest column match wins: "% agree" should not lose to "n".
+      hits.sort((a, b) => b.len - a.len);
+      return hits[0].tn;
+    }
+
     if (!fallback) return null;
     // Explicit fallback (used only for "plot the main table"): the biggest table
     // is the most informative default, not whichever happened to be registered first.
@@ -501,17 +550,36 @@
       try { r = h.run(q); } catch (e) { r = null; }
       if (r && r.text) return { ...r, intent: h.name };
     }
+    // A useful "I don't know" names what IS here. The old fallback listed generic
+    // capabilities and the table names -- not the columns, which are what a
+    // question actually has to match. Show the vocabulary the reader can use.
+    const inv = Object.keys(DATA.tables || {}).map((t) => {
+      const rows = DATA.tables[t] || [];
+      const cols = rows.length ? Object.keys(rows[0]) : [];
+      const nums = numericCols(rows);
+      return `- \`${t}\` — ${rows.length} row(s). Numeric: ${
+        nums.length ? nums.map((c) => "`" + c + "`").join(", ") : "none"}${
+        cols.length > nums.length ? ". Other: " + cols.filter((c) => !nums.includes(c))
+          .map((c) => "`" + c + "`").join(", ") : ""}`;
+    });
+    const f = DATA.findings || [];
     return {
       intent: "unknown",
-      text: ["I could not map that to the data in this report. I can answer:", "",
-        "- **what happened** — the run's findings, ranked by severity",
-        "- **what failed / what's concerning**",
-        "- **rare or unusual patterns** — values ≥ 2 SD from the cohort",
-        "- **top / lowest N by a metric**",
-        "- **compare A vs B**",
-        "- **tell me about \\<sample\\>**",
-        "- **distribution of a metric**", "",
-        `Available tables: ${Object.keys(DATA.tables).map((t) => "`" + t + "`").join(", ") || "none"}.`].join("\n"),
+      text: [
+        "That does not match anything I can compute from this page. Here is exactly what I hold:",
+        "",
+        `**${f.length} finding(s)**${f.length ? " — ask _summarise this report_ or _what needs attention_" : ""}`,
+        "",
+        inv.length ? "**Tables:**" : "_No tables were registered by this report._",
+        ...inv,
+        "",
+        "I can rank (`top 5 by <column>`), compare (`compare A vs B`), describe a",
+        "distribution (`distribution of <column>`), find outliers (`any rare patterns`),",
+        "quote a finding by keyword, or plot (`plot <column> by <column>`).",
+        "",
+        "_For anything beyond this page — what a metric means, whether a value is",
+        "typical, what to do next — turn on online mode with the gear icon above._",
+      ].join("\n"),
       facts: [],
     };
   }
@@ -724,6 +792,18 @@
       // Shift the document instead of covering it. Without this the panel sits
       // on top of Quarto's right-hand TOC.
       document.body.classList.toggle("sxa-shifted", open);
+
+      // Plotly reads its container width once, at draw time, so a widget drawn
+      // while the panel was open keeps that narrower width forever -- and one
+      // drawn beforehand overflows when the panel opens. Ask every widget to
+      // re-measure after the CSS transition settles. Guarded: a report with no
+      // Plotly runtime simply has nothing to resize.
+      setTimeout(() => {
+        if (typeof window.Plotly === "undefined") return;
+        document.querySelectorAll(".plotly.html-widget").forEach((el) => {
+          try { window.Plotly.Plots.resize(el); } catch (_) {}
+        });
+      }, 260);
     };
     launch.onclick = () => setOpen(true);
 
@@ -822,7 +902,12 @@
         bits.push("", "Nothing flagged as a caution. Headline findings:");
         f.slice(0, 3).forEach((x) => bits.push(`- ${strip(x.title || "")}: ${strip(x.text || "").slice(0, 170)}`));
       }
-      bits.push("", "Ask me anything about these numbers, or say _plot \`<column>\` by \`<column>\`_ and I will draw it.");
+      bits.push("", `I compute from **${f.length} finding(s)** and **${nT} table(s)** on this page —`
+        + " ask _what do you know_ to see the columns, or _plot X by Y_ to draw one.");
+      if (!(cloudCfg() && cloudCfg().key)) {
+        bits.push("", "_I only know this page. For what a metric means, whether a value is"
+          + " typical, or what to do next, click the gear above to connect a model._");
+      }
       return bits.join("\n");
     };
     say("bot", md(openingSummary()));

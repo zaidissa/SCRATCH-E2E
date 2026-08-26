@@ -77,8 +77,34 @@
    Docked at position:fixed it sat on top of Quarto's right-hand table of
    contents. Padding the body compresses the page grid, so the TOC moves left
    instead of disappearing under the panel. */
-body.sxa-shifted{padding-right:min(420px,92vw);transition:padding-right .22s ease}
-@media (max-width:640px){ body.sxa-shifted{padding-right:0} }
+/* Reclaim the space when the panel closes.
+   Padding the body alone was not enough: Quarto centres a FIXED-width grid, so
+   removing the padding just re-centred the same narrow column. The report is now
+   page-layout:full, and the panel narrows the grid itself -- so closing it gives
+   the width back to the figures instead of to the margins. */
+:root{ --sxa-w: min(420px, 92vw); }
+
+body.sxa-shifted{
+  padding-right: var(--sxa-w);
+  transition: padding-right .22s ease;
+}
+/* Quarto recomputes its column widths from these custom properties, so the
+   figures actually reflow rather than being clipped. */
+body.sxa-shifted .page-columns,
+body.sxa-shifted .quarto-container{
+  --grid-body-width: calc(1500px - var(--sxa-w));
+  max-width: calc(100vw - var(--sxa-w));
+  transition: max-width .22s ease;
+}
+/* Plotly widgets size themselves once at draw time; without this they keep the
+   width they were born with and overflow the narrowed column. */
+body.sxa-shifted .plotly.html-widget{ max-width:100% !important; }
+
+@media (max-width:640px){
+  body.sxa-shifted{ padding-right:0 }
+  body.sxa-shifted .page-columns,
+  body.sxa-shifted .quarto-container{ max-width:100vw }
+}
 
 .sxa-launch{position:fixed;right:18px;bottom:18px;z-index:10000;
   display:flex;align-items:center;gap:9px;padding:11px 17px;border:0;cursor:pointer;

@@ -928,3 +928,404 @@ scratch_feature_selector <- function(object, features, reduction = "umap",
         pad = list(r = 4, t = 4), buttons = btns))),
     displaylogo = FALSE, responsive = TRUE)
 }
+
+# =============================================================================
+# Publication figure grammar
+# =============================================================================
+#
+# Patterns taken from what journal figures actually do, and which the reports
+# were missing. Three things separate a professional panel from a default
+# ggplot, and none of them is styling:
+#
+#   1. SHOW THE DATA. A violin without its points hides n, and hides whether a
+#      distribution is bimodal or zero-inflated. Reference figures overlay the
+#      observations.
+#   2. LABEL DIRECTLY. A volcano with a legend makes the reader look things up;
+#      a volcano with gene names on the points does not.
+#   3. PUT THE STATISTIC IN THE PANEL. "r = 0.46, P = 0.03" inside the plotting
+#      area, not in prose somewhere below it.
+
+#' Violin + jittered points + median crossbar.
+#'
+#' The default violin collapses to a hairline when the data are zero-inflated,
+#' which is exactly what happened to the CNV burden panel: 11 groups rendered as
+#' 11 dashes because most cells sit at zero. Points make that visible rather than
+#' invisible, and the count annotation states n instead of implying it.
+scratch_violin_jitter <- function(df, x, y, fill = NULL, max_points = 3000,
+                                  log_y = FALSE, show_n = TRUE, ...) {
+  stopifnot(is.data.frame(df))
+  df <- as.data.frame(df)
+  fill <- fill %||% x
+  df <- df[is.finite(df[[y]]), , drop = FALSE]
+  if (!nrow(df)) return(NULL)
+
+  # Subsample only the points; the violin still uses every observation, so the
+  # shape never changes with the plotting budget.
+  pts <- if (nrow(df) > max_points) df[sample.int(nrow(df), max_points), , drop = FALSE] else df
+
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = .data[[x]], y = .data[[y]])) +
+    ggplot2::geom_violin(ggplot2::aes(fill = .data[[fill]]),
+                         scale = "width", colour = NA, alpha = .55, width = .9) +
+    ggplot2::geom_jitter(data = pts, width = .18, height = 0, size = .35,
+                         alpha = .35, colour = "grey20") +
+    ggplot2::stat_summary(fun = stats::median, geom = "crossbar",
+                          width = .55, linewidth = .45, colour = "grey12") +
+    scale_fill_scratch(guide = "none") +
+    theme_scratch()
+
+  if (log_y) p <- p + ggplot2::scale_y_log10(labels = scales::label_log())
+
+  if (show_n) {
+    n_df <- as.data.frame(table(df[[x]]))
+    names(n_df) <- c(x, "n")
+    n_df <- n_df[n_df$n > 0, , drop = FALSE]
+    ymax <- max(df[[y]], na.rm = TRUE)
+    p <- p + ggplot2::geom_text(
+      data = n_df, inherit.aes = FALSE,
+      ggplot2::aes(x = .data[[x]], y = ymax, label = paste0("n=", format(n, big.mark = ","))),
+      vjust = -0.4, size = 2.7, colour = "grey35") +
+      ggplot2::coord_cartesian(clip = "off") +
+      ggplot2::scale_y_continuous(expand = ggplot2::expansion(mult = c(.03, .14)))
+  }
+  p
+}
+
+#' Volcano plot with direction colouring and direct gene labels.
+#'
+#' Five notebooks in this pipeline compute differential expression and not one
+#' of them draws a volcano. This is the canonical view: effect on x, evidence on
+#' y, colour by direction, threshold lines drawn, and the extreme genes named on
+#' the points so the reader is not decoding a legend.
+#' @param highlight optional character vector of genes to call out as their own
+#'   category. Both reference figures do this -- the Cancer Discovery volcano
+#'   separates interferon-response genes from other upregulated genes, which
+#'   turns a generic volcano into a statement about a specific programme.
+#' @param direction_labels two-element vector annotated as arrows at the top,
+#'   e.g. c("low ITMB", "high ITMB"). Reference figures label the CONTRAST, not
+#'   just the axis, so the reader never has to work out which side is which.
+scratch_volcano <- function(df, lfc = "avg_log2FC", p = "p_val_adj", label = NULL,
+                            lfc_cut = 0.25, p_cut = 0.05, n_label = 20,
+                            up_name = "up", down_name = "down",
+                            highlight = NULL, highlight_name = "highlighted",
+                            direction_labels = NULL) {
+  df <- as.data.frame(df)
+  df <- df[is.finite(df[[lfc]]) & !is.na(df[[p]]), , drop = FALSE]
+  if (!nrow(df)) return(NULL)
+
+  # A p-value of exactly 0 is -log10 = Inf and drops the point. Floor it at the
+  # smallest representable double instead of silently losing the best hits.
+  # A volcano of one-sided data is a misleading picture: an empty half implies
+  # nothing moved that way, when in fact it was filtered out upstream. Seurat's
+  # FindAllMarkers(only.pos = TRUE) and any `lfc > cut` filter both produce this.
+  # Refuse to draw it silently -- return the diagnosis so the caller can report
+  # the truth instead of rendering half a plot.
+  n_neg <- sum(df[[lfc]] < 0, na.rm = TRUE)
+  n_pos <- sum(df[[lfc]] > 0, na.rm = TRUE)
+  if (n_neg == 0 || n_pos == 0) {
+    # Render the DIAGNOSIS, not a half-empty volcano and not nothing. Returning
+    # NULL would leave a silent gap in the report; returning a misleading plot is
+    # worse. A panel that explains itself is the only option that cannot be
+    # misread.
+    msg <- sprintf(paste0("Volcano not drawn: this table is one-sided\n",
+                          "(%s up, %s down).\n\n",
+                          "The source was filtered to a single direction, so the\n",
+                          "empty half would imply nothing moved that way.\n",
+                          "Use scratch_marker_panel() for ranked one-sided data."),
+                   format(n_pos, big.mark = ","), format(n_neg, big.mark = ","))
+    return(
+      ggplot2::ggplot() +
+        ggplot2::annotate("text", x = 0, y = 0, label = msg, size = 3.4,
+                          colour = "grey25", lineheight = 1.25) +
+        ggplot2::xlim(-1, 1) + ggplot2::ylim(-1, 1) +
+        theme_scratch() +
+        ggplot2::theme(axis.text = ggplot2::element_blank(),
+                       axis.title = ggplot2::element_blank(),
+                       panel.grid = ggplot2::element_blank())
+    )
+  }
+
+  df$.y <- -log10(pmax(df[[p]], .Machine$double.xmin))
+  df$.dir <- ifelse(df[[p]] < p_cut & df[[lfc]] >=  lfc_cut, up_name,
+             ifelse(df[[p]] < p_cut & df[[lfc]] <= -lfc_cut, down_name, "ns"))
+
+  # A highlighted gene keeps its direction but gets its own colour, so the panel
+  # answers "did THIS programme move" as well as "what moved".
+  hl <- character(0)
+  if (!is.null(highlight) && !is.null(label) && label %in% names(df)) {
+    hl <- intersect(toupper(highlight), toupper(df[[label]]))
+    is_hl <- toupper(df[[label]]) %in% hl & df$.dir != "ns"
+    df$.dir[is_hl] <- highlight_name
+  }
+  lev <- c(down_name, "ns", up_name)
+  if (length(hl)) lev <- c(lev, highlight_name)
+  df$.dir <- factor(df$.dir, levels = lev)
+
+  cols <- stats::setNames(c("#2c6fb0", "grey78", "#e79a9a"), c(down_name, "ns", up_name))
+  if (length(hl)) cols[highlight_name] <- "#b32020"
+  n_up <- sum(df$.dir %in% c(up_name, highlight_name)); n_dn <- sum(df$.dir == down_name)
+
+  p_obj <- ggplot2::ggplot(df, ggplot2::aes(x = .data[[lfc]], y = .data$.y, colour = .data$.dir)) +
+    ggplot2::geom_point(size = .8, alpha = .75) +
+    ggplot2::geom_vline(xintercept = c(-lfc_cut, lfc_cut), linetype = "dashed",
+                        colour = "grey45", linewidth = .3) +
+    ggplot2::geom_hline(yintercept = -log10(p_cut), linetype = "dashed",
+                        colour = "grey45", linewidth = .3) +
+    ggplot2::scale_colour_manual(values = cols, name = NULL) +
+    ggplot2::labs(x = expression(log[2]~fold~change), y = expression(-log[10]~adjusted~P)) +
+    theme_scratch()
+
+  # Direct labels on the most extreme genes in each direction.
+  # `.have()` lives in scratch_report.R, which may not be loaded; use the base
+  # check directly so this file stands alone.
+  if (!is.null(label) && label %in% names(df) &&
+      requireNamespace("ggrepel", quietly = TRUE)) {
+    top <- do.call(rbind, lapply(c(up_name, down_name), function(dd) {
+      s <- df[df$.dir == dd, , drop = FALSE]
+      if (!nrow(s)) return(NULL)
+      s <- s[order(-s$.y * abs(s[[lfc]])), , drop = FALSE]
+      utils::head(s, ceiling(n_label / 2))
+    }))
+    # Prefer the highlighted genes for labelling when a set was supplied.
+    if (length(hl)) {
+      hset <- df[df$.dir == highlight_name, , drop = FALSE]
+      if (nrow(hset)) {
+        hset <- hset[order(-hset$.y * abs(hset[[lfc]])), , drop = FALSE]
+        top <- rbind(utils::head(hset, n_label), top)
+        top <- top[!duplicated(top[[label]]), , drop = FALSE]
+        top <- utils::head(top, n_label)
+      }
+    }
+    if (!is.null(top) && nrow(top)) {
+      # Boxed labels, as in both reference figures: a white fill keeps the name
+      # readable where points are dense, which is exactly where the interesting
+      # genes are.
+      p_obj <- p_obj + ggrepel::geom_label_repel(
+        data = top, ggplot2::aes(label = .data[[label]], colour = .data$.dir),
+        size = 2.5, max.overlaps = 30, min.segment.length = 0,
+        label.padding = grid::unit(0.12, "lines"), label.size = 0.25,
+        fill = "white", fontface = "italic",
+        segment.size = .2, segment.colour = "grey55", show.legend = FALSE)
+    }
+  }
+
+  # Name the contrast with arrows, so which side means what needs no caption.
+  if (!is.null(direction_labels) && length(direction_labels) == 2) {
+    rng <- range(df[[lfc]], na.rm = TRUE); ytop <- max(df$.y, na.rm = TRUE)
+    p_obj <- p_obj +
+      ggplot2::annotate("segment", x = rng[1] * .85, xend = rng[1],
+                        y = ytop * 1.12, yend = ytop * 1.12,
+                        arrow = grid::arrow(length = grid::unit(.16, "cm")),
+                        colour = "#2c6fb0", linewidth = .5) +
+      ggplot2::annotate("text", x = rng[1] * .8, y = ytop * 1.12,
+                        label = direction_labels[1], hjust = 0, size = 3,
+                        colour = "#2c6fb0") +
+      ggplot2::annotate("segment", x = rng[2] * .85, xend = rng[2],
+                        y = ytop * 1.12, yend = ytop * 1.12,
+                        arrow = grid::arrow(length = grid::unit(.16, "cm")),
+                        colour = "#b32020", linewidth = .5) +
+      ggplot2::annotate("text", x = rng[2] * .8, y = ytop * 1.12,
+                        label = direction_labels[2], hjust = 1, size = 3,
+                        colour = "#b32020")
+  }
+
+  # Counts stated in the panel, so "how many changed" needs no second look.
+  p_obj +
+    ggplot2::annotate("text", x = Inf, y = Inf, hjust = 1.05, vjust = 1.4,
+                      label = sprintf("%s up", format(n_up, big.mark = ",")),
+                      colour = cols[[up_name]], size = 3.1, fontface = "bold") +
+    ggplot2::annotate("text", x = -Inf, y = Inf, hjust = -0.05, vjust = 1.4,
+                      label = sprintf("%s down", format(n_dn, big.mark = ",")),
+                      colour = cols[[down_name]], size = 3.1, fontface = "bold") +
+    ggplot2::coord_cartesian(clip = "off")
+}
+
+#' Enrichment dot plot: size = gene count, colour = adjusted P.
+#'
+#' The standard GO/pathway display. Two visual channels carry two quantities, so
+#' a reader sees both how big a term is and how strong its evidence is without
+#' cross-referencing a table.
+scratch_enrich_dot <- function(df, term = "term", ratio = "gene_ratio",
+                               count = "count", padj = "p_adjust", n_top = 15) {
+  df <- as.data.frame(df)
+  df <- df[is.finite(df[[ratio]]) & !is.na(df[[padj]]), , drop = FALSE]
+  if (!nrow(df)) return(NULL)
+  df <- df[order(df[[padj]]), , drop = FALSE]
+  df <- utils::head(df, n_top)
+  # Ordered by the quantity on the x axis, so the eye reads top-to-bottom.
+  df[[term]] <- factor(df[[term]], levels = df[[term]][order(df[[ratio]])])
+
+  ggplot2::ggplot(df, ggplot2::aes(x = .data[[ratio]], y = .data[[term]])) +
+    ggplot2::geom_point(ggplot2::aes(size = .data[[count]], colour = .data[[padj]])) +
+    ggplot2::scale_colour_gradient(low = "#b32020", high = "#4a7fb5",
+                                   name = "adj P", trans = "log10") +
+    ggplot2::scale_size_continuous(name = "count", range = c(2, 7)) +
+    ggplot2::labs(x = "gene ratio", y = NULL) +
+    theme_scratch() +
+    ggplot2::theme(panel.grid.major.y = ggplot2::element_line(colour = "grey92", linewidth = .3))
+}
+
+#' Put a statistic inside the plotting area, journal style.
+scratch_stat_label <- function(p, text, corner = c("topright", "topleft",
+                                                   "bottomright", "bottomleft")) {
+  corner <- match.arg(corner)
+  pos <- switch(corner,
+    topright    = list(x =  Inf, y =  Inf, h =  1.1, v =  1.5),
+    topleft     = list(x = -Inf, y =  Inf, h = -0.1, v =  1.5),
+    bottomright = list(x =  Inf, y = -Inf, h =  1.1, v = -0.7),
+    bottomleft  = list(x = -Inf, y = -Inf, h = -0.1, v = -0.7))
+  p + ggplot2::annotate("text", x = pos$x, y = pos$y, hjust = pos$h, vjust = pos$v,
+                        label = text, size = 3.1, colour = "grey20") +
+    ggplot2::coord_cartesian(clip = "off")
+}
+
+#' Heatmap with categorical annotation bars, as in a journal figure.
+#'
+#' The reference figures never show a bare heatmap: there is always a coloured
+#' sidebar naming what each row or column IS (method, patient, GO group), so the
+#' block structure can be read without cross-referencing an axis of 50 rotated
+#' labels. Our heatmaps had the matrix and nothing else.
+#'
+#' Built with patchwork rather than ComplexHeatmap deliberately: it stays a
+#' ggplot, so it keeps the house theme, the interactive shim and the PDF export
+#' that every other figure here gets.
+#'
+#' @param df long-form: one row per cell of the matrix.
+#' @param col_anno,row_anno optional data frames keyed by the x / y column,
+#'   each remaining column drawn as one annotation stripe.
+scratch_heatmap_annotated <- function(df, x, y, fill,
+                                      col_anno = NULL, row_anno = NULL,
+                                      fill_name = fill, diverging = FALSE,
+                                      title = NULL, subtitle = NULL) {
+  df <- as.data.frame(df)
+  if (!nrow(df)) return(NULL)
+
+  hm <- ggplot2::ggplot(df, ggplot2::aes(x = .data[[x]], y = .data[[y]], fill = .data[[fill]])) +
+    ggplot2::geom_tile(colour = "white", linewidth = .3) +
+    theme_scratch() +
+    ggplot2::theme(panel.grid = ggplot2::element_blank(),
+                   axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
+    ggplot2::labs(x = NULL, y = NULL, title = title, subtitle = subtitle)
+
+  hm <- hm + if (diverging) {
+    ggplot2::scale_fill_gradient2(low = "#2c6fb0", mid = "#f7f7f7", high = "#b32020",
+                                  midpoint = 0, name = fill_name)
+  } else {
+    ggplot2::scale_fill_gradient(low = "#f2f6fa", high = "#1f4e79", name = fill_name)
+  }
+
+  if (!requireNamespace("patchwork", quietly = TRUE) ||
+      (is.null(col_anno) && is.null(row_anno))) return(hm)
+
+  # One thin stripe per annotation column, sharing the heatmap's axis so the
+  # categories line up with the matrix.
+  strip <- function(anno, key, horizontal) {
+    anno <- as.data.frame(anno)
+    vars <- setdiff(names(anno), key)
+    if (!length(vars)) return(NULL)
+    long <- do.call(rbind, lapply(vars, function(v)
+      data.frame(k = anno[[key]], var = v, val = as.character(anno[[v]]),
+                 stringsAsFactors = FALSE)))
+    g <- ggplot2::ggplot(long, ggplot2::aes(fill = val)) +
+      scale_fill_scratch(name = NULL) +
+      theme_scratch(base_size = 9) +
+      ggplot2::theme(panel.grid = ggplot2::element_blank(),
+                     axis.title = ggplot2::element_blank(),
+                     axis.ticks = ggplot2::element_blank(),
+                     legend.position = "bottom", legend.box = "vertical")
+    if (horizontal) {
+      g + ggplot2::geom_tile(ggplot2::aes(x = k, y = var), colour = "white", linewidth = .3) +
+        ggplot2::theme(axis.text.x = ggplot2::element_blank())
+    } else {
+      g + ggplot2::geom_tile(ggplot2::aes(x = var, y = k), colour = "white", linewidth = .3) +
+        ggplot2::theme(axis.text.y = ggplot2::element_blank())
+    }
+  }
+
+  top  <- if (!is.null(col_anno)) strip(col_anno, x, TRUE)  else NULL
+  side <- if (!is.null(row_anno)) strip(row_anno, y, FALSE) else NULL
+
+  out <- hm
+  if (!is.null(side)) out <- side + out + patchwork::plot_layout(widths = c(1, 14))
+  if (!is.null(top))  out <- top / out + patchwork::plot_layout(heights = c(1, 10))
+  out
+}
+
+#' Bubble plot: colour is one quantity, size is another.
+#'
+#' The single most common panel in the reference figures -- both use it, for
+#' ligand-receptor pairs (colour = mean expression, size = significance) and for
+#' pathway enrichment. Generalised here because a dot plot restricted to
+#' enrichment could not serve the cell-communication reports.
+scratch_bubble <- function(df, x, y, size, colour,
+                           size_name = size, colour_name = colour,
+                           diverging = FALSE, size_range = c(1.5, 8)) {
+  df <- as.data.frame(df)
+  df <- df[is.finite(df[[size]]) & is.finite(df[[colour]]), , drop = FALSE]
+  if (!nrow(df)) return(NULL)
+
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = .data[[x]], y = .data[[y]])) +
+    ggplot2::geom_point(ggplot2::aes(size = .data[[size]], colour = .data[[colour]])) +
+    ggplot2::scale_size_continuous(name = size_name, range = size_range) +
+    ggplot2::labs(x = NULL, y = NULL) +
+    theme_scratch() +
+    ggplot2::theme(panel.grid.major = ggplot2::element_line(colour = "grey93", linewidth = .3),
+                   axis.text.x = ggplot2::element_text(angle = 40, hjust = 1))
+
+  p + if (diverging) {
+    ggplot2::scale_colour_gradient2(low = "#2c6fb0", mid = "#f7f7f7", high = "#b32020",
+                                    midpoint = 0, name = colour_name)
+  } else {
+    ggplot2::scale_colour_gradient(low = "#4a7fb5", high = "#b32020", name = colour_name)
+  }
+}
+
+
+#' Ranked marker panel: the honest figure for one-sided data.
+#'
+#' Seurat's FindAllMarkers(only.pos = TRUE) returns markers, not a two-sided
+#' contrast -- there is no "down" to show, so a volcano is the wrong instrument.
+#' This is the standard alternative: top genes per group, effect size on x,
+#' evidence as colour, detection rate as size.
+scratch_marker_panel <- function(df, group = "cluster", gene = "gene",
+                                 lfc = "avg_log2FC", p = "p_val_adj",
+                                 pct = NULL, n_top = 8, n_groups = 12) {
+  df <- as.data.frame(df)
+  df <- df[is.finite(df[[lfc]]) & !is.na(df[[p]]), , drop = FALSE]
+  if (!nrow(df)) return(NULL)
+
+  keep <- names(sort(table(df[[group]]), decreasing = TRUE))[seq_len(min(n_groups,
+              length(unique(df[[group]]))))]
+  df <- df[df[[group]] %in% keep, , drop = FALSE]
+
+  top <- do.call(rbind, lapply(split(df, df[[group]]), function(s) {
+    s <- s[order(-s[[lfc]]), , drop = FALSE]
+    utils::head(s, n_top)
+  }))
+  if (is.null(top) || !nrow(top)) return(NULL)
+
+  # Unique y label per group so the same gene can head two clusters without the
+  # rows collapsing onto each other.
+  top$.lab <- paste0(top[[gene]], "  (", top[[group]], ")")
+  top <- top[order(top[[group]], top[[lfc]]), , drop = FALSE]
+  top$.lab <- factor(top$.lab, levels = unique(top$.lab))
+  top$.nlp <- -log10(pmax(top[[p]], .Machine$double.xmin))
+
+  aes_args <- list(x = ggplot2::sym(lfc), y = ggplot2::sym(".lab"),
+                   colour = ggplot2::sym(".nlp"))
+  if (!is.null(pct) && pct %in% names(top)) aes_args$size <- ggplot2::sym(pct)
+
+  p_obj <- ggplot2::ggplot(top, do.call(ggplot2::aes, aes_args)) +
+    ggplot2::geom_segment(ggplot2::aes(x = 0, xend = .data[[lfc]], yend = .data$.lab),
+                          colour = "grey85", linewidth = .5) +
+    ggplot2::geom_point() +
+    ggplot2::scale_colour_gradient(low = "#9ecae1", high = "#b32020",
+                                   name = expression(-log[10]~adj~P)) +
+    ggplot2::facet_wrap(~ .data[[group]], scales = "free_y", ncol = 3) +
+    ggplot2::labs(x = expression(log[2]~fold~change), y = NULL) +
+    theme_scratch() +
+    ggplot2::theme(panel.grid.major.y = ggplot2::element_line(colour = "grey94", linewidth = .3),
+                   strip.text = ggplot2::element_text(face = "bold"))
+  if (!is.null(pct) && pct %in% names(top))
+    p_obj <- p_obj + ggplot2::scale_size_continuous(name = "pct expressing", range = c(1.5, 5))
+  p_obj
+}

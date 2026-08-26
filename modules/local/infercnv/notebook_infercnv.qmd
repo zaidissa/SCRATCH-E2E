@@ -431,21 +431,38 @@ if (!is.na(.col_ct) && "genomwide_cnv_proportion" %in% names(.md)) {
   d <- .md[, .(celltype = as.character(get(.col_ct)),
                burden = as.numeric(genomwide_cnv_proportion))][!is.na(burden)]
   ord <- d[, .(m = median(burden, na.rm = TRUE), n = .N), by = celltype][order(-m)]
-  d[, celltype := factor(celltype, levels = ord$celltype)]
-  d <- merge(d, ord[, .(celltype, n)], by = "celltype")
 
-  ggplot(d, aes(x = celltype, y = burden, fill = celltype,
-                text = sprintf("%s\nn = %s cells\nmedian burden = %.3f",
-                               celltype, format(n, big.mark = ","),
-                               median(burden, na.rm = TRUE)))) +
-    geom_violin(scale = "width", colour = NA, alpha = .85) +
-    geom_boxplot(width = .14, outlier.shape = NA, fill = "white", colour = "grey30") +
-    scale_fill_scratch(guide = "none") +
+  # Order AFTER every join. data.table's merge() on a factor key returns a
+  # CHARACTER column with the levels dropped, so setting the order first and
+  # merging afterwards silently reverted this panel to alphabetical while the
+  # subtitle still claimed it was ranked by median.
+  d[, celltype := factor(celltype, levels = ord$celltype)]
+
+  # A lollipop, not a violin. inferCNV was run with cluster_by_groups = TRUE, so
+  # it estimates copy number PER GROUP and add_to_seurat() writes that single
+  # value onto every cell in the group -- 9 distinct values across 24,415 cells
+  # on this data, sd = 0 within every population. A violin or boxplot of it is
+  # not merely ugly, it is a lie about the resolution: there is no distribution
+  # to draw. One mark per group is the honest encoding.
+  ord[, celltype := factor(celltype, levels = rev(ord$celltype))]
+  ord[, is_ref := grepl("T cell|B cell|NK|Macrophage|Fibroblast|Endothel|Dendritic|Mast|pDC|Plasma",
+                        celltype, ignore.case = TRUE)]
+
+  ggplot(ord, aes(x = m, y = celltype,
+                  text = sprintf("%s\n%s cells\nCNV proportion %.3f",
+                                 celltype, format(n, big.mark = ","), m))) +
+    geom_segment(aes(x = 0, xend = m, yend = celltype), colour = "grey80", linewidth = .8) +
+    geom_point(aes(size = n, colour = is_ref)) +
+    scale_colour_manual(values = c(`TRUE` = "#4a7fb5", `FALSE` = "#b32020"),
+                        labels = c(`TRUE` = "reference lineage", `FALSE` = "tumour candidate"),
+                        name = NULL) +
+    scale_size_continuous(name = "cells", range = c(2.5, 8), labels = scales::comma) +
+    scale_x_continuous(expand = expansion(mult = c(0, .12))) +
     labs(title = "Genome-wide CNV burden by cell type",
-         subtitle = "Ordered by median. Malignant populations should separate from the reference lineages.",
-         x = NULL, y = "genome-wide CNV proportion (log1p)") +
+         subtitle = "One value per group: inferCNV ran per group, so every cell in a population shares its score",
+         x = "genome-wide CNV proportion (log1p)", y = NULL) +
     theme_scratch() +
-    theme(axis.text.x = element_text(angle = 35, hjust = 1))
+    theme(panel.grid.major.y = element_line(colour = "grey93", linewidth = .3))
 }
 ```
 
@@ -479,6 +496,23 @@ if (!is.na(.col_ct) && "genomwide_cnv_proportion" %in% names(.md)) {
               worst_ref$ct, ratio) else ""),
     type = if (!is.null(worst_ref) && !is.na(ratio) && ratio > 3) "caution" else "note",
     title = "CNV burden by population")
+
+  # Resolution matters more than the ranking. A reader seeing a per-cell column
+  # reasonably assumes a per-cell measurement.
+  n_uniq <- uniqueN(d$b); n_cells <- nrow(d)
+  if (n_uniq <= 2 * uniqueN(d$ct)) {
+    scratch_finding(sprintf(paste(
+      "This score has **no per-cell resolution**: %d distinct values across %s cells",
+      "(%d population groups). inferCNV was run with `cluster_by_groups = TRUE`, so",
+      "it estimates copy number per GROUP and every cell in a group is assigned the",
+      "same value. Consequences worth carrying forward: a per-cell threshold on this",
+      "score can only ever split whole populations, it cannot identify malignant",
+      "cells *within* a population, and any figure implying a within-group",
+      "distribution is misleading. An allele-aware caller such as Numbat is",
+      "genuinely per cell — which is why it, not this, drives the compartment split."),
+      n_uniq, format(n_cells, big.mark = ","), uniqueN(d$ct)),
+      type = "caution", title = "inferCNV burden is per group, not per cell")
+  }
 }
 ```
 
