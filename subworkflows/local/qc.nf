@@ -59,12 +59,19 @@ workflow QC {
             .map { sample, files ->
                 [ sample,
                   files.find { it.toString().endsWith('metrics_summary.csv') },
-                  files.find { it.toString().endsWith('filtered_feature_bc_matrix.h5') } ]
+                  files.find { it.toString().endsWith('filtered_feature_bc_matrix.h5') },
+                  // The RAW matrix is carried alongside because CellBender needs
+                  // it. Ambient RNA is ESTIMATED FROM THE EMPTY DROPLETS, which
+                  // exist only here — the filtered matrix is, by definition, the
+                  // barcodes cellranger already called as cells. Handing
+                  // CellBender the filtered matrix asks it to infer a background
+                  // profile from data with the background removed.
+                  files.find { it.toString().endsWith('raw_feature_bc_matrix.h5') } ]
             }
 
         ch_grouped
-            .filter { sample, csv, h5 -> csv == null || h5 == null }
-            .subscribe { sample, csv, h5 ->
+            .filter { sample, csv, h5, raw -> csv == null || h5 == null }
+            .subscribe { sample, csv, h5, raw ->
                 def missing = []
                 if (csv == null) missing << 'metrics_summary.csv'
                 if (h5  == null) missing << 'filtered_feature_bc_matrix.h5'
@@ -72,7 +79,7 @@ workflow QC {
                          "(a VDJ or incomplete cellranger run will look like this)"
             }
 
-        ch_cell_matrices = ch_grouped.filter { sample, csv, h5 -> csv != null && h5 != null }
+        ch_cell_matrices = ch_grouped.filter { sample, csv, h5, raw -> csv != null && h5 != null }
 
         ch_cell_matrices
             .ifEmpty {
@@ -83,7 +90,29 @@ workflow QC {
             }
 
         if (!params.skip_cellbender) {
-            ch_cell_matrices = CELLBENDER(ch_cell_matrices)
+
+            // Fail loudly on a missing raw matrix rather than silently denoising
+            // the filtered one. A cellranger `outs` directory always contains
+            // raw_feature_bc_matrix.h5; its absence means the input glob is too
+            // narrow (a common one, `*/outs/filtered*`, excludes it) or the
+            // directory was pruned to save space.
+            ch_cb_input = ch_cell_matrices
+                .map { sample, csv, filtered, raw ->
+                    if (raw == null)
+                        error "CellBender is enabled but '${sample}' has no " +
+                              "raw_feature_bc_matrix.h5.\n" +
+                              "  CellBender learns the ambient profile from EMPTY droplets, " +
+                              "which exist only in the raw matrix.\n" +
+                              "  Widen --input_gex_matrices_path (e.g. '<path>/*/outs/*'), " +
+                              "or set --skip_cellbender true to leave ambient RNA uncorrected."
+                    tuple(sample, csv, raw)
+                }
+
+            ch_cell_matrices = CELLBENDER(ch_cb_input).corrected
+
+        } else {
+            ch_cell_matrices = ch_cell_matrices
+                .map { sample, csv, filtered, raw -> tuple(sample, csv, filtered) }
         }
 
         SEURAT_QUALITY(ch_cell_matrices, ch_notebook_quality.collect(), ch_page_config)

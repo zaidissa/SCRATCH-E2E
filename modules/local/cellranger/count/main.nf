@@ -45,9 +45,13 @@ process CELLRANGER_COUNT {
             touch ${sample}/outs/filtered_feature_bc_matrix/matrix.mtx.gz
             touch ${sample}/outs/metrics_summary.csv
 
-            # The QC stage keys off these two filenames specifically; the stub
-            # must produce them or the downstream grouping yields nulls.
+            # The QC stage keys off these filenames specifically; the stub must
+            # produce them or the downstream grouping yields nulls. The RAW
+            # matrix belongs here too — real cellranger always writes it, and
+            # CellBender consumes it rather than the filtered one. Omitting it
+            # made -stub silently exercise the skip_cellbender branch only.
             touch ${sample}/outs/filtered_feature_bc_matrix.h5
+            touch ${sample}/outs/raw_feature_bc_matrix.h5
             touch ${sample}/outs/possorted_genome_bam.bam
 
             cat <<-END_VERSIONS > versions.yml
