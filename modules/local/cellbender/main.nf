@@ -35,6 +35,11 @@ process CELLBENDER {
         path("cellbender_${sample_id}_matrix.h5")                     , emit: full
         path("cellbender_${sample_id}_matrix_cell_barcodes.csv")      , emit: cell_barcodes, optional: true
         path("cellbender_${sample_id}_matrix.pdf")                    , emit: report, optional: true
+        // CellBender's own diagnostics: the HTML report carries the learned
+        // ambient profile and the cell-probability curve, which is the evidence
+        // for whether the correction worked at all.
+        path("cellbender_${sample_id}_matrix_report.html")            , emit: html_report, optional: true
+        path("cellbender_${sample_id}_matrix_metrics.csv")            , emit: metrics, optional: true
         path("cellbender_${sample_id}_params.json")                   , emit: params_used
 
     when:
@@ -123,6 +128,8 @@ PYEOF
         touch cellbender_${sample_id}_matrix_filtered.h5
         touch cellbender_${sample_id}_matrix_cell_barcodes.csv
         touch cellbender_${sample_id}_matrix.pdf
+        touch cellbender_${sample_id}_matrix_report.html
+        touch cellbender_${sample_id}_matrix_metrics.csv
         echo '{"sample":"${sample_id}","expected_cells":0,"total_droplets_included":0}' \\
             > cellbender_${sample_id}_params.json
         """
