@@ -25,6 +25,7 @@
 */
 
 include { CELLBENDER       } from '../../modules/local/cellbender/main.nf'
+include { CELLBENDER_TO_CELLRANGER } from '../../modules/local/cellbender/to_cellranger.nf'
 include { SEURAT_QUALITY   } from '../../modules/local/seurat/quality/main.nf'
 include { HELPER_SUMMARIZE } from '../../modules/local/helper/summarize/main.nf'
 include { SEURAT_MERGE     } from '../../modules/local/seurat/merge/main.nf'
@@ -108,7 +109,9 @@ workflow QC {
                     tuple(sample, csv, raw)
                 }
 
-            ch_cell_matrices = CELLBENDER(ch_cb_input).corrected
+            // CellBender's own h5 carries extra root groups that Read10X_h5
+            // cannot parse; reformat before handing it to the QC notebook.
+            ch_cell_matrices = CELLBENDER_TO_CELLRANGER(CELLBENDER(ch_cb_input).corrected).corrected
 
         } else {
             ch_cell_matrices = ch_cell_matrices
