@@ -68,7 +68,22 @@ workflow CNV {
         if (run_numbat) {
             NUMBAT(ch_seurat_object, ch_bam)
             ch_numbat = NUMBAT.out.calls
-            ch_numbat_segments = NUMBAT.out.segments
+
+            // Stage the per-sample DIRECTORY, not the segment files themselves.
+            //
+            // Numbat names its consensus files segs_consensus_<iteration>.tsv and
+            // distinguishes samples only by the enclosing directory, so collecting
+            // the files flattens two different samples onto one basename and the
+            // task dies with "input file name collision". That stayed hidden until
+            // now because only HRS371755 ever produced segments — HRS371760 is
+            // tumour-poor and Numbat correctly returned nothing for it. With
+            // ambient RNA removed it produces 24, and the collision appeared.
+            //
+            // The notebook already expects this layout: it recovers the sample with
+            // `sub("^.*/([^/]+)/segs_consensus_.*$", ...)`, i.e. from the parent
+            // directory, which a flattened stage had also silently broken.
+            // Directories stage as symlinks, so the 3.4 GB behind them costs nothing.
+            ch_numbat_segments = NUMBAT.out.segments.flatten().map { it.parent }.unique()
         }
 
         if (!params.skip_copykat) {
