@@ -431,10 +431,47 @@ start.clus <- if (all(is.na(.med))) {
   NULL
 } else names(which.max(.med))
 
-sce <- if (is.null(start.clus)) {
-  slingshot(sce, clusterLabels = cl, reducedDim = "UMAP")
-} else {
-  slingshot(sce, clusterLabels = cl, reducedDim = "UMAP", start.clus = start.clus)
+# Slingshot's curve shrinkage has a length bug that surfaces on some topologies:
+# getCurves() approximates each curve to `approx_points` (default 150), but
+# .shrink_to_avg() can be handed one curve at full cell length, and vapply then
+# fails with
+#
+#   values must be length 150, but FUN(X[[1]]) result is length 20523
+#
+# It is a property of the lineage graph, not of the data being wrong, so a small
+# change in cell count can turn it on or off — here it appeared only after
+# ambient correction changed the compartment from 19,657 to 20,523 cells.
+#
+# Two escapes, tried in order of how little they cost:
+#   approx_points = FALSE   every curve keeps full length, so the lengths agree.
+#                           Slower and heavier, but the trajectory is unchanged.
+#   shrink = FALSE          skips .shrink_to_avg altogether. This DOES change the
+#                           result — lineages no longer share a common early
+#                           path — so it is a last resort and is reported.
+.sling <- function(...) if (is.null(start.clus))
+  slingshot(sce, clusterLabels = cl, reducedDim = "UMAP", ...) else
+  slingshot(sce, clusterLabels = cl, reducedDim = "UMAP", start.clus = start.clus, ...)
+
+slingshot_mode <- "default"
+sce <- tryCatch(.sling(), error = function(e1) {
+  message("Slingshot default failed (", conditionMessage(e1), "); retrying with approx_points = FALSE.")
+  slingshot_mode <<- "approx_points=FALSE"
+  tryCatch(.sling(approx_points = FALSE), error = function(e2) {
+    message("Slingshot failed again (", conditionMessage(e2), "); retrying with shrink = FALSE.")
+    slingshot_mode <<- "shrink=FALSE"
+    .sling(approx_points = FALSE, shrink = FALSE)
+  })
+})
+
+if (slingshot_mode != "default") {
+  scratch_finding(sprintf(paste(
+    "Slingshot did not converge under its default settings and was re-run with",
+    "**%s**. The first fallback only disables curve approximation and leaves the",
+    "trajectory unchanged; `shrink=FALSE` additionally stops lineages being pulled",
+    "toward a shared early path, so branch points sit where each curve puts them",
+    "rather than at a consensus. Read the branching structure with that in mind."),
+    slingshot_mode),
+    type = "caution", title = "Slingshot fallback")
 }
 
 # --- Figure-style panel with curves & origin ---
