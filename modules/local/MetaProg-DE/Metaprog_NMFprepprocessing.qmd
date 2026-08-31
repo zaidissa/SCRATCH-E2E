@@ -189,8 +189,46 @@ for (s in sample_ls) {
 # Save a small run log for debugging
 counts_df <- data.frame(sample = names(cell_counts), cells = as.integer(cell_counts))
 fwrite(counts_df, file.path(out_dir, "_sample_cell_counts.tsv"))
+
+# This gate decides which samples reach NMF at all, and a sample dropped here
+# silently disappears from every metaprogram result downstream - the programmes
+# are then derived from whatever survived, which is easy to mistake for a
+# cohort-wide answer. Reported in the two chunks below: scratch_finding() needs
+# results='asis' to become markup, scratch_table() returns a widget that an asis
+# chunk will not print.
+counts_df$passed <- counts_df$cells >= min_cells
+.mp_counts <- counts_df
 counts_df
 
+```
+
+```{r nmf-gate-finding, results = 'asis'}
+if (exists(".mp_counts") && exists("scratch_finding")) {
+  kept    <- .mp_counts[.mp_counts$passed, , drop = FALSE]
+  dropped <- .mp_counts[!.mp_counts$passed, , drop = FALSE]
+  scratch_finding(sprintf(paste(
+    "%d of %d samples carry at least `min_cells` = %d malignant cells and go on to",
+    "NMF (%s).%s"),
+    nrow(kept), nrow(.mp_counts), min_cells,
+    if (nrow(kept)) paste(sprintf("**%s** %s cells", kept$sample,
+                                  format(kept$cells, big.mark = ",")), collapse = "; ")
+    else "none",
+    if (nrow(dropped))
+      sprintf(paste(" **%s dropped below the gate (%s cells) and is absent from every",
+                    "metaprogram result downstream** - the programmes below therefore",
+                    "describe the remaining sample(s), not the cohort, and recurrence",
+                    "across samples cannot be assessed."),
+              paste(dropped$sample, collapse = ", "),
+              paste(format(dropped$cells, big.mark = ","), collapse = ", "))
+    else " No sample was dropped, so metaprogram recurrence is assessable across the cohort."),
+    type = if (nrow(dropped)) "caution" else "note",
+    title = "Samples reaching NMF")
+}
+```
+
+```{r nmf-gate-table}
+if (exists(".mp_counts") && exists("scratch_table"))
+  scratch_table(.mp_counts, caption = "Malignant cells per sample against the NMF gate")
 ```
 
 ``` {r PREPROCESS FOR NMF}

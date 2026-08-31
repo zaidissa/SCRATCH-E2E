@@ -214,11 +214,52 @@ if (length(mal_col) && !is.na(col_ct)) {
     print(save_fig(p, "cnv_by_celltype"))
 
     fwrite(comp, "data/cnv_by_celltype.csv")
+    # Handed to the chunks below. scratch_finding() emits a Quarto callout fence
+    # through cat(), which only becomes markup in a results='asis' chunk;
+    # scratch_table() RETURNS a widget, which an asis chunk will not print. So the
+    # finding and the table live in separate chunks, as in Run_NicheNet.qmd.
+    .cx_cnv_comp <- data.table::copy(comp)
     knitr::kable(dcast(comp, ct ~ call, value.var = "frac", fill = 0), digits = 3)
   } else note("CNV and cell-type columns present but share no cells.")
 } else {
   note("Needs the CNV and annotation stages; skipped.")
 }
+```
+
+```{r cnv-celltype-finding, results = 'asis'}
+if (exists(".cx_cnv_comp")) {
+  comp <- .cx_cnv_comp
+  # Re-run the check that caught the worst bug this stage has had. A
+  # non-epithelial lineage called predominantly malignant is the signature of a
+  # CNV cutoff set too low or a label vocabulary mismatch — that combination once
+  # called whole immune lineages aneuploid at frac 1.0, and it was invisible until
+  # someone read this table. Assert it instead.
+  mal_lab <- grep("^malig", as.character(unique(comp$call)), value = TRUE, ignore.case = TRUE)
+  if (length(mal_lab)) {
+    byct <- comp[call == mal_lab[1]][order(-frac)]
+    susp <- byct[frac > 0.5 &
+                 !grepl("epitheli|tumou?r|malignan|cancer|other", ct, ignore.case = TRUE)]
+    scratch_finding(sprintf("Malignant fraction by annotated cell type: %s.%s",
+      paste(sprintf("**%s** %.0f%%", head(byct$ct, 5), 100 * head(byct$frac, 5)), collapse = "; "),
+      if (nrow(susp))
+        sprintf(paste(" **%s exceed 50%% malignant without being an epithelial lineage.**",
+                      "That is the signature of a CNV cutoff set too low or a label",
+                      "vocabulary mismatch; check it before trusting the compartment split."),
+                paste(susp$ct, collapse = ", "))
+      else " No non-epithelial lineage exceeds 50% malignant, which is the expected pattern."),
+      type = if (nrow(susp)) "warning" else "note", title = "CNV call by cell type")
+
+    wide <- dcast(comp, ct ~ call, value.var = "frac", fill = 0)
+    num  <- names(wide)[vapply(wide, is.numeric, logical(1))]
+    wide[, (num) := lapply(.SD, round, 4), .SDcols = num]
+    .cx_cnv_wide <- wide
+  }
+}
+```
+
+```{r cnv-celltype-table}
+if (exists(".cx_cnv_wide"))
+  scratch_table(.cx_cnv_wide, caption = "Share of each annotated cell type by CNV call")
 ```
 
 ## Metaprograms vs the malignant compartment
@@ -352,9 +393,49 @@ if (!is.na(col_ct) && !is.na(col_cond) && uniqueN(cells[[col_cond]]) > 1) {
   print(save_fig(p, "composition_by_condition"))
 
   fwrite(comp, "data/composition_by_condition.csv")
+  .cx_comp_cond <- data.table::copy(comp)
 } else {
   note("Needs an annotation column and more than one condition; skipped.")
 }
+```
+
+```{r composition-finding, results = 'asis'}
+# Composition differences are the main confounder in every between-condition
+# contrast downstream: a population several-fold rarer in one arm makes a
+# differential test partly a measurement of abundance. Quantify the largest
+# shifts so the cell-communication and DE reports can be read against them.
+if (exists(".cx_comp_cond")) {
+  wide <- dcast(.cx_comp_cond, ct ~ cond, value.var = "frac", fill = 0)
+  cnds <- setdiff(names(wide), "ct")
+  if (length(cnds) == 2) {
+    # +1e-3 keeps a population absent from one arm from producing an infinite
+    # fold change; at these fractions it is below the reporting precision.
+    wide[, fold := (get(cnds[2]) + 1e-3) / (get(cnds[1]) + 1e-3)]
+    wide[, direction := ifelse(fold >= 1, cnds[2], cnds[1])]
+    wide[, fold_abs := pmax(fold, 1 / fold)]
+    setorder(wide, -fold_abs)
+    top <- head(wide, 3)
+    scratch_finding(sprintf(paste(
+      "Cell-type composition differs markedly between **%s** and **%s**: %s.",
+      "Composition this unbalanced confounds every between-condition contrast",
+      "downstream - a differential test on a population that is several-fold rarer",
+      "in one arm is measuring abundance as much as biology."),
+      cnds[1], cnds[2],
+      paste(sprintf("**%s** %.1f%% vs %.1f%% (%.1fx toward %s)", top$ct,
+                    100 * top[[cnds[1]]], 100 * top[[cnds[2]]],
+                    top$fold_abs, top$direction), collapse = "; ")),
+      type = if (max(wide$fold_abs) > 5) "caution" else "note",
+      title = "Composition by condition")
+    num <- names(wide)[vapply(wide, is.numeric, logical(1))]
+    wide[, (num) := lapply(.SD, round, 4), .SDcols = num]
+    .cx_comp_wide <- wide
+  }
+}
+```
+
+```{r composition-table}
+if (exists(".cx_comp_wide"))
+  scratch_table(.cx_comp_wide, caption = "Cell-type composition per condition, largest shift first")
 ```
 
 ## Ligand-receptor activity vs malignant fraction
@@ -389,11 +470,36 @@ if (length(lr_files) && length(mal_col)) {
       print(save_fig(p, "lr_interaction_load"))
 
       fwrite(top, "data/lr_interaction_load.csv")
+      .cx_lr_top <- data.table::copy(top)
     } else note("LIANA output present but sender/receiver columns were not recognised.")
   } else note("LIANA results file was empty.")
 } else {
   note("Needs the cell-communication and CNV stages; skipped.")
 }
+```
+
+```{r lr-finding, results = 'asis'}
+# Interaction COUNT is a function of how many cells a population has, so the
+# busiest sender is often just the most abundant one. Say so - the heatmap
+# invites reading it as signalling strength.
+if (exists(".cx_lr_top")) {
+  snd <- .cx_lr_top[, .(n = sum(N)), by = source][order(-n)]
+  rcv <- .cx_lr_top[, .(n = sum(N)), by = target][order(-n)]
+  scratch_finding(sprintf(paste(
+    "Across the top 200 sender-receiver pairs the heaviest senders are **%s** and",
+    "the heaviest receivers **%s**. This counts INTERACTIONS, not signalling",
+    "strength: a population with more cells supports more detected pairs, so read it",
+    "against the composition table above before concluding that a population drives",
+    "the niche."),
+    paste(sprintf("%s (%d)", head(snd$source, 3), head(snd$n, 3)), collapse = ", "),
+    paste(sprintf("%s (%d)", head(rcv$target, 3), head(rcv$n, 3)), collapse = ", ")),
+    type = "note", title = "Ligand-receptor load")
+}
+```
+
+```{r lr-table}
+if (exists(".cx_lr_top"))
+  scratch_table(.cx_lr_top, caption = "Interaction count per sender-receiver pair (top 200)")
 ```
 
 ## Summary table

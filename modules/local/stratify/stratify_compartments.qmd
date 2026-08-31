@@ -661,9 +661,76 @@ obj$malignancy_evidence <- unname(setNames(assign_dt$evidence_basis, assign_dt$c
 
 tab <- assign_dt[, .N, by = malignant_status][order(-N)]
 tab[, pct := round(100 * N / sum(N), 1)]
+
+# This is the decision the whole pipeline turns on - everything downstream runs
+# on one side of it or the other - and it was reported only as an unlabelled
+# table. Prepare the breakdown here; the finding and the tables follow in their
+# own chunks, because scratch_finding() needs results='asis' to become markup
+# while scratch_table() returns a widget that an asis chunk will not print.
+.st_tab <- tab
+.st_ev  <- assign_dt[, .N, by = .(malignant_status, evidence_basis)][order(-N)]
+.st_smp <- NULL
+if (exists("meta") && "cell_id" %in% names(meta)) {
+  scol <- intersect(c("orig.ident", "sample", "sample_id", "patient_id"), names(meta))
+  if (length(scol)) {
+    .st_smp <- merge(assign_dt[, .(cell_id, malignant_status)],
+                     meta[, .(cell_id, .s = as.character(get(scol[1])))], by = "cell_id")
+    .st_smp <- .st_smp[, .(cells = .N,
+                           malignant = sum(malignant_status == "malignant")), by = .s]
+    .st_smp[, pct_malignant := round(100 * malignant / cells, 2)]
+    setorder(.st_smp, -pct_malignant)
+  }
+}
+
 knitr::kable(tab)
 
 fwrite(assign_dt, file.path("data", paste0(params$project_name, "_malignancy_assignment.csv")))
+```
+
+```{r assign-finding, results = 'asis'}
+if (exists(".st_tab")) {
+  tab <- .st_tab
+  # `tab[status == x, N]` is integer(0) when a status is absent, and sprintf with
+  # a zero-length argument returns character(0) - the finding would vanish rather
+  # than say "0".
+  n_of <- function(s) { v <- tab[malignant_status == s, N]; if (length(v)) v[1] else 0L }
+  mal <- tab[malignant_status == "malignant"]
+  amb <- tab[malignant_status == "ambiguous"]
+  # A per-sample malignant fraction near zero is the signal that a sample is
+  # tumour-poor and will silently weaken every malignant-side result downstream.
+  poor <- if (!is.null(.st_smp)) .st_smp[pct_malignant < 1] else NULL
+
+  scratch_finding(sprintf(paste(
+    "The cohort splits **%s malignant / %s non-malignant%s** (%.1f%% malignant).",
+    "Evidence: %s.%s"),
+    format(n_of("malignant"), big.mark = ","),
+    format(n_of("non_malignant"), big.mark = ","),
+    if (nrow(amb)) sprintf(" / %s ambiguous", format(amb$N[1], big.mark = ",")) else "",
+    if (nrow(mal)) mal$pct[1] else 0,
+    # Name the STATUS as well as the basis: the same basis appears under both
+    # statuses, so "4,745 numbat; 48 numbat" reads as a duplicate rather than as
+    # two different verdicts from the same caller.
+    paste(sprintf("%s %s by %s", format(head(.st_ev$N, 4), big.mark = ","),
+                  head(.st_ev$malignant_status, 4),
+                  head(.st_ev$evidence_basis, 4)), collapse = "; "),
+    if (!is.null(poor) && nrow(poor))
+      sprintf(paste(" **%s is below 1%% malignant** - treat it as tumour-poor: it",
+                    "contributes almost nothing to the malignant compartment, and any",
+                    "between-sample contrast on that side is effectively single-sample."),
+              paste(poor$.s, collapse = ", "))
+    else ""),
+    type = if (!is.null(poor) && nrow(poor)) "caution" else "note",
+    title = "Compartment split")
+}
+```
+
+```{r assign-tables}
+if (exists(".st_tab")) scratch_table(.st_tab, caption = "Cells per compartment")
+```
+
+```{r assign-tables-sample}
+if (exists(".st_smp") && !is.null(.st_smp))
+  scratch_table(.st_smp, caption = "Malignant fraction per sample")
 ```
 
 ```{r composition-plot, fig.width = 9, fig.height = 5}
