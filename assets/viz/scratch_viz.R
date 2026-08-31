@@ -584,6 +584,23 @@ DimPlot <- function(object, ...) {
       if (!is.null(col) && is.data.frame(x$data) && is.numeric(x$data[[col]]))
         x$data[[col]] <- round(x$data[[col]], 2)
     }
+
+    # The NON-positional numeric aesthetics matter more, and were being missed.
+    # ggplotly builds the hover string from the data, so a colour column carrying
+    # `pseudotime: 14.306830402` costs ten wasted bytes per point per trace. On
+    # the trajectory report the hover text came to 8.4 MB of a 15.9 MB widget --
+    # more than the x and y arrays put together, in a 39 MB document.
+    #
+    # signif() rather than round(): a p-value or an adjusted p-value collapses to
+    # zero under round(v, 3), while signif(v, 6) leaves 1e-300 intact and still
+    # turns 14.306830402 into 14.3068. Six significant digits is far beyond what
+    # a hover label or a rendered pixel can express.
+    for (nm in setdiff(names(x$mapping), c("x", "y"))) {
+      col <- tryCatch(rlang::as_name(x$mapping[[nm]]), error = function(e) NULL)
+      if (!is.null(col) && is.data.frame(x$data) &&
+          !is.null(x$data[[col]]) && is.numeric(x$data[[col]]))
+        x$data[[col]] <- signif(x$data[[col]], 6)
+    }
   }
 
   # Honour an explicit `text` aesthetic when the plot supplies one; otherwise
