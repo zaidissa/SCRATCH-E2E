@@ -1542,11 +1542,45 @@ if (identical(input_integration_method, "all")) {
     readr::write_lines(best_integration, "./data/batch_method.selected.txt")
   }
 
-  p_sum <- ggplot(metrics_df, aes(x = method, y = CompositeZ)) +
-    geom_col() + theme_bw(base_size = 12) + labs(title = "Composite score (Z-sum)")
+  # This is the figure the method choice is read off, and it was a bare geom_col
+  # in alphabetical order with no indication of which bar won or how thin the
+  # margin was. Rank it, mark the selection, and print the value on the bar.
+  .mdf <- metrics_df
+  .mdf$selected <- .mdf$method == best_integration
+  .mdf$method   <- factor(.mdf$method, levels = .mdf$method[order(.mdf$CompositeZ)])
+  .margin <- {
+    o <- sort(metrics_df$CompositeZ, decreasing = TRUE)
+    if (length(o) > 1) o[1] - o[2] else NA_real_
+  }
+  .spread <- diff(range(metrics_df$CompositeZ, na.rm = TRUE))
+
+  p_sum <- ggplot(.mdf, aes(x = method, y = CompositeZ, fill = selected)) +
+    geom_col(width = 0.7) +
+    geom_text(aes(label = sprintf("%.2f", CompositeZ)), hjust = -0.15, size = 3.4,
+              colour = "#4e5a60") +
+    scale_fill_manual(values = c(`TRUE` = "#eb6834", `FALSE` = "#9aa4a9"), guide = "none") +
+    coord_flip(clip = "off") +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.14))) +
+    labs(title = "Composite score (Z-sum)",
+         subtitle = sprintf(
+           "Selected: %s%s. Higher is better; scored on up to %d metrics.",
+           best_integration,
+           if (is.finite(.margin) && .spread > 0)
+             sprintf(" - ahead by %.2f, %.0f%% of the spread across methods",
+                     .margin, 100 * .margin / .spread)
+           else "",
+           length(higher_better)),
+         x = NULL, y = "Composite Z (sum)") +
+    (if (exists("theme_scratch")) theme_scratch() else theme_bw(base_size = 12))
   dir.create("figures/evaluation", recursive = TRUE, showWarnings = FALSE)
   ggsave(file.path("figures","evaluation","composite_scores.png"), p_sum, width = 7, height = 4, dpi = 400)
-  print(p_sum)
+  # Deliberately NOT printed here. See the bc-figures chunk below: knit_print()
+  # is consulted only for AUTO-printed values, so print() bypasses the hook in
+  # scratch_viz.R that makes a figure interactive — which is why every figure in
+  # this notebook was static. But a bare `p_sum` inside this if-block prints
+  # nothing at all, because auto-printing applies to top-level expressions only
+  # (verified: a value inside a block, followed by more code, emits zero output).
+  # So the plot is built here and auto-printed at top level below.
 
   stopifnot(requireNamespace("kBET", quietly = TRUE))
   if (!requireNamespace("ggplot2", quietly = TRUE)) stop("Please install ggplot2")
@@ -1606,18 +1640,28 @@ if (identical(input_integration_method, "all")) {
                           length(cells_eval), nd_eval, k0_eval,
                           if (!is.null(params$seed)) params$seed else 2203)
 
+  # Mark the uncorrected baseline: kBET acceptance is only meaningful as a
+  # movement away from it, and with every bar the same colour the reader has to
+  # find the baseline in the axis labels first.
+  df_kb$is_baseline <- df_kb$method == baseline
   p_kbet_all <- ggplot2::ggplot(df_kb, ggplot2::aes(x = factor(method, levels = methods_ordered),
-                                                    y = acceptance)) +
-    ggplot2::geom_col() +
-    ggplot2::coord_cartesian(ylim = c(0, 1)) +
+                                                    y = acceptance, fill = is_baseline)) +
+    ggplot2::geom_col(width = 0.7) +
+    ggplot2::geom_text(ggplot2::aes(label = sprintf("%.3f", acceptance)),
+                       vjust = -0.5, size = 3.3, colour = "#4e5a60") +
+    ggplot2::scale_fill_manual(values = c(`TRUE` = "#9aa4a9", `FALSE` = "#2a78d6"),
+                               labels = c(`TRUE` = "uncorrected", `FALSE` = "corrected"),
+                               name = NULL) +
+    ggplot2::coord_cartesian(ylim = c(0, 1.08)) +
     ggplot2::labs(title = "kBET Acceptance (higher = better mixing)",
                   subtitle = subtitle_str,
                   x = NULL, y = "Acceptance") +
-    ggplot2::theme_bw(base_size = 12) +
+    (if (exists("theme_scratch")) theme_scratch() else ggplot2::theme_bw(base_size = 12)) +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 25, hjust = 1))
   ggsave(file.path("figures","evaluation","kBET_baseline_vs_integrations.png"),
          p_kbet_all, width = 7.5, height = 4.5, dpi = 400)
-  print(p_kbet_all)
+  # Auto-printed at top level in the bc-figures chunk below, for the reason
+  # given at p_sum.
 
   # per-method "before vs after" plots are strict subsets of df_kb
   for (meth in methods_eval) {
@@ -1808,6 +1852,19 @@ if (identical(input_integration_method, "all")) {
 }
 
 ```
+
+```{r bc-figure-composite}
+# Top level, so the value is AUTO-printed and knit_print.ggplot in scratch_viz.R
+# is consulted — that hook is what converts the figure to an interactive widget.
+# `if (exists(...)) p` is itself a top-level expression whose value is the plot,
+# so visibility is preserved; wrapping it in braces would not print.
+if (exists("p_sum")) p_sum
+```
+
+```{r bc-figure-kbet}
+if (exists("p_kbet_all")) p_kbet_all
+```
+
 
 
 
