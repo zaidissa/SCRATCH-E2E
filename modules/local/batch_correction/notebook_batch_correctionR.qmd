@@ -1562,8 +1562,10 @@ if (identical(input_integration_method, "all")) {
     coord_flip(clip = "off") +
     scale_y_continuous(expand = expansion(mult = c(0, 0.14))) +
     labs(title = "Composite score (Z-sum)",
+         # Wrapped onto two lines deliberately: on one line this overran the
+         # 7-inch PNG and the reader lost the end of the sentence.
          subtitle = sprintf(
-           "Selected: %s%s. Higher is better; scored on up to %d metrics.",
+           "Selected: %s%s\nHigher is better; scored on up to %d metrics.",
            best_integration,
            if (is.finite(.margin) && .spread > 0)
              sprintf(" - ahead by %.2f, %.0f%% of the spread across methods",
@@ -1573,7 +1575,7 @@ if (identical(input_integration_method, "all")) {
          x = NULL, y = "Composite Z (sum)") +
     (if (exists("theme_scratch")) theme_scratch() else theme_bw(base_size = 12))
   dir.create("figures/evaluation", recursive = TRUE, showWarnings = FALSE)
-  ggsave(file.path("figures","evaluation","composite_scores.png"), p_sum, width = 7, height = 4, dpi = 400)
+  ggsave(file.path("figures","evaluation","composite_scores.png"), p_sum, width = 8.5, height = 4.2, dpi = 400)
   # Deliberately NOT printed here. See the bc-figures chunk below: knit_print()
   # is consulted only for AUTO-printed values, so print() bypasses the hook in
   # scratch_viz.R that makes a figure interactive — which is why every figure in
