@@ -595,11 +595,22 @@ DimPlot <- function(object, ...) {
     # zero under round(v, 3), while signif(v, 6) leaves 1e-300 intact and still
     # turns 14.306830402 into 14.3068. Six significant digits is far beyond what
     # a hover label or a rendered pixel can express.
+    # signif() alone does NOT shrink the document, which is worth recording
+    # because it looks as though it should. ggplotly formats a column to a COMMON
+    # width, so signif(v, 6) turned "14.306830402" into "14.30680000" -- the
+    # trailing zeros cost exactly what the digits did and the file was unchanged
+    # byte for byte. Only a shorter COMMON format actually saves anything.
+    #
+    # round() to a fixed 3 decimals gives that, but would flatten a p-value
+    # column to zero, so it is applied only when the smallest non-zero magnitude
+    # in the column can survive it; anything finer keeps signif().
     for (nm in setdiff(names(x$mapping), c("x", "y"))) {
       col <- tryCatch(rlang::as_name(x$mapping[[nm]]), error = function(e) NULL)
-      if (!is.null(col) && is.data.frame(x$data) &&
-          !is.null(x$data[[col]]) && is.numeric(x$data[[col]]))
-        x$data[[col]] <- signif(x$data[[col]], 6)
+      if (is.null(col) || !is.data.frame(x$data) ||
+          is.null(x$data[[col]]) || !is.numeric(x$data[[col]])) next
+      v  <- x$data[[col]]
+      nz <- abs(v[is.finite(v) & v != 0])
+      x$data[[col]] <- if (length(nz) && min(nz) >= 1e-3) round(v, 3) else signif(v, 4)
     }
   }
 
@@ -623,8 +634,25 @@ DimPlot <- function(object, ...) {
   # suppressWarnings: ggplotly reports every ggplot attribute a plotly trace type
   # does not accept, one line per trace. Eight cell types meant eight identical
   # notices printed into the report above the figure.
+  # On a large scatter the default tooltip restates the axes. Measured on the
+  # trajectory report, one hover string was
+  #     "DR1:  -6.28<br />DR2: -13.65<br />pseudotime: 14.30680000"
+  # of which the first 34 of 56 characters are the x and y the reader is already
+  # looking at -- and hover text came to 16.1 MB of a 39.3 MB document, four
+  # times the x and y arrays put together. Restricting the tooltip to the
+  # non-positional aesthetics keeps the part that says something.
+  #
+  # Only for point-heavy plots: on a bar chart or a heatmap the positional
+  # aesthetic IS the value, and dropping it would leave an empty tooltip.
+  .tip <- NULL
+  if (isTRUE(.point_only) && n > 5000) {
+    .cand <- setdiff(names(x$mapping), c("x", "y", "group"))
+    if (length(.cand)) .tip <- .cand
+  }
   w <- try(suppressWarnings(
-         if (.has_text) plotly::ggplotly(x, tooltip = "text") else plotly::ggplotly(x)),
+         if (.has_text) plotly::ggplotly(x, tooltip = "text")
+         else if (!is.null(.tip)) plotly::ggplotly(x, tooltip = .tip)
+         else plotly::ggplotly(x)),
          silent = TRUE)
   if (inherits(w, "try-error")) return(NULL)
 
@@ -645,6 +673,45 @@ DimPlot <- function(object, ...) {
     wg <- try(suppressWarnings(plotly::toWebGL(w)), silent = TRUE)
     if (!inherits(wg, "try-error")) w <- wg
   }
+  # ------------------------------------------------------------------------
+  # Trim the serialised widget.
+  #
+  # Rounding the INPUT mapping is not enough and was measured not to be: it only
+  # sees aesthetics declared at the top level, so any plot that maps x/y inside a
+  # layer -- which SCP and several notebooks here do -- went into the document at
+  # full precision. On the trajectory report one hover field was 7.2 MB of
+  #     "DR1: -3.572143e+00<br />DR2: -9.695639e+00"
+  # which is the two axis values, in scientific notation, and nothing else.
+  #
+  # Working on the BUILT traces catches every case regardless of how the plot was
+  # specified. Measured on that report: 4.40 MB from the coordinate arrays and
+  # 1.96 MB from numbers inside hover strings, 6.36 MB of 39.3 total.
+  #
+  # 3 decimals on a screen coordinate is well past what any zoom the widget
+  # offers can resolve, and %g inside the hover keeps 4 significant figures.
+  w <- local({
+    ok <- try({
+      w$x$data <- lapply(w$x$data, function(tr) {
+        for (k in c("x", "y")) {
+          v <- tr[[k]]
+          if (is.numeric(v) && length(v)) tr[[k]] <- round(v, 3)
+        }
+        for (k in c("text", "hovertext")) {
+          v <- tr[[k]]
+          if (is.character(v) && length(v)) {
+            m <- gregexpr("-?[0-9]+\\.[0-9]+(e[+-][0-9]+)?", v)
+            regmatches(v, m) <- lapply(regmatches(v, m), function(z)
+              if (length(z)) formatC(as.numeric(z), digits = 4, format = "g") else z)
+            tr[[k]] <- v
+          }
+        }
+        tr
+      })
+      w
+    }, silent = TRUE)
+    if (inherits(ok, "try-error")) w else ok
+  })
+
   # ggplotly DROPS the subtitle. Every subtitle in this pipeline carries the
   # interpretation -- which line is the applied cutoff, what the colour means --
   # so losing it silently gutted the interactive figures. Fold it into the
