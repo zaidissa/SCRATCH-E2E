@@ -106,12 +106,22 @@ workflow ANNOTATION {
         // is an "is not defined" at parse time when the stage is skipped.
         ch_concordance = Channel.empty()
         if (!params.skip_annotation_concordance) {
-            def no_file = file("${projectDir}/assets/NO_FILE")
+            // A DEDICATED placeholder per input, not one shared NO_FILE.
+            // Nextflow stages inputs by basename, so two absent annotators both
+            // resolving to `NO_FILE` put two files of that name in the task
+            // directory and the run dies with "input file name collision". That
+            // needs only two of the three to be missing, which is now the DEFAULT
+            // combination: CellTypist is off unless asked for, and Azimuth is off
+            // unless --input_reference_object is given. The same trap is recorded
+            // against NO_FILE_gmap in numbat.nf.
+            def nf_ct  = file("${projectDir}/assets/NO_FILE_celltypist")
+            def nf_st  = file("${projectDir}/assets/NO_FILE_sctype")
+            def nf_az  = file("${projectDir}/assets/NO_FILE_azimuth")
             ANNOTATION_CONCORDANCE(
                 Channel.fromPath(params.notebook_annotation_concordance, checkIfExists: true),
-                ch_celltypist_obs.ifEmpty(no_file),
-                ch_sctype_rds.ifEmpty(no_file),
-                ch_azimuth_rds.ifEmpty(no_file),
+                ch_celltypist_obs.ifEmpty(nf_ct),
+                ch_sctype_rds.ifEmpty(nf_st),
+                ch_azimuth_rds.ifEmpty(nf_az),
                 ch_page_config
             )
             ch_concordance = ANNOTATION_CONCORDANCE.out.concordance

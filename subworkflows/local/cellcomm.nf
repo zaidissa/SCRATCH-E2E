@@ -22,10 +22,20 @@
 
 include { CELLCOMM_LIANA    } from '../../modules/local/Cell_Communication/main.nf'
 include { CELLCOMM_CELLCHAT } from '../../modules/local/Cell_Communication/main.nf'
-include { CELLCOMM_NICHENET } from '../../modules/local/Cell_Communication/main.nf'
+include { CELLCOMM_NICHENET  } from '../../modules/local/Cell_Communication/main.nf'
+include { NICHENET_FETCH_REFS } from '../../modules/local/Cell_Communication/main.nf'
 
 // Validate NicheNet's reference RDS files. A Git LFS pointer is a small text
 // file beginning "version https://git-lfs..."; a real RDS is binary.
+// True when the directory holds unresolved LFS pointers rather than real data.
+def nichenetNeedsFetch(dir) {
+    def d = file(dir, type: 'dir')
+    if (!d.exists()) return true
+    def rds = d.listFiles().findAll { it.name.endsWith('.rds') }
+    if (!rds) return true
+    return rds.any { f -> f.size() < 4096 && f.text.startsWith('version https://git-lfs') }
+}
+
 def nichenetAssets(dir) {
     def d = file(dir, type: 'dir', checkIfExists: true)
     def rds = d.listFiles().findAll { it.name.endsWith('.rds') }
@@ -74,6 +84,29 @@ workflow CELL_COMMUNICATION {
             ch_liana_csv    = CELLCOMM_LIANA.out.liana_csv
             ch_cellchat_rds = CELLCOMM_CELLCHAT.out.cellchat_rds
 
+            // Resolve the reference networks BEFORE the DAG needs them.
+            //
+            // The three .rds files ship as Git LFS pointers. On a laptop that is
+            // one `git lfs pull`; in a managed environment such as Cirro the
+            // checkout is not yours to fix, and erroring here sank the run at the
+            // ninth of eleven stages over a 320 MB download. So: fetch them when
+            // they are unresolved and the user has not named a directory of their
+            // own, and keep the hard error for the case where they HAVE named one
+            // -- that is a wrong path, not a missing convenience.
+            def nn_default   = "${projectDir}/assets/nichenet_resources".toString()
+            def nn_is_default = params.nichenet_assets_dir.toString() == nn_default
+
+            ch_nichenet_assets =
+                // Deliberately NOT excluded from -stub. The process has a stub
+                // branch that touches the three filenames, so a stub run proves
+                // this wiring; skipping it here would leave the fetch path
+                // untested until a real cloud run, which is how the SCDBLFINDER
+                // and CellBender h5 bugs survived to production.
+                (nichenetNeedsFetch(params.nichenet_assets_dir) && nn_is_default &&
+                 params.nichenet_fetch_refs)
+                    ? NICHENET_FETCH_REFS().assets
+                    : Channel.value(nichenetAssets(params.nichenet_assets_dir))
+
             // Real data dependency: NicheNet waits on the actual artefacts.
             CELLCOMM_NICHENET(
                 ch_seurat_object
@@ -88,7 +121,7 @@ workflow CELL_COMMUNICATION {
                 // "readRDS(): unknown input format" -- a message that says
                 // nothing about the real cause. Validate content here, before a
                 // container starts.
-                nichenetAssets(params.nichenet_assets_dir),
+                ch_nichenet_assets,
                 ch_page_config
             )
 

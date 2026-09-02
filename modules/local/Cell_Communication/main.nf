@@ -327,3 +327,51 @@ process CELLCOMM_NICHENET {
 //     [ -f "${notebook.baseName}.html" ] && cp "${notebook.baseName}.html" report/index.html || true
 //     """
 // }
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    NICHENET_FETCH_REFS — download the reference networks
+
+    The repo ships these three files as Git LFS POINTERS, so a fresh clone
+    without `git lfs pull` has 130-byte text stubs where 320 MB of networks
+    should be. On a laptop that is a one-line fix; on Cirro or AWS Batch, where
+    the checkout is done for you, it sinks the run at the ninth of eleven stages.
+
+    Mirrors NUMBAT_FETCH_REFS: `storeDir` means the download happens once and is
+    reused by every later run, including across resumes.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+process NICHENET_FETCH_REFS {
+
+    tag "NicheNet reference networks"
+    label 'process_low'
+    storeDir "${params.nichenet_refs_dir}"
+
+    output:
+        path "nichenet_resources", type: 'dir', emit: assets
+
+    when:
+        task.ext.when == null || task.ext.when
+
+    script:
+        """
+        set -euo pipefail
+        fetch_nichenet_refs.sh nichenet_resources
+        # The fetch script verifies each file downloaded, but a truncated
+        # transfer still satisfies `-f`. Refuse anything still pointer-sized:
+        # the failure downstream is "readRDS(): unknown input format", which
+        # says nothing about the cause.
+        for f in nichenet_resources/*.rds; do
+            sz=\$(wc -c < "\$f")
+            [ "\$sz" -gt 4096 ] || { echo "nichenet ref \$f is only \$sz bytes" >&2; exit 1; }
+        done
+        """
+
+    stub:
+        """
+        mkdir -p nichenet_resources
+        touch nichenet_resources/ligand_target_matrix.rds
+        touch nichenet_resources/lr_network_human.rds
+        touch nichenet_resources/weighted_networks.rds
+        """
+}

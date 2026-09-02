@@ -35,3 +35,6 @@ Thumbs.db
 # These are DATA, not source; committing either would be a disaster.
 assets/numbat_refs/
 .test_numbat_refs/
+
+# Fetched at runtime by NICHENET_FETCH_REFS (~320 MB from Zenodo).
+assets/nichenet_fetched/

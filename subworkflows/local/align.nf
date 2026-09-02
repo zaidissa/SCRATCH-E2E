@@ -46,6 +46,29 @@ workflow ALIGN {
 
         ch_versions = Channel.empty()
 
+        // Check the reference BEFORE anything runs. `igenomes_base` defaults to
+        // ${projectDir}/references, which is not in the repository and is not
+        // something a managed environment such as Cirro will have created — so
+        // on a fresh checkout this is missing, and without this check the first
+        // sign of it is cellranger exiting inside a container after the queue has
+        // already granted a 16-core machine.
+        def refs = params.genomes?.get(genome)
+        if (!refs)
+            error "Unknown --genome '${genome}'. Configured: " +
+                  "${params.genomes ? params.genomes.keySet().join(', ') : 'none'}."
+        def need = (modality =~ /GEX/) ? ['gex'] : []
+        if (modality =~ /TCR/) need << 'vdj'
+        def missing = need.findAll { k -> !refs[k] || !file(refs[k]).exists() }
+        if (missing)
+            error "cellranger reference not found for --genome ${genome}:\n" +
+                  missing.collect { k -> "  ${k}: ${refs[k]}" }.join('\n') +
+                  "\n\nThese are not shipped with the pipeline (~15 GB for GEX).\n" +
+                  "  Download from 10x Genomics, then point --igenomes_base at the\n" +
+                  "  directory holding refdata/, or set --genomes.${genome}.gex directly.\n" +
+                  "  On S3 an s3:// path works.\n" +
+                  "  To skip alignment entirely, start from counts:\n" +
+                  "    --from qc --input_gex_matrices_path '<path>/*/outs/*'"
+
         ch_validated_csv = SAMPLESHEET_CHECK(ch_samplesheet).csv
 
         // Named, independently-consumable outputs.
