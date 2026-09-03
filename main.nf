@@ -262,10 +262,30 @@ workflow {
         def entry_object = params.input_seurat_object
                         ?: params.input_nonmalignant_object
                         ?: params.input_tumor_object
-        if (!entry_object)
-            error "Starting from '${params.from}' requires an input object: " +
-                  "--input_seurat_object, or --input_tumor_object / --input_nonmalignant_object " +
-                  "to enter one arm directly."
+        if (!entry_object) {
+            // Name the object THIS entry point wants. The generic list made the
+            // reader work out which arm they were entering, and the answer is
+            // not guessable: the malignant arm takes a different object from the
+            // non-malignant one, and both differ from the pre-split object.
+            def wants = [
+                cluster     : '--input_seurat_object       (post-QC object)',
+                annotation  : '--input_seurat_object       (clustered object)',
+                cnv         : '--input_seurat_object       (annotated object)',
+                stratify    : '--input_seurat_object       (object carrying CNV calls)',
+                metaprog    : '--input_tumor_object        (malignant compartment)',
+                batchcorrect: '--input_nonmalignant_object (non-malignant compartment)',
+                trajectory  : '--input_nonmalignant_object (batch-corrected object)',
+                cellcomm    : '--input_nonmalignant_object (batch-corrected object)',
+                tme         : '--input_nonmalignant_object (batch-corrected object)',
+                integration : '--input_seurat_object       (any stage object)'
+            ]
+            def hint = wants[params.from?.toString()?.toLowerCase()]
+            error "Starting from '${params.from}' requires an input object.\n" +
+                  (hint ? "  This entry point takes ${hint}\n"
+                        : "  Pass --input_seurat_object, or --input_tumor_object /\n" +
+                          "  --input_nonmalignant_object to enter one arm directly.\n") +
+                  "  Stage outputs live under <outdir>/<project>/<stage>/data/."
+        }
         // Also becomes the base object the integration layer annotates.
         ch_seurat = Channel.value(file(entry_object, checkIfExists: true))
         // Entering at/after cluster: no BPCells store travels with a plain RDS.

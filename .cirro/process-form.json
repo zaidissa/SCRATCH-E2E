@@ -1,0 +1,183 @@
+{
+    "ui": {},
+    "form": {
+        "title": "SCRATCH E2E",
+        "type": "object",
+        "properties": {
+            "stage_range": {
+                "title": "Stages to run",
+                "type": "object",
+                "description": "The pipeline is one process. Pick where to start and where to stop; everything between runs in order, with the malignant and non-malignant arms fanning out after stratification.",
+                "properties": {
+                    "from": {
+                        "type": "string",
+                        "title": "Start at",
+                        "default": "qc",
+                        "description": "align needs FASTQs and a ~15 GB cellranger reference. Starting anywhere after qc requires the matching input object below.",
+                        "enum": [
+                            "align", "qc", "cluster", "annotation", "cnv", "stratify",
+                            "metaprog", "batchcorrect", "trajectory", "cellcomm", "tme",
+                            "tcr", "integration"
+                        ]
+                    },
+                    "to": {
+                        "type": "string",
+                        "title": "Stop after",
+                        "default": "end",
+                        "description": "'end' runs through to the integration layer and the master report.",
+                        "enum": [
+                            "end", "qc", "cluster", "annotation", "cnv", "stratify",
+                            "metaprog", "batchcorrect", "trajectory", "cellcomm", "tme",
+                            "tcr", "integration"
+                        ]
+                    }
+                }
+            },
+            "entry_point": {
+                "title": "Entry point object",
+                "type": "object",
+                "description": "Only needed when starting after QC. Which one depends on where you start: cluster/annotation/cnv/stratify take the pre-split object; metaprog takes the malignant compartment; batchcorrect/trajectory/cellcomm/tme take the non-malignant one. Leave blank when starting from align or qc.",
+                "properties": {
+                    "input_seurat_object": {
+                        "type": "string",
+                        "title": "Seurat object (pre-split)",
+                        "description": "s3:// path to an .RDS from a previous run, e.g. <outdir>/<project>/annotation/data/*_annotated_object.RDS",
+                        "default": ""
+                    },
+                    "input_tumor_object": {
+                        "type": "string",
+                        "title": "Malignant compartment",
+                        "description": "s3:// path, for --from metaprog. Written by stratify as *_malignant_object.RDS",
+                        "default": ""
+                    },
+                    "input_nonmalignant_object": {
+                        "type": "string",
+                        "title": "Non-malignant compartment",
+                        "description": "s3:// path, for --from batchcorrect / trajectory / cellcomm / tme. Written by stratify as *_nonmalignant_object.RDS",
+                        "default": ""
+                    }
+                }
+            },
+            "reference": {
+                "title": "Reference and annotation",
+                "type": "object",
+                "properties": {
+                    "genome": {
+                        "type": "string",
+                        "title": "Genome",
+                        "default": "GRCh38",
+                        "enum": ["GRCh38", "GRCm39"]
+                    },
+                    "organism": {
+                        "type": "string",
+                        "title": "Organism",
+                        "default": "human",
+                        "enum": ["human", "mouse"]
+                    },
+                    "modality": {
+                        "type": "string",
+                        "title": "Modality",
+                        "default": "GEX",
+                        "description": "GEX+TCR also runs cellranger vdj and enables the TCR stage.",
+                        "enum": ["GEX", "TCR", "GEX+TCR"]
+                    },
+                    "input_reference_object": {
+                        "type": "string",
+                        "title": "Azimuth reference object (optional)",
+                        "description": "s3:// path to a reference .RDS. Without it Azimuth is skipped and annotation falls back to scType.",
+                        "default": ""
+                    }
+                }
+            },
+            "quality_control_parameters": {
+                "title": "Quality control",
+                "type": "object",
+                "properties": {
+                    "qc_thr_estimate_n_cells":     { "type": "integer", "default": 300,   "title": "Estimated number of cells" },
+                    "qc_thr_mean_reads_per_cells": { "type": "integer", "default": 25000, "title": "Mean reads per cell" },
+                    "qc_thr_median_genes_per_cell":{ "type": "integer", "default": 900,   "title": "Median genes per cell" },
+                    "qc_thr_median_umi_per_cell":  { "type": "integer", "default": 1000,  "title": "Median UMI per cell" },
+                    "qc_thr_n_feature_rna_min":    { "type": "integer", "default": 300,   "title": "Min features per cell" },
+                    "qc_thr_n_feature_rna_max":    { "type": "integer", "default": 7500,  "title": "Max features per cell" },
+                    "qc_thr_percent_mito":         { "type": "integer", "default": 25,    "title": "Max percent mitochondrial" },
+                    "qc_thr_n_observed_cells":     { "type": "integer", "default": 300,   "title": "Min observed cells to pass" }
+                }
+            },
+            "ambient_rna": {
+                "title": "Ambient RNA (CellBender)",
+                "type": "object",
+                "description": "Reads the RAW matrix and estimates the background from empty droplets. Expected cells and total droplets are derived PER SAMPLE from each library's own UMI curve, so they are deliberately not exposed here.",
+                "properties": {
+                    "skip_cellbender": {
+                        "type": "boolean",
+                        "title": "Skip ambient RNA removal",
+                        "default": false,
+                        "description": "On this cohort it cut the share of non-plasma cells carrying any immunoglobulin from 22.5% to 12.3%, and raised inferCNV/Numbat agreement from 92.2% to 95.5%."
+                    },
+                    "cellbender_cuda": {
+                        "type": "boolean",
+                        "title": "Use GPU",
+                        "default": false,
+                        "description": "Enable on a GPU queue. On CPU this step costs roughly 135 s per epoch at 33k droplets, so about 6 h per sample at the default 150 epochs."
+                    },
+                    "cellbender_epochs": { "type": "integer", "default": 150,  "title": "Epochs" },
+                    "cellbender_fpr":    { "type": "number",  "default": 0.01, "title": "False positive rate" }
+                }
+            },
+            "cnv_parameters": {
+                "title": "CNV and stratification",
+                "type": "object",
+                "properties": {
+                    "run_numbat": {
+                        "type": "boolean",
+                        "title": "Run Numbat",
+                        "default": true,
+                        "description": "Allele-aware and the only caller that sees copy-neutral LOH. Needs the aligned BAM, so it self-disables when starting from counts without one."
+                    },
+                    "skip_infercnv": { "type": "boolean", "default": false, "title": "Skip inferCNV" },
+                    "cnv_caller_priority": {
+                        "type": "string",
+                        "title": "Preferred caller",
+                        "default": "numbat",
+                        "description": "Which caller wins when the two disagree.",
+                        "enum": ["numbat", "infercnv"]
+                    },
+                    "stratify_infercnv_sd": {
+                        "type": "number",
+                        "title": "inferCNV threshold (SDs above reference)",
+                        "default": 2,
+                        "description": "Calibrated against Numbat on HGSOC. At 3 the cutoff sat above the entire epithelial block and inferCNV called nothing malignant."
+                    }
+                }
+            },
+            "downstream": {
+                "title": "Downstream stages",
+                "type": "object",
+                "properties": {
+                    "metaprog_nmf_engine": {
+                        "type": "string",
+                        "title": "NMF engine",
+                        "default": "python",
+                        "description": "The python engine is markedly faster and leaner than the R package for the same rank sweep.",
+                        "enum": ["python", "r"]
+                    },
+                    "bc_integration_method": {
+                        "type": "string",
+                        "title": "Batch correction method",
+                        "default": "all",
+                        "description": "'all' runs CCA, RPCA, Harmony and MNN and selects on a composite score. The report states the winning margin as a share of the spread, so a weakly supported choice is visible.",
+                        "enum": ["all", "cca", "rpca", "harmony", "mnn"]
+                    },
+                    "skip_cellcomm": { "type": "boolean", "default": false, "title": "Skip cell communication" },
+                    "skip_tme":      { "type": "boolean", "default": false, "title": "Skip TME characterisation" },
+                    "skip_celltypist": {
+                        "type": "boolean",
+                        "title": "Skip CellTypist",
+                        "default": true,
+                        "description": "Off by default: its Jupyter kernel never answers under emulation locally. It may well work here on native x86 — worth trying once."
+                    }
+                }
+            }
+        }
+    }
+}

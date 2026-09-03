@@ -58,7 +58,19 @@ workflow ALIGN {
                   "${params.genomes ? params.genomes.keySet().join(', ') : 'none'}."
         def need = (modality =~ /GEX/) ? ['gex'] : []
         if (modality =~ /TCR/) need << 'vdj'
-        def missing = need.findAll { k -> !refs[k] || !file(refs[k]).exists() }
+        // Existence is only checked for LOCAL paths. A remote URI resolves through
+        // a credentialed filesystem provider, and whether the head job can see it
+        // at DAG-build time is a question about the execution environment rather
+        // than about the reference being wrong. Failing here on a permissions
+        // hiccup would block a run that would have worked, so remote paths are
+        // taken on trust and cellranger reports the truth if they are bad.
+        // Inlined, not a `def isRemote = { }` closure: Nextflow 26.x's strict
+        // parser reports "`isRemote` is not defined" for a closure variable
+        // referenced later in the same block. Same trap as resolveSheetPath above.
+        def missing = need.findAll { k ->
+            !refs[k] ||
+            (!(refs[k].toString() ==~ /^[a-z0-9+.-]+:\/\/.*/) && !file(refs[k]).exists())
+        }
         if (missing)
             error "cellranger reference not found for --genome ${genome}:\n" +
                   missing.collect { k -> "  ${k}: ${refs[k]}" }.join('\n') +
