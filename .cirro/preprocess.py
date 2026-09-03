@@ -2,29 +2,97 @@
 """
 Cirro preprocessing for SCRATCH-E2E.
 
-Runs before the workflow is launched. Two jobs: log enough about the dataset
-that a failed launch can be diagnosed without re-running, and drop the
-entry-point object parameters that were left blank in the form.
+Three jobs, in order of how badly their absence bites:
 
-That second one matters. The form offers three entry-point objects because the
-right one depends on where you start, so at most one is ever filled. Passing the
-other two through as empty strings makes Nextflow receive
-`--input_tumor_object ''`, which is truthy enough to defeat the `?:` chain in
-main.nf's entry-point resolution and produces a confusing "file not found" for a
-path nobody typed.
+1. Build the cellranger samplesheet when the run starts at `align`. Cirro
+   annotates a FASTQ dataset one row per file; cellranger wants one row per
+   sample with R1 and R2 in columns. Without this, `--from align` fails on a
+   samplesheet that was never written.
+
+2. Translate `alignment_mode` into the two booleans main.nf actually reads, and
+   drop entry-point paths left blank in the form. The form offers three entry
+   objects because the right one depends on where you start, so at most one is
+   ever filled; passing the others as empty strings defeats the `?:` chain in
+   main.nf's entry-point resolution and produces a file-not-found for a path
+   nobody typed.
+
+3. Log enough that a failed launch can be diagnosed without re-running it.
 """
 
 import os
 
+import pandas as pd
 from cirro.helpers.preprocess_dataset import PreprocessDataset
 
-# Blank in the form means "not supplied", not "supplied as empty".
+# Blank in a form field means "not supplied", not "supplied as empty".
 OPTIONAL_PATHS = [
     "input_seurat_object",
     "input_tumor_object",
     "input_nonmalignant_object",
     "input_reference_object",
+    "input_bam_path",
+    "input_vdj_contigs",
 ]
+
+
+def build_samplesheet(ds: PreprocessDataset) -> pd.DataFrame:
+    """One row per sample, R1/R2 in columns — cellranger's layout, not Cirro's.
+
+    Mirrors SCRATCH-QC-multi-mode/.cirro/align/preprocess.py, which is the
+    version already known to work against a real Cirro FASTQ dataset.
+    """
+    REQUIRED = ["sample", "modality", "patient_id"]
+    OPTIONAL = ["timepoint", "batch"]
+
+    have_optional = [c for c in OPTIONAL if c in ds.samplesheet.columns]
+    missing = [c for c in REQUIRED if c not in ds.samplesheet.columns]
+    if missing:
+        raise ValueError(
+            f"Dataset samplesheet is missing required column(s): {', '.join(missing)}. "
+            f"Present: {', '.join(ds.samplesheet.columns)}"
+        )
+
+    table = ds.pivot_samplesheet(
+        index=["sampleIndex", "sample", "lane"],
+        pivot_columns="read",
+        metadata_columns=REQUIRED + have_optional,
+        column_prefix="fastq_",
+    ).sort_values(by="sample")
+
+    ds.logger.info("Pivoted samplesheet:")
+    ds.logger.info(table.to_csv(index=None))
+    return table
+
+
+def setup_parameters(ds: PreprocessDataset):
+    start = str(ds.params.get("from", "align")).lower()
+
+    # ---- alignment ------------------------------------------------------
+    if start == "align":
+        table = build_samplesheet(ds)
+        table.to_csv("samplesheet.csv", index=None)
+        # ${launchDir} rather than an absolute path: the head job and the tasks
+        # do not share a filesystem view on Batch.
+        ds.add_param("input_samplesheet", "${launchDir}/samplesheet.csv")
+    else:
+        ds.logger.info(f"Starting at '{start}', so no cellranger samplesheet is built.")
+
+    # main.nf reads two booleans, not a mode string.
+    mode = ds.params.get("alignment_mode", "standard")
+    ds.add_param("multi", mode == "multi")
+    ds.add_param("demux", mode == "demux")
+    ds.remove_param("alignment_mode")
+
+    # ---- blanks ---------------------------------------------------------
+    dropped = [
+        k for k in OPTIONAL_PATHS
+        if k in ds.params and not str(ds.params[k]).strip()
+    ]
+    for k in dropped:
+        ds.remove_param(k)
+    if dropped:
+        ds.logger.info(f"Dropped blank optional paths: {', '.join(dropped)}")
+
 
 if __name__ == "__main__":
 
@@ -33,24 +101,18 @@ if __name__ == "__main__":
     ds.logger.info("Files annotated in the dataset:")
     ds.logger.info(ds.files)
 
-    ds.logger.info("Samplesheet columns:")
     try:
+        ds.logger.info("Samplesheet columns:")
         ds.logger.info(ds.samplesheet.columns)
     except Exception as e:                      # a dataset need not carry one
         ds.logger.info(f"  no samplesheet available: {e}")
 
     ds.logger.info(f"Launch directory: {os.getcwd()}")
 
-    dropped = [k for k in OPTIONAL_PATHS
-               if k in ds.params and not str(ds.params[k]).strip()]
-    for k in dropped:
-        ds.remove_param(k)
-    if dropped:
-        ds.logger.info(f"Dropped blank optional paths: {', '.join(dropped)}")
+    setup_parameters(ds)
 
-    # Record the stage range explicitly. "Which stages did this run actually
-    # do?" is the first question asked of any output, and --from/--to is the
-    # only place the answer lives.
+    # "Which stages did this run actually do?" is the first question asked of any
+    # output, and --from/--to is the only place the answer lives.
     ds.logger.info(
         f"Stage range: --from {ds.params.get('from', 'align')} "
         f"--to {ds.params.get('to', 'end')}"

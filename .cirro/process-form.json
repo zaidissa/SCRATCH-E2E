@@ -15,9 +15,19 @@
                         "default": "qc",
                         "description": "align needs FASTQs and a ~15 GB cellranger reference. Starting anywhere after qc requires the matching input object below.",
                         "enum": [
-                            "align", "qc", "cluster", "annotation", "cnv", "stratify",
-                            "metaprog", "batchcorrect", "trajectory", "cellcomm", "tme",
-                            "tcr", "integration"
+                            "align",
+                            "qc",
+                            "cluster",
+                            "annotation",
+                            "cnv",
+                            "stratify",
+                            "metaprog",
+                            "batchcorrect",
+                            "trajectory",
+                            "cellcomm",
+                            "tme",
+                            "tcr",
+                            "integration"
                         ]
                     },
                     "to": {
@@ -26,10 +36,26 @@
                         "default": "end",
                         "description": "'end' runs through to the integration layer and the master report.",
                         "enum": [
-                            "end", "qc", "cluster", "annotation", "cnv", "stratify",
-                            "metaprog", "batchcorrect", "trajectory", "cellcomm", "tme",
-                            "tcr", "integration"
+                            "end",
+                            "qc",
+                            "cluster",
+                            "annotation",
+                            "cnv",
+                            "stratify",
+                            "metaprog",
+                            "batchcorrect",
+                            "trajectory",
+                            "cellcomm",
+                            "tme",
+                            "tcr",
+                            "integration"
                         ]
+                    },
+                    "project_name": {
+                        "type": "string",
+                        "title": "Project name",
+                        "default": "scratch",
+                        "description": "Prefixes every output object and report, e.g. <project>_qc_dbl_singlet_object.RDS."
                     }
                 }
             },
@@ -55,6 +81,18 @@
                         "title": "Non-malignant compartment",
                         "description": "s3:// path, for --from batchcorrect / trajectory / cellcomm / tme. Written by stratify as *_nonmalignant_object.RDS",
                         "default": ""
+                    },
+                    "input_bam_path": {
+                        "type": "string",
+                        "title": "Aligned BAM glob (optional)",
+                        "description": "s3:// glob of possorted_genome_bam.bam. Numbat phases reads at heterozygous SNPs and cannot run without it; leave blank and Numbat self-disables with a warning.",
+                        "default": ""
+                    },
+                    "input_vdj_contigs": {
+                        "type": "string",
+                        "title": "VDJ contigs glob (optional)",
+                        "description": "s3:// glob of filtered_contig_annotations.csv. Required for the TCR stage when not starting from align.",
+                        "default": ""
                     }
                 }
             },
@@ -66,26 +104,47 @@
                         "type": "string",
                         "title": "Genome",
                         "default": "GRCh38",
-                        "enum": ["GRCh38", "GRCm39"]
+                        "enum": [
+                            "GRCh38",
+                            "GRCm39"
+                        ]
                     },
                     "organism": {
                         "type": "string",
                         "title": "Organism",
                         "default": "human",
-                        "enum": ["human", "mouse"]
+                        "enum": [
+                            "human",
+                            "mouse"
+                        ]
                     },
                     "modality": {
                         "type": "string",
                         "title": "Modality",
                         "default": "GEX",
                         "description": "GEX+TCR also runs cellranger vdj and enables the TCR stage.",
-                        "enum": ["GEX", "TCR", "GEX+TCR"]
+                        "enum": [
+                            "GEX",
+                            "TCR",
+                            "GEX+TCR"
+                        ]
                     },
                     "input_reference_object": {
                         "type": "string",
                         "title": "Azimuth reference object (optional)",
                         "description": "s3:// path to a reference .RDS. Without it Azimuth is skipped and annotation falls back to scType.",
                         "default": ""
+                    },
+                    "alignment_mode": {
+                        "type": "string",
+                        "title": "Alignment mode",
+                        "default": "standard",
+                        "description": "Only used when starting at align. standard = one row per sample; multi = hashtag-multiplexed, demultiplexed by cellranger multi; demux = pooled FASTQs, barcodes detected from the I1 index.",
+                        "enum": [
+                            "standard",
+                            "multi",
+                            "demux"
+                        ]
                     }
                 }
             },
@@ -93,14 +152,46 @@
                 "title": "Quality control",
                 "type": "object",
                 "properties": {
-                    "qc_thr_estimate_n_cells":     { "type": "integer", "default": 300,   "title": "Estimated number of cells" },
-                    "qc_thr_mean_reads_per_cells": { "type": "integer", "default": 25000, "title": "Mean reads per cell" },
-                    "qc_thr_median_genes_per_cell":{ "type": "integer", "default": 900,   "title": "Median genes per cell" },
-                    "qc_thr_median_umi_per_cell":  { "type": "integer", "default": 1000,  "title": "Median UMI per cell" },
-                    "qc_thr_n_feature_rna_min":    { "type": "integer", "default": 300,   "title": "Min features per cell" },
-                    "qc_thr_n_feature_rna_max":    { "type": "integer", "default": 7500,  "title": "Max features per cell" },
-                    "qc_thr_percent_mito":         { "type": "integer", "default": 25,    "title": "Max percent mitochondrial" },
-                    "qc_thr_n_observed_cells":     { "type": "integer", "default": 300,   "title": "Min observed cells to pass" }
+                    "qc_thr_estimate_n_cells": {
+                        "type": "integer",
+                        "default": 300,
+                        "title": "Estimated number of cells"
+                    },
+                    "qc_thr_mean_reads_per_cells": {
+                        "type": "integer",
+                        "default": 25000,
+                        "title": "Mean reads per cell"
+                    },
+                    "qc_thr_median_genes_per_cell": {
+                        "type": "integer",
+                        "default": 900,
+                        "title": "Median genes per cell"
+                    },
+                    "qc_thr_median_umi_per_cell": {
+                        "type": "integer",
+                        "default": 1000,
+                        "title": "Median UMI per cell"
+                    },
+                    "qc_thr_n_feature_rna_min": {
+                        "type": "integer",
+                        "default": 300,
+                        "title": "Min features per cell"
+                    },
+                    "qc_thr_n_feature_rna_max": {
+                        "type": "integer",
+                        "default": 7500,
+                        "title": "Max features per cell"
+                    },
+                    "qc_thr_percent_mito": {
+                        "type": "integer",
+                        "default": 25,
+                        "title": "Max percent mitochondrial"
+                    },
+                    "qc_thr_n_observed_cells": {
+                        "type": "integer",
+                        "default": 300,
+                        "title": "Min observed cells to pass"
+                    }
                 }
             },
             "ambient_rna": {
@@ -120,8 +211,16 @@
                         "default": false,
                         "description": "Enable on a GPU queue. On CPU this step costs roughly 135 s per epoch at 33k droplets, so about 6 h per sample at the default 150 epochs."
                     },
-                    "cellbender_epochs": { "type": "integer", "default": 150,  "title": "Epochs" },
-                    "cellbender_fpr":    { "type": "number",  "default": 0.01, "title": "False positive rate" }
+                    "cellbender_epochs": {
+                        "type": "integer",
+                        "default": 150,
+                        "title": "Epochs"
+                    },
+                    "cellbender_fpr": {
+                        "type": "number",
+                        "default": 0.01,
+                        "title": "False positive rate"
+                    }
                 }
             },
             "cnv_parameters": {
@@ -134,19 +233,32 @@
                         "default": true,
                         "description": "Allele-aware and the only caller that sees copy-neutral LOH. Needs the aligned BAM, so it self-disables when starting from counts without one."
                     },
-                    "skip_infercnv": { "type": "boolean", "default": false, "title": "Skip inferCNV" },
+                    "skip_infercnv": {
+                        "type": "boolean",
+                        "default": false,
+                        "title": "Skip inferCNV"
+                    },
                     "cnv_caller_priority": {
                         "type": "string",
                         "title": "Preferred caller",
                         "default": "numbat",
                         "description": "Which caller wins when the two disagree.",
-                        "enum": ["numbat", "infercnv"]
+                        "enum": [
+                            "numbat",
+                            "infercnv"
+                        ]
                     },
                     "stratify_infercnv_sd": {
                         "type": "number",
                         "title": "inferCNV threshold (SDs above reference)",
                         "default": 2,
                         "description": "Calibrated against Numbat on HGSOC. At 3 the cutoff sat above the entire epithelial block and inferCNV called nothing malignant."
+                    },
+                    "numbat_fetch_refs": {
+                        "type": "boolean",
+                        "title": "Download Numbat references",
+                        "default": false,
+                        "description": "Off by default because the Numbat image already carries a copy. Enable only if the in-image references are missing or the wrong genome build."
                     }
                 }
             },
@@ -159,22 +271,39 @@
                         "title": "NMF engine",
                         "default": "python",
                         "description": "The python engine is markedly faster and leaner than the R package for the same rank sweep.",
-                        "enum": ["python", "r"]
+                        "enum": [
+                            "python",
+                            "r"
+                        ]
                     },
                     "bc_integration_method": {
                         "type": "string",
                         "title": "Batch correction method",
                         "default": "all",
                         "description": "'all' runs CCA, RPCA, Harmony and MNN and selects on a composite score. The report states the winning margin as a share of the spread, so a weakly supported choice is visible.",
-                        "enum": ["all", "cca", "rpca", "harmony", "mnn"]
+                        "enum": [
+                            "all",
+                            "cca",
+                            "rpca",
+                            "harmony",
+                            "mnn"
+                        ]
                     },
-                    "skip_cellcomm": { "type": "boolean", "default": false, "title": "Skip cell communication" },
-                    "skip_tme":      { "type": "boolean", "default": false, "title": "Skip TME characterisation" },
+                    "skip_cellcomm": {
+                        "type": "boolean",
+                        "default": false,
+                        "title": "Skip cell communication"
+                    },
+                    "skip_tme": {
+                        "type": "boolean",
+                        "default": false,
+                        "title": "Skip TME characterisation"
+                    },
                     "skip_celltypist": {
                         "type": "boolean",
                         "title": "Skip CellTypist",
                         "default": true,
-                        "description": "Off by default: its Jupyter kernel never answers under emulation locally. It may well work here on native x86 — worth trying once."
+                        "description": "Off by default: its Jupyter kernel never answers under emulation locally. It may well work here on native x86 \u2014 worth trying once."
                     }
                 }
             }

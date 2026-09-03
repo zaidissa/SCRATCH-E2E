@@ -2,19 +2,15 @@
     "input_gex_matrices_path": "$.params.inputs[0].s3|/data/data/SCRATCH_ALIGN:CELLRANGER_COUNT/**/outs/*",
     "input_exp_table": "$.params.inputs[0].s3|/data/pipeline_info/samplesheet.valid.csv",
     "outdir": "$.params.dataset.s3|/data/",
-
     "from": "$.params.dataset.paramJson.stage_range.from",
     "to": "$.params.dataset.paramJson.stage_range.to",
-
     "input_seurat_object": "$.params.dataset.paramJson.entry_point.input_seurat_object",
     "input_tumor_object": "$.params.dataset.paramJson.entry_point.input_tumor_object",
     "input_nonmalignant_object": "$.params.dataset.paramJson.entry_point.input_nonmalignant_object",
-
     "genome": "$.params.dataset.paramJson.reference.genome",
     "organism": "$.params.dataset.paramJson.reference.organism",
     "modality": "$.params.dataset.paramJson.reference.modality",
     "input_reference_object": "$.params.dataset.paramJson.reference.input_reference_object",
-
     "qc_thr_estimate_n_cells": "$.params.dataset.paramJson.quality_control_parameters.qc_thr_estimate_n_cells",
     "qc_thr_mean_reads_per_cells": "$.params.dataset.paramJson.quality_control_parameters.qc_thr_mean_reads_per_cells",
     "qc_thr_median_genes_per_cell": "$.params.dataset.paramJson.quality_control_parameters.qc_thr_median_genes_per_cell",
@@ -23,20 +19,22 @@
     "qc_thr_n_feature_rna_max": "$.params.dataset.paramJson.quality_control_parameters.qc_thr_n_feature_rna_max",
     "qc_thr_percent_mito": "$.params.dataset.paramJson.quality_control_parameters.qc_thr_percent_mito",
     "qc_thr_n_observed_cells": "$.params.dataset.paramJson.quality_control_parameters.qc_thr_n_observed_cells",
-
     "skip_cellbender": "$.params.dataset.paramJson.ambient_rna.skip_cellbender",
     "cellbender_cuda": "$.params.dataset.paramJson.ambient_rna.cellbender_cuda",
     "cellbender_epochs": "$.params.dataset.paramJson.ambient_rna.cellbender_epochs",
     "cellbender_fpr": "$.params.dataset.paramJson.ambient_rna.cellbender_fpr",
-
     "run_numbat": "$.params.dataset.paramJson.cnv_parameters.run_numbat",
     "skip_infercnv": "$.params.dataset.paramJson.cnv_parameters.skip_infercnv",
     "cnv_caller_priority": "$.params.dataset.paramJson.cnv_parameters.cnv_caller_priority",
     "stratify_infercnv_sd": "$.params.dataset.paramJson.cnv_parameters.stratify_infercnv_sd",
-
     "metaprog_nmf_engine": "$.params.dataset.paramJson.downstream.metaprog_nmf_engine",
     "bc_integration_method": "$.params.dataset.paramJson.downstream.bc_integration_method",
     "skip_cellcomm": "$.params.dataset.paramJson.downstream.skip_cellcomm",
     "skip_tme": "$.params.dataset.paramJson.downstream.skip_tme",
-    "skip_celltypist": "$.params.dataset.paramJson.downstream.skip_celltypist"
+    "skip_celltypist": "$.params.dataset.paramJson.downstream.skip_celltypist",
+    "project_name": "$.params.dataset.paramJson.stage_range.project_name",
+    "alignment_mode": "$.params.dataset.paramJson.reference.alignment_mode",
+    "input_bam_path": "$.params.dataset.paramJson.entry_point.input_bam_path",
+    "input_vdj_contigs": "$.params.dataset.paramJson.entry_point.input_vdj_contigs",
+    "numbat_fetch_refs": "$.params.dataset.paramJson.cnv_parameters.numbat_fetch_refs"
 }
