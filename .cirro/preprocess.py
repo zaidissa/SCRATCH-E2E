@@ -32,6 +32,10 @@ OPTIONAL_PATHS = [
     "input_reference_object",
     "input_bam_path",
     "input_vdj_contigs",
+    # Blank means "use the marker database shipped in the repo". Passed through
+    # as "" it would reach Channel.fromPath(..., checkIfExists: true) and fail
+    # on a path nobody typed.
+    "annot_db",
 ]
 
 

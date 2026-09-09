@@ -145,6 +145,28 @@
                             "multi",
                             "demux"
                         ]
+                    },
+                    "annot_db": {
+                        "type": "string",
+                        "title": "scType marker database",
+                        "description": "s3:// path to the marker CSV (parent_level,cell_group,cell_annotation,markers). THE reference to change per tumour type \u2014 the markers defining a lineage in ovarian are not those defining it in glioma. Leave blank for the built-in ovarian/carcinoma set.",
+                        "default": ""
+                    },
+                    "annot_primary": {
+                        "type": "string",
+                        "title": "Primary annotator",
+                        "default": "sctype",
+                        "description": "Whose labels the CNV, stratification and communication stages read. Both annotators still run and both are reported. Azimuth contributes nothing unless a reference object is supplied.",
+                        "enum": [
+                            "sctype",
+                            "azimuth"
+                        ]
+                    },
+                    "annot_state_exclude": {
+                        "type": "string",
+                        "title": "Skip state-level annotation for",
+                        "default": "Unknown;Epithelial;Fibroblast;NK_Cells",
+                        "description": "Semicolon-separated major classes that get no second, state-level pass. The default is an ovarian-carcinoma assumption: a sarcoma wants Fibroblast states, a glioma has no Epithelial compartment."
                     }
                 }
             },
@@ -304,6 +326,12 @@
                         "title": "Skip CellTypist",
                         "default": true,
                         "description": "Off by default: its Jupyter kernel never answers under emulation locally. It may well work here on native x86 \u2014 worth trying once."
+                    },
+                    "annot_celltypist_model": {
+                        "type": "string",
+                        "title": "CellTypist model",
+                        "default": "Immune_All_Low.pkl",
+                        "description": "Immune_All_Low is IMMUNE-ONLY: on a tumour dataset it labels epithelial and stromal cells as immune subtypes. Pick a model matching the tissue, e.g. Human_Lung_Atlas.pkl."
                     }
                 }
             }

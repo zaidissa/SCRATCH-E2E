@@ -38,6 +38,12 @@ workflow ANNOTATION {
 
     main:
 
+        // A typo here would silently fall through to scType and look like it
+        // worked, so name the valid values instead.
+        if (!(params.annot_primary?.toString()?.toLowerCase() in ['sctype', 'azimuth']))
+            error "--annot_primary '${params.annot_primary}' is not valid. Use 'sctype' or 'azimuth'."
+
+
         ch_notebook_celltypist = Channel.fromPath(params.notebook_celltypist,   checkIfExists: true)
         ch_notebook_sctype_mj  = Channel.fromPath(params.notebook_sctype_major, checkIfExists: true)
         ch_notebook_sctype_st  = Channel.fromPath(params.notebook_sctype_state, checkIfExists: true).collect()
@@ -72,10 +78,23 @@ workflow ANNOTATION {
             ch_major_object = SCYTPE_MAJOR_ANNOTATION.out.seurat_rds
 
             // Populations that get a second, state-level annotation pass.
+            // The exclusion list is a property of the TUMOUR TYPE, not of the
+            // pipeline: it was hardcoded to Unknown|Epithelial|Fibroblast|NK_Cells,
+            // which is an ovarian-carcinoma assumption. A sarcoma wants fibroblast
+            // states; a glioma has no epithelial compartment to exclude.
+            def state_exclude = params.annot_state_exclude
+                                    .toString()
+                                    .split('[;,|]')
+                                    .collect { it.trim() }
+                                    .findAll { it }
+                                    .join('|')
             ch_major_list = SCYTPE_MAJOR_ANNOTATION.out.major_list
                 .splitText()
                 .map    { it.split(':') }
-                .filter { !(it[0] =~ /Unknown|Epithelial|Fibroblast|NK_Cells/) }
+                // `=~ state_exclude` with a plain String, NOT /${state_exclude}/:
+                // Nextflow 26.x's parser rejects an interpolated slashy regex
+                // with "Unexpected input: '/'". Groovy coerces the String itself.
+                .filter { state_exclude ? !(it[0] =~ state_exclude) : true }
                 .map    { it[0].trim() }
 
             SCYTPE_STATE_ANNOTATION(ch_notebook_sctype_st, ch_major_object, ch_database, ch_major_list, ch_page_config)
@@ -128,11 +147,21 @@ workflow ANNOTATION {
             ch_concordance = ANNOTATION_CONCORDANCE.out.concordance
         }
 
-        // Preference order: Azimuth -> scType aggregate -> unannotated input.
+        // Which annotator's object goes downstream. Both still run and both are
+        // reported; this only decides whose labels CNV, stratification and cell
+        // communication read.
+        //
         // `first()` on a mixed channel would be non-deterministic, so the
-        // fallback is resolved by concatenation and taking the head.
-        ch_annotated = ch_azimuth_rds
-            .concat(ch_sctype_rds)
+        // fallback is resolved by concatenation and taking the head — the
+        // preferred annotator is simply concatenated first, and an annotator that
+        // did not run contributes an empty channel rather than a null.
+        //
+        // Previously Azimuth always won. That made the choice depend on whether
+        // --input_reference_object happened to be supplied, rather than on
+        // anything anyone decided.
+        ch_annotated = (params.annot_primary?.toString()?.toLowerCase() == 'azimuth'
+                            ? ch_azimuth_rds.concat(ch_sctype_rds)
+                            : ch_sctype_rds.concat(ch_azimuth_rds))
             .concat(ch_working)
             .first()
 
