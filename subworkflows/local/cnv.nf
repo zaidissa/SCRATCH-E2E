@@ -20,6 +20,7 @@
 ----------------------------------------------------------------------------------------
 */
 
+include { asBool } from '../../lib/booleans.nf'
 include { INFERCNV        } from '../../modules/local/infercnv/main.nf'
 include { COPYKAT_PROCESS } from '../../modules/local/copykat/main.nf'
 include { NUMBAT          } from './numbat.nf'
@@ -48,7 +49,7 @@ workflow CNV {
         // These are what the stratification step consumes.
         ch_infercnv_meta = Channel.empty()
 
-        if (!params.skip_infercnv) {
+        if (!asBool(params.skip_infercnv)) {
             INFERCNV(ch_seurat_object,
                      Channel.fromPath(params.notebook_infercnv, checkIfExists: true),
                      ch_page_config)
@@ -86,7 +87,7 @@ workflow CNV {
             ch_numbat_segments = NUMBAT.out.segments.flatten().map { it.parent }.unique()
         }
 
-        if (!params.skip_copykat) {
+        if (!asBool(params.skip_copykat)) {
             COPYKAT_PROCESS(ch_seurat_object,
                             Channel.fromPath(params.notebook_copykat, checkIfExists: true),
                             ch_page_config)
@@ -108,7 +109,7 @@ workflow CNV {
         // Defaults to the stage's input so the chain never breaks when the
         // comparison is skipped — it is then simply the annotated object.
         ch_cnv_object       = ch_seurat_object
-        if (!params.skip_cnv_concordance) {
+        if (!asBool(params.skip_cnv_concordance)) {
             CNV_CONCORDANCE(
                 ch_seurat_object,
                 ch_infercnv_meta.collect().ifEmpty([]),

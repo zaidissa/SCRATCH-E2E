@@ -20,6 +20,7 @@
 ----------------------------------------------------------------------------------------
 */
 
+include { asBool } from '../../lib/booleans.nf'
 include { CELLCOMM_LIANA    } from '../../modules/local/Cell_Communication/main.nf'
 include { CELLCOMM_CELLCHAT } from '../../modules/local/Cell_Communication/main.nf'
 include { CELLCOMM_NICHENET  } from '../../modules/local/Cell_Communication/main.nf'
@@ -46,7 +47,7 @@ def nichenetAssets(dir) {
     // stub suite depend on data it does not use. Same for an explicitly skipped
     // NicheNet: `ext.when` is evaluated per task, AFTER the DAG is built, so
     // this guard would otherwise block a run that never intended to use them.
-    if (pointers && (workflow.stubRun || params.skip_nichenet)) {
+    if (pointers && (workflow.stubRun || asBool(params.skip_nichenet))) {
         log.warn "NicheNet reference files are unresolved Git LFS pointers " +
                  "(${pointers*.name.join(', ')}). Fine for -stub; a real run needs " +
                  "bin/fetch_nichenet_refs.sh."
@@ -72,7 +73,7 @@ workflow CELL_COMMUNICATION {
         ch_cellchat_rds = Channel.empty()
         ch_nichenet     = Channel.empty()
 
-        if (!params.skip_cellcomm) {
+        if (!asBool(params.skip_cellcomm)) {
 
             nb_liana    = Channel.fromPath(params.liana_qmd,    checkIfExists: true)
             nb_cellchat = Channel.fromPath(params.cellchat_qmd, checkIfExists: true)

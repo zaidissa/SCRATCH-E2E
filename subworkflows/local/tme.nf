@@ -4,6 +4,7 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
+include { asBool } from '../../lib/booleans.nf'
 include { TME_CHARACTERISATION } from '../../modules/local/tme/main.nf'
 
 workflow TME {
@@ -16,7 +17,7 @@ workflow TME {
         ch_data    = Channel.empty()
         ch_figures = Channel.empty()
 
-        if (!params.skip_tme) {
+        if (!asBool(params.skip_tme)) {
             ch_notebook = Channel.fromPath(
                 "${projectDir}/modules/local/tme/tme_characterisation.qmd", checkIfExists: true)
 

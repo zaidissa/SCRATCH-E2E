@@ -4,6 +4,7 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
+include { asBool } from '../../lib/booleans.nf'
 include { CELLTRAJECTORY } from '../../modules/local/cell_trajectory/main.nf'
 
 workflow TRAJECTORY {
@@ -16,7 +17,7 @@ workflow TRAJECTORY {
         ch_rds = Channel.empty()
         ch_obj = Channel.empty()
 
-        if (!params.skip_trajectory) {
+        if (!asBool(params.skip_trajectory)) {
             CELLTRAJECTORY(ch_seurat_object,
                            Channel.fromPath(params.notebook_celltraj, checkIfExists: true),
                            ch_page_config)

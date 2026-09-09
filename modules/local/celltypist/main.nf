@@ -19,7 +19,7 @@ process CELLTYPIST_ANNOTATION {
         path("figures/**"), emit: figure_files, optional: true
         path("_freeze/${notebook.baseName}")                                  , emit: cache
         path("data/${params.project_name}_celltypist_annotation_object.h5ad") , emit: ann_object
-        path("data/Immune_All")                                               , emit: csv_file
+        path("data/celltypist_csvs")                                          , emit: csv_file
         path("report/${notebook.baseName}.html")                              , emit: html
         // path ("figures/**")                                              , emit: figures
                 // Jupyter-engine notebooks with embed-resources inline figures as
@@ -86,7 +86,7 @@ PYEOF
 
 
         touch data/${params.project_name}_celltypist_annotation_object.h5ad
-        mkdir -p _freeze/${notebook.baseName} data/Immune_All
+        mkdir -p _freeze/${notebook.baseName} data/celltypist_csvs
         touch _freeze/${notebook.baseName}/${notebook.baseName}.html
 
         mkdir -p report

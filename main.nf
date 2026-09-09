@@ -45,6 +45,7 @@
 
 nextflow.enable.dsl = 2
 
+include { asBool } from './lib/booleans.nf'
 include { ALIGN              } from './subworkflows/local/align.nf'
 include { QC                 } from './subworkflows/local/qc.nf'
 include { CLUSTER            } from './subworkflows/local/cluster.nf'
@@ -384,7 +385,7 @@ workflow {
     // matched between the supplied BAMs and the annotated object" — is the same
     // treatment TCR gets when there is no VDJ input.
     def numbat_has_bam = params.input_bam_path || run['align']
-    if (params.run_numbat && !numbat_has_bam) {
+    if (asBool(params.run_numbat) && !numbat_has_bam) {
         log.warn "Numbat skipped: no BAM (--input_bam_path unset and ALIGN not running). " +
                  "It phases reads at heterozygous SNPs, so it needs the aligned BAM; " +
                  "inferCNV does not. CNV will run inferCNV alone and the caller " +
@@ -392,7 +393,7 @@ workflow {
     }
 
     ch_numbat_bam = Channel.empty()
-    if (params.run_numbat && numbat_has_bam) {
+    if (asBool(params.run_numbat) && numbat_has_bam) {
         ch_numbat_bam = ch_bam
         if (params.input_bam_path) {
             // Carry the .bai alongside the BAM. Without it the pileup re-indexes an
@@ -411,7 +412,7 @@ workflow {
     }
 
     if (run['cnv']) {
-        CNV(ch_annotated, ch_numbat_bam, (params.run_numbat && numbat_has_bam), ch_page_config)
+        CNV(ch_annotated, ch_numbat_bam, (asBool(params.run_numbat) && numbat_has_bam), ch_page_config)
         ch_cnv_infercnv = CNV.out.infercnv
         // Per-cell calls for the split; the raw caller directories stay behind.
         ch_cnv_evidence = CNV.out.infercnv_meta

@@ -16,6 +16,7 @@
 ----------------------------------------------------------------------------------------
 */
 
+include { asBool } from '../../lib/booleans.nf'
 include { HELPER_SEURAT_SUBSET                            } from '../../modules/local/helpers/subset/main.nf'
 include { HELPER_SCEASY_CONVERTER as SCEASY_CONVERTER_ONE } from '../../modules/local/helpers/convert/main.nf'
 include { CELLTYPIST_ANNOTATION                           } from '../../modules/local/celltypist/main.nf'
@@ -59,13 +60,13 @@ workflow ANNOTATION {
         ch_azimuth_rds = Channel.empty()
         ch_celltypist_obs = Channel.empty()
 
-        if (!params.skip_celltypist) {
+        if (!asBool(params.skip_celltypist)) {
             CELLTYPIST_ANNOTATION(ch_notebook_celltypist, SCEASY_CONVERTER_ONE.out.project_rds, ch_page_config)
             ch_celltypist_obs = CELLTYPIST_ANNOTATION.out.csv_file
         }
 
         // scType's marker database is human-only in this build.
-        if (params.organism_capitalised == 'Human' && !params.skip_sctype) {
+        if (params.organism_capitalised == 'Human' && !asBool(params.skip_sctype)) {
 
             SCYTPE_MAJOR_ANNOTATION(ch_notebook_sctype_mj, ch_working, ch_database, ch_page_config)
             ch_major_object = SCYTPE_MAJOR_ANNOTATION.out.seurat_rds
@@ -92,7 +93,7 @@ workflow ANNOTATION {
 
         // Azimuth requires a reference object.
         def has_reference = params.input_reference_object && !params.input_reference_object.toString().contains('NO_FILE')
-        if (has_reference && !params.skip_azimuth) {
+        if (has_reference && !asBool(params.skip_azimuth)) {
             AZIMUTH_ANNOTATION(ch_notebook_azimuth, ch_working, ch_reference_object, ch_page_config)
             ch_azimuth_rds = AZIMUTH_ANNOTATION.out.seurat_rds
         }
@@ -105,7 +106,7 @@ workflow ANNOTATION {
         // Initialised outside the guard: an emit that only exists on one branch
         // is an "is not defined" at parse time when the stage is skipped.
         ch_concordance = Channel.empty()
-        if (!params.skip_annotation_concordance) {
+        if (!asBool(params.skip_annotation_concordance)) {
             // A DEDICATED placeholder per input, not one shared NO_FILE.
             // Nextflow stages inputs by basename, so two absent annotators both
             // resolving to `NO_FILE` put two files of that name in the task

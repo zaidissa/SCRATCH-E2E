@@ -7,6 +7,7 @@
 ----------------------------------------------------------------------------------------
 */
 
+include { asBool } from '../../lib/booleans.nf'
 include { NUMBAT_FETCH_REFS } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_PREP   } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_PILEUP } from '../../modules/local/numbat/main.nf'
@@ -23,7 +24,7 @@ workflow NUMBAT {
         ch_calls = Channel.empty()
         ch_segments = Channel.empty()
 
-        if (params.run_numbat) {
+        if (asBool(params.run_numbat)) {
 
             // Fail early and legibly: the reference panel is a large external
             // download, and discovering it is missing after the pileup has

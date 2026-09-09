@@ -7,6 +7,7 @@
 ----------------------------------------------------------------------------------------
 */
 
+include { asBool } from '../../lib/booleans.nf'
 include { BATCHCORRECTION } from '../../modules/local/batch_correction/main.nf'
 
 workflow BATCH_CORRECTION {
@@ -18,7 +19,7 @@ workflow BATCH_CORRECTION {
     main:
         ch_notebook = Channel.fromPath(params.notebook_batchcorr, checkIfExists: true)
 
-        if (!params.skip_batchcorrect) {
+        if (!asBool(params.skip_batchcorrect)) {
             BATCHCORRECTION(ch_seurat_object, ch_notebook, ch_page_config)
             ch_out     = BATCHCORRECTION.out.seurat_rds.ifEmpty { null }
             ch_report  = BATCHCORRECTION.out.report

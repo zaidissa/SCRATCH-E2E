@@ -24,6 +24,7 @@
 ----------------------------------------------------------------------------------------
 */
 
+include { asBool } from '../../lib/booleans.nf'
 include { CELLBENDER       } from '../../modules/local/cellbender/main.nf'
 include { CELLBENDER_TO_CELLRANGER } from '../../modules/local/cellbender/to_cellranger.nf'
 include { SEURAT_QUALITY   } from '../../modules/local/seurat/quality/main.nf'
@@ -90,7 +91,7 @@ workflow QC {
                       "  Typical glob   : --input_gex_matrices_path '/path/to/cellranger/*/outs/*'"
             }
 
-        if (!params.skip_cellbender) {
+        if (!asBool(params.skip_cellbender)) {
 
             // Fail loudly on a missing raw matrix rather than silently denoising
             // the filtered one. A cellranger `outs` directory always contains
@@ -139,7 +140,7 @@ workflow QC {
 
         // Propagate the doublet-filtered object, not the pre-filter merge.
         // Select exactly one of the two saved variants by filename.
-        if (!params.skip_scdblfinder) {
+        if (!asBool(params.skip_scdblfinder)) {
             SCDBLFINDER(ch_merged, SEURAT_MERGE.out.bpcells_store,
                         ch_notebook_scdblfinder, ch_page_config)
 

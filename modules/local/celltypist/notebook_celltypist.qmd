@@ -86,7 +86,12 @@ if not os.path.exists(os.path.join(work_directory, 'data')):
 # exit code 0, and Nextflow then failed on a missing output. Silent wrong result,
 # not a crash.
 output_object  = "{work_directory}/data/{project_name}_{object_label}".format(work_directory = work_directory, project_name = project_name, object_label = "celltypist_annotation_object.h5ad")
-annot_table    = "{work_directory}/data/{cell_model}".format(work_directory = work_directory, cell_model = "Immune_All")
+# Model-INDEPENDENT on purpose. This directory is a declared Nextflow output, so
+# deriving its name from cell_model would mean the declaration stops matching the
+# moment anyone selects a different model -- the notebook would render fine and
+# the task would then fail on a missing output. The concordance step is handed
+# this path and appends obs.csv, so the name carries no meaning downstream.
+annot_table    = "{work_directory}/data/celltypist_csvs".format(work_directory = work_directory)
 
 ```
 
