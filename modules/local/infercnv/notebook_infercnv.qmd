@@ -28,6 +28,10 @@ params:
   organism: "human"
   input_analysis_mode: 'samples'
   bayes_max_p_normal: 0
+  # Same parameters STRATIFY and CNV_CONCORDANCE read, so all three build on one
+  # baseline. Supplied from --celltype_col / --stratify_reference_labels.
+  celltype_col: "sctype"
+  reference_labels: "T_Cells;NK_Cells;Myeloid;B_Plasma_Cells;Endothelial_Cells;Fibroblast"
   thr_cluster_size: 1000
   n_threads: 8
   n_memory: 16
@@ -132,19 +136,30 @@ seurat_object <- readRDS(file = seurat_object)
 # Whitelisting observations is the wrong shape anyway: you cannot know in advance
 # what the malignant cells were labelled, and that is the entire question. Keep
 # every cell, name only the REFERENCE, and let everything else be observed.
-if ("azimuth_labels" %in% colnames(seurat_object@meta.data)) {
-  reference_label <- "azimuth_labels"
-  reference_grp   <- c("B cell", "T cell", "Fibroblast")
-} else if ("sctype" %in% colnames(seurat_object@meta.data)) {
-  reference_label <- "sctype"
-  reference_grp   <- c("B_Plasma_Cells", "T_Cells", "Fibroblast")
-} else if ("cell_label" %in% colnames(seurat_object@meta.data)) {
-  # Was `else if ("sctype" %in% ...)` -- a copy of the branch above, so this arm
-  # was unreachable and a cell_label-only object hit the stop() instead.
-  reference_label <- "cell_label"
-  reference_grp   <- c("B cell", "T cell", "Fibroblast")
-} else {
-  stop("No supported annotation column found. The object must have one of the following columns: azimuth_labels, sctype, cell_label")
+#
+# The reference used to be hardcoded per column (scType: B_Plasma_Cells, T_Cells,
+# Fibroblast), while STRATIFY and CNV_CONCORDANCE read --stratify_reference_labels.
+# So the baseline inferCNV called CNV against was not the one the rest of the
+# pipeline believed it was, and on a tumour type with a different vocabulary
+# (glioma: no Fibroblast, no B_Plasma_Cells) it quietly shrank to T cells alone.
+# Column and labels now come from the same parameters, resolved the same way:
+# the candidate order is STRATIFY's, and the matcher is the shared one in
+# scratch_report.R, which reconciles scType and Azimuth spellings.
+.ct_candidates <- c(params$celltype_col, "azimuth_labels", "celltype", "cell_type",
+                    "annotation", "sctype", "sctype_agg", "sctype_labels", "cell_label")
+reference_label <- .ct_candidates[.ct_candidates %in% colnames(seurat_object@meta.data)][1]
+if (is.na(reference_label)) {
+  stop("No annotation column found. Tried: ", paste(.ct_candidates, collapse = ", "),
+       ". Set --celltype_col to the column holding cell-type labels.")
+}
+reference_grp <- trimws(unlist(strsplit(as.character(params$reference_labels), "[;,|]")))
+reference_grp <- reference_grp[nzchar(reference_grp)]
+if (!length(reference_grp)) {
+  stop("inferCNV: --stratify_reference_labels is empty, so there is no baseline to call CNV against.")
+}
+if (!exists("scratch_match_labels")) {
+  stop("inferCNV: scratch_report.R was not staged, so reference labels cannot be ",
+       "matched the way STRATIFY matches them.")
 }
 
 ```
@@ -175,7 +190,8 @@ seurat_object$reference_label[is.na(seurat_object$reference_label) |
 # No keep-list: every cell is retained. Reference cells form the baseline, all
 # others are observations.
 .present   <- unique(seurat_object$reference_label)
-.ref_found <- intersect(reference_grp, .present)
+# Observed labels, not requested names: "T_Cells" may appear as "T cell".
+.ref_found <- .present[scratch_match_labels(.present, reference_grp)]
 .n_ref     <- sum(seurat_object$reference_label %in% .ref_found)
 .n_obs     <- sum(!seurat_object$reference_label %in% .ref_found)
 
@@ -200,9 +216,11 @@ message(sprintf(paste("[inferCNV] reference: %s cells across %d group(s) [%s];",
                 length(setdiff(.present, .ref_found))))
 
 # Reference groups named but absent are dropped silently by inferCNV otherwise.
-if (length(setdiff(reference_grp, .ref_found))) {
+.unmatched_ref <- reference_grp[!vapply(reference_grp, function(r)
+                     any(scratch_match_labels(.present, r)), logical(1))]
+if (length(.unmatched_ref)) {
   warning("inferCNV: reference group(s) not present and therefore unused: ",
-          paste(setdiff(reference_grp, .ref_found), collapse = ", "),
+          paste(.unmatched_ref, collapse = ", "),
           call. = FALSE)
 }
 
