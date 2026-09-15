@@ -91,10 +91,14 @@ workflow ANNOTATION {
             ch_major_list = SCYTPE_MAJOR_ANNOTATION.out.major_list
                 .splitText()
                 .map    { it.split(':') }
-                // `=~ state_exclude` with a plain String, NOT /${state_exclude}/:
+                // `==~ state_exclude` with a plain String, NOT /${state_exclude}/:
                 // Nextflow 26.x's parser rejects an interpolated slashy regex
                 // with "Unexpected input: '/'". Groovy coerces the String itself.
-                .filter { state_exclude ? !(it[0] =~ state_exclude) : true }
+                //
+                // `==~` is a WHOLE-name match. It was `=~`, a substring find, so
+                // excluding Plasma_Cells also excluded B_Plasma_Cells — one class
+                // named in the list silently took every class containing it.
+                .filter { state_exclude ? !(it[0].trim() ==~ state_exclude) : true }
                 .map    { it[0].trim() }
 
             SCYTPE_STATE_ANNOTATION(ch_notebook_sctype_st, ch_major_object, ch_database, ch_major_list, ch_page_config)
