@@ -159,7 +159,9 @@ nextflow config -profile docker .
 | `--cluster_thr_n_dimensions` | `100` |
 | `--cluster_thr_resolution` | `0.5` |
 | `--cluster_group_plot` | `patient_id;timepoint` |
-| `--annot_db` | `assets/cell_markers_database.csv` |
+| `--tumor_type` | `ovarian` (or `glioblastoma`) — presets the four settings below that must agree |
+| `--annot_db` | per tumour type: `assets/cell_markers_database.csv` / `assets/gbm_cell_markers_database.csv` |
+| `--annot_state_exclude` | per tumour type: major classes with no state-level pass |
 | `--skip_celltypist` / `--skip_sctype` / `--skip_azimuth` | `false` |
 
 Azimuth only runs when `--input_reference_object` is set to a real file;
@@ -178,8 +180,8 @@ scType's marker database in this build is human-only.
 | `--stratify_gate_by_lineage` | `true` | immune/stromal lineages are non-malignant regardless of CNV score |
 | `--stratify_method` | `consensus` | `consensus` / `cnv` / `annotation` |
 | `--stratify_min_callers` | `1` | callers that must agree before CNV decides |
-| `--stratify_tumor_labels` | `Epithelial` | labels treated as the tumour lineage |
-| `--stratify_reference_labels` | immune + stromal | the null for inferCNV's score |
+| `--stratify_tumor_labels` | per tumour type: `Epithelial` / `Malignant` | labels treated as the tumour lineage |
+| `--stratify_reference_labels` | per tumour type: immune + stromal / TAMs, T, NK, oligodendrocyte, endothelial | the normal baseline for inferCNV, stratification and CNV concordance |
 | `--stratify_infercnv_sd` | `3` | SDs above the reference-lineage mean |
 | `--stratify_ambiguous` | `exclude` | `exclude` / `malignant` / `non_malignant` |
 | `--stratify_min_cells` | `50` | below this, that arm is skipped |

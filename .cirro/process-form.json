@@ -146,10 +146,20 @@
                             "demux"
                         ]
                     },
+                    "tumor_type": {
+                        "type": "string",
+                        "title": "Tumour type",
+                        "default": "ovarian",
+                        "description": "Sets the scType marker database, the lineages that skip the state-level pass, the tumour-lineage label and the normal reference lineages together, so they always describe the same tumour. Any of those filled in below overrides its preset.",
+                        "enum": [
+                            "ovarian",
+                            "glioblastoma"
+                        ]
+                    },
                     "annot_db": {
                         "type": "string",
-                        "title": "scType marker database",
-                        "description": "s3:// path to the marker CSV (parent_level,cell_group,cell_annotation,markers). THE reference to change per tumour type \u2014 the markers defining a lineage in ovarian are not those defining it in glioma. Leave blank for the built-in ovarian/carcinoma set.",
+                        "title": "scType marker database (override)",
+                        "description": "s3:// path to your own marker CSV (parent_level,cell_group,cell_annotation,markers). Leave blank to use the database for the tumour type above.",
                         "default": ""
                     },
                     "annot_primary": {
@@ -164,9 +174,9 @@
                     },
                     "annot_state_exclude": {
                         "type": "string",
-                        "title": "Skip state-level annotation for",
-                        "default": "Unknown;Epithelial;Fibroblast;NK_Cells",
-                        "description": "Semicolon-separated major classes that get no second, state-level pass. The default is an ovarian-carcinoma assumption: a sarcoma wants Fibroblast states, a glioma has no Epithelial compartment."
+                        "title": "Skip state-level annotation for (override)",
+                        "default": "",
+                        "description": "Semicolon-separated major classes that get no second, state-level pass. Leave blank to use the list for the tumour type above; only set it with your own marker database."
                     }
                 }
             },

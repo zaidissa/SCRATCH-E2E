@@ -25,17 +25,20 @@ import pandas as pd
 from cirro.helpers.preprocess_dataset import PreprocessDataset
 
 # Blank in a form field means "not supplied", not "supplied as empty".
-OPTIONAL_PATHS = [
+BLANK_MEANS_UNSET = [
     "input_seurat_object",
     "input_tumor_object",
     "input_nonmalignant_object",
     "input_reference_object",
     "input_bam_path",
     "input_vdj_contigs",
-    # Blank means "use the marker database shipped in the repo". Passed through
-    # as "" it would reach Channel.fromPath(..., checkIfExists: true) and fail
-    # on a path nobody typed.
+    # Blank means "use the --tumor_type preset". nextflow.config resolves these
+    # four from tumor_type, and any value that reaches Nextflow — including "" —
+    # overrides the preset: "" for annot_db reaches Channel.fromPath(...,
+    # checkIfExists: true) and fails on a path nobody typed, and "" for
+    # annot_state_exclude would silently run a state pass for every class.
     "annot_db",
+    "annot_state_exclude",
 ]
 
 
@@ -89,7 +92,7 @@ def setup_parameters(ds: PreprocessDataset):
 
     # ---- blanks ---------------------------------------------------------
     dropped = [
-        k for k in OPTIONAL_PATHS
+        k for k in BLANK_MEANS_UNSET
         if k in ds.params and not str(ds.params[k]).strip()
     ]
     for k in dropped:

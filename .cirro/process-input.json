@@ -37,6 +37,7 @@
     "input_bam_path": "$.params.dataset.paramJson.entry_point.input_bam_path",
     "input_vdj_contigs": "$.params.dataset.paramJson.entry_point.input_vdj_contigs",
     "numbat_fetch_refs": "$.params.dataset.paramJson.cnv_parameters.numbat_fetch_refs",
+    "tumor_type": "$.params.dataset.paramJson.reference.tumor_type",
     "annot_db": "$.params.dataset.paramJson.reference.annot_db",
     "annot_primary": "$.params.dataset.paramJson.reference.annot_primary",
     "annot_state_exclude": "$.params.dataset.paramJson.reference.annot_state_exclude",

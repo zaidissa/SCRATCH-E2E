@@ -212,6 +212,13 @@ def stagePack(ch, id, title) {
 
 workflow {
 
+    // The four tumour-type presets are resolved in nextflow.config; an unknown
+    // name resolves every one of them to null. Stop here rather than at the
+    // first stage that happens to read one.
+    def tumor_types = ['ovarian', 'glioblastoma']
+    if (!(params.tumor_type?.toString()?.toLowerCase() in tumor_types))
+        error "--tumor_type '${params.tumor_type}' is not valid. Use: ${tumor_types.join(', ')}"
+
     def run  = resolveStages()
     def line = '=' * 74
 
@@ -221,6 +228,9 @@ workflow {
     ${line}
      Project        : ${params.project_name}
      Organism       : ${params.organism}  (genome ${params.genome})
+     Tumour type    : ${params.tumor_type}  (markers ${file(params.annot_db.toString()).name})
+     Tumour labels  : ${params.stratify_tumor_labels}
+     Reference      : ${params.stratify_reference_labels}
      Output         : ${params.outdir}
      Range          : ${params.only ? "--only ${params.only}" : "--from ${params.from} --to ${params.to}"}
      Stages enabled : ${run.findAll { k, v -> v }.keySet().join(', ') ?: 'none'}
