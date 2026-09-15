@@ -718,23 +718,23 @@ panel_m3
 #| message: true
 #| warning: true
 
-# ncores_m3 <- max(1, parallel::detectCores() - 1)
-
-# m3_gt <- monocle3::graph_test(cds, neighbor_graph = "principal_graph", cores = ncores_m3)
-# Default to the cores Nextflow actually allocated, not 1. The module exports
-# OMP_NUM_THREADS from task.cpus but never sets M3_CORES, so graph_test -- the
-# most expensive step in this stage by a wide margin -- ran single-threaded
-# while the other 11 allocated cores sat idle. safe_graph_test() below already
-# retries with cores=1 if a parallel run fails, so raising the default is safe.
-# M3_CORES still wins when set explicitly.
-ncores_m3 <- as.integer(Sys.getenv("M3_CORES",
-                                   unset = Sys.getenv("OMP_NUM_THREADS", unset = "1")))
-if (!is.finite(ncores_m3) || ncores_m3 < 1) ncores_m3 <- 1L
-
-max_cores <- as.integer(Sys.getenv("OMP_NUM_THREADS", unset = "8"))
-if (!is.finite(max_cores) || max_cores < 1) max_cores <- 1L
-
-ncores_m3 <- as.integer(min(ncores_m3, max_cores))
+# graph_test is the most expensive step in this stage: 53 of the 140 minutes on
+# the 20,523-cell HGSOC compartment. It forks one worker per core.
+#
+# Cores come from params$n_threads, which the module sets to task.cpus. They used
+# to be read from OMP_NUM_THREADS, and that never worked: the CytoTRACE chunk
+# above sets OMP_NUM_THREADS to "1" to keep BLAS single-threaded, so by the time
+# this chunk ran the variable always said 1, and graph_test ran on one core while
+# the other 11 allocated cores sat idle. params are not touched by Sys.setenv.
+#
+# Measured in syedsazaidi/scratch-celltrajectory under amd64 emulation, on this
+# run's saved cds: identical Moran's I and q-values at 1 and 12 cores, and no
+# hang (forked workers were the suspect in the CytoTRACE2 hang). M3_CORES still
+# wins when set; outside Nextflow, with no n_threads, it stays at one core.
+ncores_m3 <- suppressWarnings(as.integer(Sys.getenv("M3_CORES",
+                                                    unset = as.character(params$n_threads %||% 1L))))
+if (length(ncores_m3) != 1L || !is.finite(ncores_m3) || ncores_m3 < 1L) ncores_m3 <- 1L
+message(sprintf("[Monocle3] graph_test and find_gene_modules on %d core(s).", ncores_m3))
 
 safe_graph_test <- function(cds, cores) {
   tryCatch(
