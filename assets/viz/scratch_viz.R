@@ -348,11 +348,19 @@ scratch_interactive_twin <- function(plot, filename) {
 # raster call is delegated verbatim so any arguments they pass still apply.
 ggsave <- function(filename, plot = ggplot2::last_plot(), ...) {
   plot <- tryCatch(scratch_autoscale_text(plot), error = function(e) plot)
-  out <- ggplot2::ggsave(filename, plot, ...)
+  # Opaque background unless the caller chose one. Without `bg`, ggsave() takes
+  # the background from the theme, and Seurat's and NicheNet's themes leave
+  # plot.background blank — so their PNGs were written TRANSPARENT: black strokes
+  # on nothing, which shows as a solid black image in any viewer or slide that is
+  # not a white page. 16 of 165 files in figures/ were like that while the same
+  # plots looked right embedded in the report. An explicit bg, "transparent"
+  # included, is still honoured.
+  dots <- list(...)
+  if (is.null(dots$bg)) dots$bg <- SCRATCH_PAL$surface
+  out <- do.call(ggplot2::ggsave, c(list(filename = filename, plot = plot), dots))
   if (grepl("\\.png$", filename, ignore.case = TRUE)) {
     try({
       pdfname <- sub("\\.png$", ".pdf", filename, ignore.case = TRUE)
-      dots <- list(...)
       dots$dpi <- NULL                       # meaningless for vector output
       dev <- if (capabilities("cairo")) grDevices::cairo_pdf else NULL
       if (!is.null(dev)) dots$device <- dev
@@ -476,8 +484,11 @@ DimPlot <- function(object, ...) {
   # Never let a failed export abort the render: a missing figure file is a far
   # smaller problem than a notebook that does not finish.
   for (ext in c("png", "pdf")) {
+    # bg: same reason as the ggsave shim — a theme with a blank plot.background
+    # otherwise exports a transparent PNG that reads as solid black off the page.
     try(suppressMessages(ggplot2::ggsave(paste0(base, ".", ext), plot = x,
                                          width = w, height = h, dpi = 300,
+                                         bg = SCRATCH_PAL$surface,
                                          limitsize = FALSE)), silent = TRUE)
   }
   invisible(NULL)
