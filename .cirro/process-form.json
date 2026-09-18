@@ -34,9 +34,10 @@
                         "type": "string",
                         "title": "Stop after",
                         "default": "end",
-                        "description": "'end' runs through to the integration layer and the master report.",
+                        "description": "'end' runs through to the integration layer and the master report. 'align' stops after cellranger, which is the only range that works for a TCR-only run — QC and everything after it need gene expression.",
                         "enum": [
                             "end",
+                            "align",
                             "qc",
                             "cluster",
                             "annotation",
@@ -49,6 +50,17 @@
                             "tme",
                             "tcr",
                             "integration"
+                        ]
+                    },
+                    "tcr_analysis": {
+                        "type": "string",
+                        "title": "TCR analysis",
+                        "default": "auto",
+                        "description": "auto follows the stage range. Pick 'yes' with Start at 'align', Stop after 'align' and Modality 'TCR' to run VDJ QC and repertoire analysis on TCR libraries alone, with no gene expression.",
+                        "enum": [
+                            "auto",
+                            "yes",
+                            "no"
                         ]
                     },
                     "project_name": {

@@ -33,6 +33,7 @@
     "skip_tme": "$.params.dataset.paramJson.downstream.skip_tme",
     "skip_celltypist": "$.params.dataset.paramJson.downstream.skip_celltypist",
     "project_name": "$.params.dataset.paramJson.stage_range.project_name",
+    "tcr_analysis": "$.params.dataset.paramJson.stage_range.tcr_analysis",
     "alignment_mode": "$.params.dataset.paramJson.reference.alignment_mode",
     "input_bam_path": "$.params.dataset.paramJson.entry_point.input_bam_path",
     "input_vdj_contigs": "$.params.dataset.paramJson.entry_point.input_vdj_contigs",

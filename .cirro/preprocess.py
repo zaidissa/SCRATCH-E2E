@@ -109,6 +109,24 @@ def setup_parameters(ds: PreprocessDataset):
     ds.add_param("demux", mode == "demux")
     ds.remove_param("alignment_mode")
 
+    # TCR analysis is a TRI-STATE, not a checkbox, and it has to stay one.
+    # main.nf reads run_tcr as "null = decide from --from/--to" and applies the
+    # override only when it is non-null, so a boolean field defaulting to false
+    # would send false on EVERY launch and silently switch the TCR stage off in
+    # full runs that should fan out to it.
+    #
+    # 'yes' is what makes a TCR-only run possible: with Stop after = align the
+    # range enables no stage that needs gene expression, and run_tcr = true adds
+    # the TCR stage back on top of alignment.
+    tcr = str(ds.params.get("tcr_analysis", "auto")).strip().lower()
+    if tcr == "yes":
+        ds.add_param("run_tcr", True, overwrite=True)
+    elif tcr == "no":
+        ds.add_param("run_tcr", False, overwrite=True)
+    # 'auto' leaves run_tcr unset, which is the null the stage logic expects.
+    if "tcr_analysis" in ds.params:
+        ds.remove_param("tcr_analysis")
+
     # ---- blanks ---------------------------------------------------------
     dropped = [
         k for k in BLANK_MEANS_UNSET
