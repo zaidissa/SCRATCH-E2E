@@ -242,6 +242,20 @@ workflow {
     if (!run.any { k, v -> v })
         error "No stages selected. Check --from/--to and the run_* flags."
 
+    // ALIGN builds count matrices only for the modality it was told to run, so a
+    // TCR-only run reaches QC with nothing: cellranger vdj writes neither
+    // metrics_summary.csv nor filtered_feature_bc_matrix.h5. That used to surface
+    // one stage later as "No sample under --input_gex_matrices_path ...", naming a
+    // flag the run never set and a glob nobody typed. Say it here, where the cause
+    // is still the answer.
+    if (run['align'] && run['qc'] && !(params.modality?.toString() =~ /GEX/))
+        error "--modality '${params.modality}' aligns no gene-expression libraries, " +
+              "but the stage range includes 'qc'.\n" +
+              "  cellranger vdj produces no count matrix, so QC — and every stage after " +
+              "it — would have nothing to read.\n" +
+              "  Use --modality GEX or GEX+TCR, stop at --to align, or start from existing " +
+              "counts with --input_gex_matrices_path."
+
     // ---- Shared Quarto assets -------------------------------------------
     // Every notebook-rendering process takes the same template bundle. Built
     // once here rather than re-derived inside each of the eleven subworkflows,

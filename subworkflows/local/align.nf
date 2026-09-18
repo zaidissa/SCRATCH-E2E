@@ -151,6 +151,15 @@ workflow ALIGN {
             }
 
             if (modality =~ /GEX/) {
+                // GEX was asked for, but demultiplexing may have detected none:
+                // the manifest's modality column decides. Without this the run
+                // stays silent until QC fails on an empty channel.
+                ch_branches.gex.ifEmpty {
+                    error "--modality '${modality}' includes GEX, but AUTO_DEMUX detected " +
+                          "no sample with modality 'GEX'.\n" +
+                          "  Check the `modality` column of the demux manifest " +
+                          "(detected_samples.csv) and the pooled FASTQs given to it."
+                }
                 ch_gex_outs = CELLRANGER_COUNT(
                     ch_branches.gex.map { s, reads, mod -> tuple(s, reads) },
                     params.genomes[genome].gex
@@ -193,6 +202,17 @@ workflow ALIGN {
             }
 
             if (modality =~ /GEX/) {
+                // GEX was asked for, but the sheet may carry none of it: the
+                // modality COLUMN decides which rows are aligned, so a samplesheet
+                // built from a TCR-only file selection satisfies --modality
+                // GEX+TCR while containing no GEX row at all. Without this the run
+                // stays silent until QC fails on an empty channel, one stage later.
+                ch_branches.gex.ifEmpty {
+                    error "--modality '${modality}' includes GEX, but no row in the " +
+                          "samplesheet has modality 'GEX'.\n" +
+                          "  Samplesheet: ${params.input_samplesheet}\n" +
+                          "  Check its `modality` column, and which input files the run selected."
+                }
                 ch_gex_outs = CELLRANGER_COUNT(
                     ch_branches.gex
                         .map { r -> tuple(r[0], r[1], r[2]) }

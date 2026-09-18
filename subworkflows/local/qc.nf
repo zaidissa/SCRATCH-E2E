@@ -85,10 +85,16 @@ workflow QC {
 
         ch_cell_matrices
             .ifEmpty {
-                error "No sample under --input_gex_matrices_path has BOTH " +
+                // Two different causes reach this point, and the old message
+                // named only the second — so a TCR-only ALIGN run was told to fix
+                // a glob it had never set. Name both, with the values in force.
+                error "No GEX count matrices reached QC: no sample has BOTH " +
                       "metrics_summary.csv and filtered_feature_bc_matrix.h5.\n" +
-                      "  Expected layout: <sample>/outs/<those files>\n" +
-                      "  Typical glob   : --input_gex_matrices_path '/path/to/cellranger/*/outs/*'"
+                      "  If ALIGN ran   : --modality is '${params.modality}' — it must include " +
+                      "GEX, and the samplesheet must have rows with modality 'GEX'.\n" +
+                      "  If starting from counts: --input_gex_matrices_path is " +
+                      "'${params.input_gex_matrices_path ?: 'unset'}'; expected layout " +
+                      "<sample>/outs/<those files>, typically '/path/to/cellranger/*/outs/*'."
             }
 
         if (!asBool(params.skip_cellbender)) {
