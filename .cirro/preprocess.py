@@ -81,6 +81,25 @@ def setup_parameters(ds: PreprocessDataset):
         # ${launchDir} rather than an absolute path: the head job and the tasks
         # do not share a filesystem view on Batch.
         ds.add_param("input_samplesheet", "${launchDir}/samplesheet.csv")
+        # ...and the per-sample METADATA table that QC's merge step reads.
+        #
+        # process-input.json maps input_exp_table to
+        #   <input dataset>/data/pipeline_info/samplesheet.valid.csv
+        # which exists only inside a PREVIOUS PIPELINE'S OUTPUT dataset. Starting
+        # at `align` the input is a FASTQ dataset, which has no such file, so the
+        # run died at DAG build — before a single task — with
+        #   No such file or directory: .../data/pipeline_info/samplesheet.valid.csv
+        #
+        # The samplesheet just written is a valid metadata table: the merge
+        # notebook requires a `sample` column, drops fastq_1/fastq_2/modality and
+        # calls distinct(), so the one-row-per-lane layout collapses to one row
+        # per sample carrying patient_id, timepoint and batch. The sample names
+        # match end to end — cellranger is run with --id="${sample}", QC sets
+        # orig.ident from it, and merge joins orig.ident to metadata$sample.
+        #
+        # overwrite=True is required: add_param asserts when the key already
+        # exists, and process-input.json always supplies this one.
+        ds.add_param("input_exp_table", "${launchDir}/samplesheet.csv", overwrite=True)
     else:
         ds.logger.info(f"Starting at '{start}', so no cellranger samplesheet is built.")
 
