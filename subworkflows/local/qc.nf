@@ -99,12 +99,39 @@ workflow QC {
 
         if (!asBool(params.skip_cellbender)) {
 
+            // Samples named in --cellbender_skip_samples bypass CellBender and are
+            // analysed from cellranger's filtered matrix. It exists because the
+            // first GBM run spent four days retrying one 4-lane library on CPU
+            // while six finished samples waited: every step after this one needs
+            // all samples, so one library CellBender cannot finish holds them all.
+            def cb_skip = (params.cellbender_skip_samples ?: '').toString()
+                              .split('[,;]').collect { it.trim() }.findAll { it }
+
+            if (cb_skip) {
+                // A misspelt name would quietly run CellBender on the very sample
+                // the user meant to skip — days of compute for a typo. Name it.
+                ch_cell_matrices
+                    .map { it[0] }
+                    .collect()
+                    .subscribe { names ->
+                        def unknown = cb_skip.findAll { !(it in names) }
+                        if (unknown)
+                            log.warn "--cellbender_skip_samples names no sample called " +
+                                     "${unknown.join(', ')}. Samples in this run: ${names.join(', ')}"
+                    }
+            }
+
+            ch_cb_branch = ch_cell_matrices.branch {
+                skip: it[0] in cb_skip
+                run:  true
+            }
+
             // Fail loudly on a missing raw matrix rather than silently denoising
             // the filtered one. A cellranger `outs` directory always contains
             // raw_feature_bc_matrix.h5; its absence means the input glob is too
             // narrow (a common one, `*/outs/filtered*`, excludes it) or the
             // directory was pruned to save space.
-            ch_cb_input = ch_cell_matrices
+            ch_cb_input = ch_cb_branch.run
                 .map { sample, csv, filtered, raw ->
                     if (raw == null)
                         error "CellBender is enabled but '${sample}' has no " +
@@ -118,11 +145,32 @@ workflow QC {
 
             // CellBender's own h5 carries extra root groups that Read10X_h5
             // cannot parse; reformat before handing it to the QC notebook.
-            ch_cell_matrices = CELLBENDER_TO_CELLRANGER(CELLBENDER(ch_cb_input).corrected).corrected
+            ch_cb_done = CELLBENDER_TO_CELLRANGER(CELLBENDER(ch_cb_input).corrected).corrected
+                .map { sample, csv, h5 -> tuple(sample, h5) }
+
+            // Per-sample fallback. CELLBENDER's final attempt is `ignore`
+            // (conf/base.config), so a sample it cannot finish emits nothing here
+            // instead of terminating the run; this left join then hands that
+            // sample its cellranger filtered matrix. Before, one unfinished library
+            // took every other sample's completed work down with it. The status
+            // travels with the sample into its QC report, so the fallback is never
+            // silent: a run that mixes corrected and uncorrected samples says so.
+            ch_cb_resolved = ch_cb_branch.run
+                .map { sample, csv, filtered, raw -> tuple(sample, csv, filtered) }
+                .join(ch_cb_done, remainder: true)
+                .map { sample, csv, filtered, h5 ->
+                    h5 ? tuple(sample, csv, h5, 'cellbender')
+                       : tuple(sample, csv, filtered, 'cellbender_failed')
+                }
+
+            ch_cb_skipped = ch_cb_branch.skip
+                .map { sample, csv, filtered, raw -> tuple(sample, csv, filtered, 'skipped_by_request') }
+
+            ch_cell_matrices = ch_cb_resolved.mix(ch_cb_skipped)
 
         } else {
             ch_cell_matrices = ch_cell_matrices
-                .map { sample, csv, filtered, raw -> tuple(sample, csv, filtered) }
+                .map { sample, csv, filtered, raw -> tuple(sample, csv, filtered, 'disabled') }
         }
 
         SEURAT_QUALITY(ch_cell_matrices, ch_notebook_quality.collect(), ch_page_config)

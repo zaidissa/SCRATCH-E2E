@@ -23,6 +23,7 @@
     "cellbender_cuda": "$.params.dataset.paramJson.ambient_rna.cellbender_cuda",
     "cellbender_epochs": "$.params.dataset.paramJson.ambient_rna.cellbender_epochs",
     "cellbender_fpr": "$.params.dataset.paramJson.ambient_rna.cellbender_fpr",
+    "cellbender_skip_samples": "$.params.dataset.paramJson.ambient_rna.cellbender_skip_samples",
     "run_numbat": "$.params.dataset.paramJson.cnv_parameters.run_numbat",
     "skip_infercnv": "$.params.dataset.paramJson.cnv_parameters.skip_infercnv",
     "cnv_caller_priority": "$.params.dataset.paramJson.cnv_parameters.cnv_caller_priority",

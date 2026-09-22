@@ -32,6 +32,9 @@ params:
   thr_n_feature_rna_max: 7500
   thr_percent_mito: 25
   thr_n_observed_cells: 300
+  # Which counts this sample was analysed from, set per sample by qc.nf:
+  # cellbender | skipped_by_request | cellbender_failed | disabled
+  ambient_correction: 'cellbender'
   n_threads: 8
   n_memory: 16
   work_directory: !expr here::here()
@@ -397,6 +400,31 @@ keep_fixed <- qcd$nFeature_RNA >= thr_n_feature_rna_min &
 keep_mad   <- qcd$nFeature_RNA >= mad_feat[1] & qcd$nFeature_RNA < mad_feat[2] &
               qcd$percent_mito < mad_mito
 n_disagree <- sum(keep_fixed != keep_mad, na.rm = TRUE)
+```
+
+```{r ambient-finding, results = 'asis'}
+# Stated on every sample's page, because a run can now mix CellBender-corrected
+# and uncorrected samples, and that difference would otherwise surface later as
+# something that looks like a batch effect.
+.amb <- if (is.null(params$ambient_correction)) "cellbender" else as.character(params$ambient_correction)
+if (identical(.amb, "skipped_by_request")) {
+  scratch_finding(paste(
+    "**Not ambient-corrected: CellBender was skipped for this sample by request**",
+    "(`--cellbender_skip_samples`). Its counts are cellranger's filtered matrix, so",
+    "ambient transcripts remain in every cell. Where other samples in this run were",
+    "corrected, part of any difference between them is the correction, not biology."),
+    type = "caution", title = "Ambient RNA")
+} else if (identical(.amb, "cellbender_failed")) {
+  scratch_finding(paste(
+    "**Not ambient-corrected: CellBender did not finish for this sample** after all",
+    "its attempts, so the pipeline fell back to cellranger's filtered matrix instead",
+    "of stopping the run. Ambient transcripts remain in every cell; compare it with",
+    "corrected samples with that in mind, and see the CellBender task log for why."),
+    type = "caution", title = "Ambient RNA")
+} else if (identical(.amb, "disabled")) {
+  scratch_finding("Ambient-RNA correction is off for this run (`--skip_cellbender`).",
+                  type = "note", title = "Ambient RNA")
+}
 ```
 
 ```{r qc-finding, results = 'asis'}

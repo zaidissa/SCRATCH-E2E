@@ -264,6 +264,12 @@
                         "type": "number",
                         "default": 0.01,
                         "title": "False positive rate"
+                    },
+                    "cellbender_skip_samples": {
+                        "type": "string",
+                        "title": "Skip CellBender for these samples",
+                        "default": "",
+                        "description": "Comma-separated exact sample names to analyse without ambient-RNA removal, using cellranger's filtered matrix. For a library CellBender cannot finish on CPU. Each skipped sample's QC report says it was not corrected. Blank = none skipped."
                     }
                 }
             },

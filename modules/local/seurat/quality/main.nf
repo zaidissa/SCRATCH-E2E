@@ -4,7 +4,10 @@ process SEURAT_QUALITY {
     label 'process_medium'
 
     input:
-        tuple val(sample_id), path(csv_metrics), path(matrices)
+        // ambient_status: cellbender | skipped_by_request | cellbender_failed |
+        // disabled — set per sample in qc.nf so the report can say which counts
+        // this sample was analysed from.
+        tuple val(sample_id), path(csv_metrics), path(matrices), val(ambient_status)
         path(notebook_quality)
         path(page_config)
 
@@ -21,14 +24,14 @@ process SEURAT_QUALITY {
         task.ext.when == null || task.ext.when
 
     script:
-        def param_file = task.ext.args ? "-P sample_name:${sample_id} -P csv_metrics:${csv_metrics} -P input_gex_matrices:${matrices} -P ${task.ext.args}" : ""
+        def param_file = task.ext.args ? "-P sample_name:${sample_id} -P csv_metrics:${csv_metrics} -P input_gex_matrices:${matrices} -P ambient_correction:${ambient_status} -P ${task.ext.args}" : ""
         def notebook_sample = "notebook_${sample_id}"
         """
         mv ${notebook_quality} ${notebook_sample}.qmd
         quarto render ${notebook_sample}.qmd ${param_file}
         """
     stub:
-        def param_file = task.ext.args ? "-P sample_name:${sample_id} -P csv_metrics:${csv_metrics} -P input_gex_matrices:${matrices} -P ${task.ext.args}" : ""
+        def param_file = task.ext.args ? "-P sample_name:${sample_id} -P csv_metrics:${csv_metrics} -P input_gex_matrices:${matrices} -P ambient_correction:${ambient_status} -P ${task.ext.args}" : ""
         def notebook_sample = "notebook_${sample_id}"
         """
         mkdir -p objects log figures report
