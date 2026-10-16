@@ -2,10 +2,17 @@ process SCDBLFINDER {
 
     tag "Removing doublets"
     label 'process_high'
-    
-    // Directive form, not assignment: Nextflow 26.x rejects `executor = 'x'`
-    // inside a process with "Invalid process directive".
-    executor 'local'
+
+    // NO `executor 'local'` HERE. It was inherited from the standalone pipeline
+    // and pinned doublet detection to whatever machine launched the run. On
+    // Cirro that is the 2-CPU head node, so the 12 cpus asked for in
+    // conf/base.config aborted the whole run with "Process requirement exceeds
+    // available CPUs -- req: 12; avail: 2" (2026-10-16). A process-level
+    // executor directive overrides `process.executor = 'awsbatch'` from the
+    // cirro profile, so nothing in conf/ could correct it. The notebook opens
+    // the BPCells store by its STAGED RELATIVE path (data/bpcells_counts), not
+    // by the absolute path recorded in the RDS, so this process has never
+    // needed to share a filesystem with SEURAT_MERGE.
 
 
     input:
