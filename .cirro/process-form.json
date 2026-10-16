@@ -97,7 +97,7 @@
                     "input_bam_path": {
                         "type": "string",
                         "title": "Aligned BAM glob (optional)",
-                        "description": "s3:// glob of possorted_genome_bam.bam. Numbat phases reads at heterozygous SNPs and cannot run without it; leave blank and Numbat self-disables with a warning.",
+                        "description": "Leave blank: when the selected dataset contains cellranger BAMs, the glob is derived from it automatically. Fill it in only to point at BAMs in a different dataset. Numbat phases reads at heterozygous SNPs and cannot run without one; if none is found it self-disables with a warning.",
                         "default": ""
                     },
                     "input_vdj_contigs": {

@@ -16,7 +16,13 @@ Three jobs, in order of how badly their absence bites:
    main.nf's entry-point resolution and produces a file-not-found for a path
    nobody typed.
 
-3. Log enough that a failed launch can be diagnosed without re-running it.
+3. Find Numbat's BAM in the input dataset instead of making the user retype a
+   path Cirro already knows. Selecting a dataset maps only the matrices and the
+   metadata table, so a cellranger dataset full of possorted_genome_bam.bam
+   files still produced "Numbat skipped: no BAM" unless the glob was typed into
+   the form by hand. Twice, on real launches.
+
+4. Log enough that a failed launch can be diagnosed without re-running it.
 """
 
 import os
@@ -40,6 +46,107 @@ BLANK_MEANS_UNSET = [
     "annot_db",
     "annot_state_exclude",
 ]
+
+
+BAM_NAME = "possorted_genome_bam.bam"
+
+
+def _truthy(value) -> bool:
+    return str(value).strip().lower() in ("true", "yes", "y", "on", "1")
+
+
+def _bam_glob_from_matrices(gex_path: str):
+    """Turn the matrices glob into the BAM glob beside it.
+
+    process-input.json builds input_gex_matrices_path as
+        <dataset>/data/data/SCRATCH_ALIGN:CELLRANGER_COUNT/**/outs/*
+    and cellranger writes possorted_genome_bam.bam into that same `outs`, so the
+    BAM glob is the matrices glob with its last segment replaced. Returns None
+    for any path that does not look like a cellranger layout, so an unusual
+    input simply falls back to the old behaviour.
+    """
+    gex_path = (gex_path or "").strip()
+    if not gex_path.startswith("s3://") or "/outs/" not in gex_path:
+        return None
+    return gex_path.rsplit("/outs/", 1)[0] + "/outs/" + BAM_NAME
+
+
+def _files_table_lists_bam(ds: PreprocessDataset) -> bool:
+    """True when the dataset's own file table already names a BAM."""
+    try:
+        files = ds.files
+        if files is None or len(files) == 0:
+            return False
+        return bool(
+            files.astype(str)
+            .apply(lambda col: col.str.endswith(BAM_NAME))
+            .to_numpy()
+            .any()
+        )
+    except Exception:
+        return False
+
+
+def _s3_lists_bam(bam_glob: str, ds: PreprocessDataset, max_pages: int = 5) -> bool:
+    """Confirm at least one BAM exists under the glob's fixed prefix.
+
+    This check is the point of the whole function. main.nf reads the path with
+    `Channel.fromPath(..., checkIfExists: true)`, so handing it a glob that
+    matches nothing converts today's graceful "Numbat skipped" warning into a
+    hard failure at DAG build. Deriving a path is only safe once something has
+    been seen at the other end of it.
+    """
+    try:
+        import boto3
+
+        bucket, _, key = bam_glob[len("s3://"):].partition("/")
+        prefix = key.split("**", 1)[0].split("*", 1)[0]
+        pages = 0
+        for page in boto3.client("s3").get_paginator("list_objects_v2").paginate(
+            Bucket=bucket, Prefix=prefix
+        ):
+            pages += 1
+            for obj in page.get("Contents", []):
+                if obj["Key"].endswith(BAM_NAME):
+                    return True
+            if pages >= max_pages:
+                break
+        return False
+    except Exception as exc:
+        ds.logger.info(f"Numbat: could not list S3 for BAMs ({exc})")
+        return False
+
+
+def resolve_numbat_bam(ds: PreprocessDataset, start: str) -> None:
+    """Fill --input_bam_path from the input dataset when the form left it blank.
+
+    Starting at `align` the pipeline produces its own BAMs, and the input is a
+    FASTQ dataset that has none, so nothing is derived there.
+    """
+    if start == "align":
+        return
+    if not _truthy(ds.params.get("run_numbat", False)):
+        return
+    if str(ds.params.get("input_bam_path", "")).strip():
+        return  # an explicit path always wins
+
+    bam_glob = _bam_glob_from_matrices(ds.params.get("input_gex_matrices_path", ""))
+    if not bam_glob:
+        ds.logger.info(
+            "Numbat: input_gex_matrices_path is not a cellranger layout, so no BAM "
+            "glob could be derived. Numbat will self-disable."
+        )
+        return
+
+    if not (_files_table_lists_bam(ds) or _s3_lists_bam(bam_glob, ds)):
+        ds.logger.info(
+            f"Numbat: no {BAM_NAME} found under the input dataset, so "
+            "--input_bam_path stays unset and Numbat will self-disable with a warning."
+        )
+        return
+
+    ds.add_param("input_bam_path", bam_glob, overwrite=True)
+    ds.logger.info(f"Numbat: derived --input_bam_path from the input dataset: {bam_glob}")
 
 
 def build_samplesheet(ds: PreprocessDataset) -> pd.DataFrame:
@@ -126,6 +233,12 @@ def setup_parameters(ds: PreprocessDataset):
     # 'auto' leaves run_tcr unset, which is the null the stage logic expects.
     if "tcr_analysis" in ds.params:
         ds.remove_param("tcr_analysis")
+
+    # ---- Numbat's BAM ----------------------------------------------------
+    # Must run BEFORE the blank-dropping below: a derived path is non-blank and
+    # therefore survives it, while a dataset with no BAMs leaves the field blank
+    # and is dropped exactly as before.
+    resolve_numbat_bam(ds, start)
 
     # ---- blanks ---------------------------------------------------------
     dropped = [
