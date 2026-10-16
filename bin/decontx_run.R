@@ -46,6 +46,15 @@ msg <- function(...) cat(sprintf(...), "\n", sep = "")
 sce <- DropletUtils::read10xCounts(filtered, col.names = TRUE)
 msg("%s: read %d genes x %d cells", sample_id, nrow(sce), ncol(sce))
 
+# read10xCounts returns an HDF5-BACKED TENxMatrix for an .h5 input, and DecontX
+# then returns its result as one too -- whereupon round()/drop0() die with
+# `invalid class "DelayedMatrix" in 'R_Matrix_as_Csparse'`, AFTER the EM has
+# run. Materialise the cell matrix now: it is the filtered matrix, so it is
+# small, and the EM is faster in memory. The background matrix is deliberately
+# left delayed -- it holds every droplet and can be millions of columns.
+SummarizedExperiment::assay(sce, "counts") <-
+  as(SummarizedExperiment::assay(sce, "counts"), "dgCMatrix")
+
 # ---- optional ambient profile from empty droplets --------------------------
 # DecontX does not require empty droplets -- that is its advantage over
 # CellBender and SoupX -- but it uses them when given, and a cellranger `outs`
@@ -92,7 +101,14 @@ msg("%s: decontX finished in %.1f min, mean contamination %.1f%% (median %.1f%%)
 # decontXcounts is non-integer by construction. Round, then drop0: without it the
 # zeros stay as EXPLICIT entries and the file carries millions of stored zeros,
 # which inflates it and slows every reader downstream.
-corrected <- Matrix::drop0(round(celda::decontXcounts(sce)))
+corrected <- celda::decontXcounts(sce)
+# Belt and braces: if a future celda hands back a delayed matrix anyway, coerce
+# rather than fail after the expensive part is already done.
+if (!inherits(corrected, "dgCMatrix")) {
+  corrected <- tryCatch(as(corrected, "dgCMatrix"),
+                        error = function(e) as(as(corrected, "sparseMatrix"), "dgCMatrix"))
+}
+corrected <- Matrix::drop0(round(corrected))
 
 # A cell whose counts round away entirely cannot be analysed and makes Seurat
 # fail later with an unrelated-looking error. Drop it here and say so.
