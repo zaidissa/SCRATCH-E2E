@@ -219,6 +219,13 @@ workflow {
     if (!(params.tumor_type?.toString()?.toLowerCase() in tumor_types))
         error "--tumor_type '${params.tumor_type}' is not valid. Use: ${tumor_types.join(', ')}"
 
+    // An unknown ambient method would otherwise fall through qc.nf's else branch
+    // and silently run CellBender — days of compute the user did not ask for.
+    def amb_methods = ['cellbender', 'decontx']
+    if (!(params.ambient_method?.toString()?.toLowerCase() in amb_methods))
+        error "--ambient_method '${params.ambient_method}' is not valid. Use: ${amb_methods.join(', ')} " +
+              "(or --skip_cellbender true for no ambient correction at all)."
+
     def run  = resolveStages()
     def line = '=' * 74
 
@@ -234,6 +241,7 @@ workflow {
      Output         : ${params.outdir}
      Range          : ${params.only ? "--only ${params.only}" : "--from ${params.from} --to ${params.to}"}
      Stages enabled : ${run.findAll { k, v -> v }.keySet().join(', ') ?: 'none'}
+     Ambient RNA    : ${asBool(params.skip_cellbender) ? 'none (--skip_cellbender)' : params.ambient_method}
      NMF engine     : ${params.metaprog_nmf_engine}
      Profile        : ${workflow.profile}
     ${line}

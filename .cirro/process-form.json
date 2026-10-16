@@ -34,7 +34,7 @@
                         "type": "string",
                         "title": "Stop after",
                         "default": "end",
-                        "description": "'end' runs through to the integration layer and the master report. 'align' stops after cellranger, which is the only range that works for a TCR-only run — QC and everything after it need gene expression.",
+                        "description": "'end' runs through to the integration layer and the master report. 'align' stops after cellranger, which is the only range that works for a TCR-only run \u2014 QC and everything after it need gene expression.",
                         "enum": [
                             "end",
                             "align",
@@ -241,8 +241,18 @@
             "ambient_rna": {
                 "title": "Ambient RNA (CellBender)",
                 "type": "object",
-                "description": "Reads the RAW matrix and estimates the background from empty droplets. Expected cells and total droplets are derived PER SAMPLE from each library's own UMI curve, so they are deliberately not exposed here.",
+                "description": "Ambient transcripts from lysed cells end up in every droplet. The method is chosen below; CellBender estimates the background from empty droplets in the RAW matrix, DecontX from the cell matrix itself. Expected cells and total droplets are derived PER SAMPLE from each library's own UMI curve, so they are deliberately not exposed here.",
                 "properties": {
+                    "ambient_method": {
+                        "type": "string",
+                        "title": "Method",
+                        "default": "cellbender",
+                        "description": "cellbender is the most precise background estimate published, and the slowest: about 6 h per library on CPU at 150 epochs, and 4-lane libraries have taken days. decontx is variational EM over the cell matrix, needs no GPU and no empty droplets; benchmarks place the two in the same performing band. 'Skip ambient RNA removal' below overrides this and runs neither.",
+                        "enum": [
+                            "cellbender",
+                            "decontx"
+                        ]
+                    },
                     "skip_cellbender": {
                         "type": "boolean",
                         "title": "Skip ambient RNA removal",

@@ -27,6 +27,7 @@
 include { asBool } from '../../lib/booleans.nf'
 include { CELLBENDER       } from '../../modules/local/cellbender/main.nf'
 include { CELLBENDER_TO_CELLRANGER } from '../../modules/local/cellbender/to_cellranger.nf'
+include { DECONTX          } from '../../modules/local/decontx/main.nf'
 include { SEURAT_QUALITY   } from '../../modules/local/seurat/quality/main.nf'
 include { HELPER_SUMMARIZE } from '../../modules/local/helper/summarize/main.nf'
 include { SEURAT_MERGE     } from '../../modules/local/seurat/merge/main.nf'
@@ -97,19 +98,25 @@ workflow QC {
                       "<sample>/outs/<those files>, typically '/path/to/cellranger/*/outs/*'."
             }
 
-        if (!asBool(params.skip_cellbender)) {
+        // Which ambient-RNA method runs. --skip_cellbender stays the historical
+        // off switch and OUTRANKS the method: a run that set it asked for no
+        // correction at all, whichever method is configured.
+        def amb_method = asBool(params.skip_cellbender) ? 'none'
+                             : (params.ambient_method ?: 'cellbender').toString().toLowerCase()
 
-            // Samples named in --cellbender_skip_samples bypass CellBender and are
-            // analysed from cellranger's filtered matrix. It exists because the
-            // first GBM run spent four days retrying one 4-lane library on CPU
+        if (amb_method != 'none') {
+
+            // Samples named in --cellbender_skip_samples bypass ambient correction
+            // and are analysed from cellranger's filtered matrix. It exists because
+            // the first GBM run spent four days retrying one 4-lane library on CPU
             // while six finished samples waited: every step after this one needs
-            // all samples, so one library CellBender cannot finish holds them all.
+            // all samples, so one library the method cannot finish holds them all.
             def cb_skip = (params.cellbender_skip_samples ?: '').toString()
                               .split('[,;]').collect { it.trim() }.findAll { it }
 
             if (cb_skip) {
-                // A misspelt name would quietly run CellBender on the very sample
-                // the user meant to skip — days of compute for a typo. Name it.
+                // A misspelt name would quietly correct the very sample the user
+                // meant to skip — days of compute for a typo. Name it.
                 ch_cell_matrices
                     .map { it[0] }
                     .collect()
@@ -121,52 +128,74 @@ workflow QC {
                     }
             }
 
-            ch_cb_branch = ch_cell_matrices.branch {
+            ch_amb_branch = ch_cell_matrices.branch {
                 skip: it[0] in cb_skip
                 run:  true
             }
 
-            // Fail loudly on a missing raw matrix rather than silently denoising
-            // the filtered one. A cellranger `outs` directory always contains
-            // raw_feature_bc_matrix.h5; its absence means the input glob is too
-            // narrow (a common one, `*/outs/filtered*`, excludes it) or the
-            // directory was pruned to save space.
-            ch_cb_input = ch_cb_branch.run
-                .map { sample, csv, filtered, raw ->
-                    if (raw == null)
-                        error "CellBender is enabled but '${sample}' has no " +
-                              "raw_feature_bc_matrix.h5.\n" +
-                              "  CellBender learns the ambient profile from EMPTY droplets, " +
-                              "which exist only in the raw matrix.\n" +
-                              "  Widen --input_gex_matrices_path (e.g. '<path>/*/outs/*'), " +
-                              "or set --skip_cellbender true to leave ambient RNA uncorrected."
-                    tuple(sample, csv, raw)
-                }
+            if (amb_method == 'cellbender') {
 
-            // CellBender's own h5 carries extra root groups that Read10X_h5
-            // cannot parse; reformat before handing it to the QC notebook.
-            ch_cb_done = CELLBENDER_TO_CELLRANGER(CELLBENDER(ch_cb_input).corrected).corrected
-                .map { sample, csv, h5 -> tuple(sample, h5) }
+                // Fail loudly on a missing raw matrix rather than silently denoising
+                // the filtered one. A cellranger `outs` directory always contains
+                // raw_feature_bc_matrix.h5; its absence means the input glob is too
+                // narrow (a common one, `*/outs/filtered*`, excludes it) or the
+                // directory was pruned to save space.
+                ch_cb_input = ch_amb_branch.run
+                    .map { sample, csv, filtered, raw ->
+                        if (raw == null)
+                            error "CellBender is enabled but '${sample}' has no " +
+                                  "raw_feature_bc_matrix.h5.\n" +
+                                  "  CellBender learns the ambient profile from EMPTY droplets, " +
+                                  "which exist only in the raw matrix.\n" +
+                                  "  Widen --input_gex_matrices_path (e.g. '<path>/*/outs/*'), " +
+                                  "switch to --ambient_method decontx, which does not need empty " +
+                                  "droplets, or set --skip_cellbender true to leave ambient RNA " +
+                                  "uncorrected."
+                        tuple(sample, csv, raw)
+                    }
 
-            // Per-sample fallback. CELLBENDER's final attempt is `ignore`
-            // (conf/base.config), so a sample it cannot finish emits nothing here
-            // instead of terminating the run; this left join then hands that
-            // sample its cellranger filtered matrix. Before, one unfinished library
-            // took every other sample's completed work down with it. The status
-            // travels with the sample into its QC report, so the fallback is never
-            // silent: a run that mixes corrected and uncorrected samples says so.
-            ch_cb_resolved = ch_cb_branch.run
+                // CellBender's own h5 carries extra root groups that Read10X_h5
+                // cannot parse; reformat before handing it to the QC notebook.
+                ch_amb_done = CELLBENDER_TO_CELLRANGER(CELLBENDER(ch_cb_input).corrected).corrected
+                    .map { sample, csv, h5 -> tuple(sample, h5) }
+
+            } else {
+
+                // DecontX reads the FILTERED matrix and uses the raw one only to
+                // sharpen the ambient profile, so a sample without a raw matrix is
+                // not an error here. A `path` input cannot be null, hence the
+                // placeholder the script recognises by name.
+                def no_file = file("${projectDir}/assets/NO_FILE")
+                ch_dx_input = ch_amb_branch.run
+                    .map { sample, csv, filtered, raw ->
+                        tuple(sample, csv, filtered,
+                              (raw && asBool(params.decontx_use_background)) ? raw : no_file)
+                    }
+
+                ch_amb_done = DECONTX(ch_dx_input).corrected
+                    .map { sample, csv, h5 -> tuple(sample, h5) }
+            }
+
+            // Per-sample fallback. Whichever method ran, its final attempt is
+            // `ignore` (conf/base.config), so a sample it cannot finish emits
+            // nothing here instead of terminating the run; this left join then
+            // hands that sample its cellranger filtered matrix. Before, one
+            // unfinished library took every other sample's completed work down
+            // with it. The status travels with the sample into its QC report, so
+            // the fallback is never silent: a run that mixes corrected and
+            // uncorrected samples says so, and says which method was used.
+            ch_amb_resolved = ch_amb_branch.run
                 .map { sample, csv, filtered, raw -> tuple(sample, csv, filtered) }
-                .join(ch_cb_done, remainder: true)
+                .join(ch_amb_done, remainder: true)
                 .map { sample, csv, filtered, h5 ->
-                    h5 ? tuple(sample, csv, h5, 'cellbender')
-                       : tuple(sample, csv, filtered, 'cellbender_failed')
+                    h5 ? tuple(sample, csv, h5, amb_method)
+                       : tuple(sample, csv, filtered, "${amb_method}_failed")
                 }
 
-            ch_cb_skipped = ch_cb_branch.skip
+            ch_amb_skipped = ch_amb_branch.skip
                 .map { sample, csv, filtered, raw -> tuple(sample, csv, filtered, 'skipped_by_request') }
 
-            ch_cell_matrices = ch_cb_resolved.mix(ch_cb_skipped)
+            ch_cell_matrices = ch_amb_resolved.mix(ch_amb_skipped)
 
         } else {
             ch_cell_matrices = ch_cell_matrices

@@ -409,10 +409,25 @@ n_disagree <- sum(keep_fixed != keep_mad, na.rm = TRUE)
 .amb <- if (is.null(params$ambient_correction)) "cellbender" else as.character(params$ambient_correction)
 if (identical(.amb, "skipped_by_request")) {
   scratch_finding(paste(
-    "**Not ambient-corrected: CellBender was skipped for this sample by request**",
+    "**Not ambient-corrected: this sample was skipped by request**",
     "(`--cellbender_skip_samples`). Its counts are cellranger's filtered matrix, so",
     "ambient transcripts remain in every cell. Where other samples in this run were",
     "corrected, part of any difference between them is the correction, not biology."),
+    type = "caution", title = "Ambient RNA")
+} else if (identical(.amb, "decontx")) {
+  scratch_finding(paste(
+    "Ambient RNA was removed with **DecontX**, not CellBender (`--ambient_method",
+    "decontx`). DecontX is variational EM over the cell matrix and needs no GPU;",
+    "benchmarks place the two in the same performing band but they are not identical,",
+    "so do not compare this sample's counts directly with a CellBender-corrected run.",
+    "Per-cell contamination estimates are published under `qc/decontx/`."),
+    type = "note", title = "Ambient RNA")
+} else if (identical(.amb, "decontx_failed")) {
+  scratch_finding(paste(
+    "**Not ambient-corrected: DecontX did not finish for this sample** after all its",
+    "attempts, so the pipeline fell back to cellranger's filtered matrix instead of",
+    "stopping the run. Ambient transcripts remain in every cell; compare it with",
+    "corrected samples with that in mind, and see the DecontX task log for why."),
     type = "caution", title = "Ambient RNA")
 } else if (identical(.amb, "cellbender_failed")) {
   scratch_finding(paste(
@@ -422,8 +437,11 @@ if (identical(.amb, "skipped_by_request")) {
     "corrected samples with that in mind, and see the CellBender task log for why."),
     type = "caution", title = "Ambient RNA")
 } else if (identical(.amb, "disabled")) {
-  scratch_finding("Ambient-RNA correction is off for this run (`--skip_cellbender`).",
-                  type = "note", title = "Ambient RNA")
+  scratch_finding(paste(
+    "Ambient-RNA correction is off for this run (`--skip_cellbender`). Ambient",
+    "transcripts remain in every cell, which inflates the share of cells carrying",
+    "lineage-foreign transcripts and, downstream, weakens CNV-caller agreement."),
+    type = "note", title = "Ambient RNA")
 }
 ```
 

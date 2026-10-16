@@ -145,11 +145,32 @@ nextflow config -profile docker .
 
 | Parameter | Default |
 |---|---|
-| `--skip_cellbender` | `true` |
+| `--ambient_method` | `cellbender` |
+| `--skip_cellbender` | `false` |
+| `--cellbender_skip_samples` | `''` |
 | `--qc_thr_n_feature_rna_min` / `_max` | `300` / `7500` |
 | `--qc_thr_percent_mito` | `25` |
 | `--qc_thr_median_genes_per_cell` | `900` |
 | `--skip_scdblfinder` | `false` |
+
+**Ambient RNA.** `--ambient_method` picks the method: `cellbender` (default) or
+`decontx`. CellBender gives the most precise background estimate published and is
+the slowest — roughly 6 h per library on a CPU queue at 150 epochs, and 4-lane
+libraries have taken days. `--cellbender_cuda` does NOT obtain a GPU on its own:
+no process declares an `accelerator`, so the task lands on a CPU instance anyway.
+DecontX (celda) is variational EM over the cell matrix, needs no GPU and no empty
+droplets, and the 2026 seven-method benchmark places the two in the same
+performing band, recommending the choice be made on available compute.
+
+`--skip_cellbender true` outranks both and runs no correction at all. Named
+samples in `--cellbender_skip_samples` bypass whichever method is selected. If a
+method cannot finish for a sample, its last attempt is `ignore` and that sample
+falls back to cellranger's filtered matrix — the status is recorded per sample
+and stated in that sample's QC report, so a mixed run is never silent.
+
+DecontX runs in `syedsazaidi/scratch-decontx` (`docker/scratch-decontx.Dockerfile`,
+the QC image plus celda) and publishes per-cell contamination estimates to
+`<outdir>/<project>/qc/decontx/`.
 
 ### Clustering and annotation
 

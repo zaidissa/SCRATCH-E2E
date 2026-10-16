@@ -20,6 +20,7 @@
     "qc_thr_percent_mito": "$.params.dataset.paramJson.quality_control_parameters.qc_thr_percent_mito",
     "qc_thr_n_observed_cells": "$.params.dataset.paramJson.quality_control_parameters.qc_thr_n_observed_cells",
     "skip_cellbender": "$.params.dataset.paramJson.ambient_rna.skip_cellbender",
+    "ambient_method": "$.params.dataset.paramJson.ambient_rna.ambient_method",
     "cellbender_cuda": "$.params.dataset.paramJson.ambient_rna.cellbender_cuda",
     "cellbender_epochs": "$.params.dataset.paramJson.ambient_rna.cellbender_epochs",
     "cellbender_fpr": "$.params.dataset.paramJson.ambient_rna.cellbender_fpr",
