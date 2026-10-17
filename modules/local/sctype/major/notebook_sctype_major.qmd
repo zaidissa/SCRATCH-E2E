@@ -301,8 +301,31 @@ VariableFeatures(seurat_object) <- union(
   as.vector(unlist(gene_list_db))
 )
 
-# Rescaling the dataset
+# Rescaling the dataset.
+#
+# ScaleData runs under a SEQUENTIAL plan on purpose, and the previous plan is
+# restored straight after. With a parallel plan, Seurat's ScaleData.default
+# builds the closure it hands to future_lapply inside its own call frame, so
+# future measures the enclosing frames -- which still hold the whole Seurat
+# object -- against `future.globals.maxSize` and aborts before any work starts:
+#
+#   The total size of the 10 globals exported for future expression ('FUN()')
+#   is 19.18 GiB. This exceeds the maximum allowed size 16.00 GiB ...
+#   'FUN' (18.93 GiB of class 'function'), 'object' (257.32 MiB of class 'S4')
+#
+# That killed ANNOTATION:SCYTPE_MAJOR_ANNOTATION three times on Cirro
+# (dataset 5c649064, 2026-10-16). The 18.93 GiB is a phantom: the matrix the
+# workers actually need is `object`, 257 MiB, and the figure tracks the size of
+# the whole object (measured in this image: a 315 MB object reports 943 MiB,
+# a 183 MB one 560 MiB -- roughly 3x, because several frames in the chain each
+# hold it). `plan("multicore")` forks, so none of it is ever transferred; the
+# limit was guarding a copy that does not happen. Sequential skips the globals
+# check entirely and calls the same FastSparseRowScale on the same features, so
+# the values are bit-identical (verified all.equal, max abs diff 0). It is also
+# not a slow path: one scaled block per 1,000 features is seconds of C++.
+previous_plan <- plan("sequential")
 seurat_object <- ScaleData(seurat_object)
+plan(previous_plan)
 
 ```
 
