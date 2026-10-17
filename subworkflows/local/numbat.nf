@@ -99,14 +99,29 @@ workflow NUMBAT {
             // Sample key = --numbat_sample_col, falling back to orig.ident
             ch_pileup_in = ch_bam.join(ch_barcodes, failOnMismatch: false, remainder: false)
                 .ifEmpty {
-                    error "Numbat: no sample matched between the supplied BAMs and the " +
-                          "annotated object, so there is nothing to pile up.\n" +
-                          "  BAM key    = the directory two levels above the .bam " +
+                    // This fires whenever the join is empty, which has TWO causes, and
+                    // the common one is not a key mismatch. `ifEmpty` is a runtime
+                    // check: if any earlier stage failed, NUMBAT_PREP never ran, the
+                    // right-hand side of the join is empty, and this message is printed
+                    // as the run's `Error :` even though nothing is wrong with the keys
+                    // (2026-10-16 on Cirro: SEURAT_CLUSTER died and this is what the
+                    // summary blamed). Say so first, so the message cannot send the
+                    // next reader looking for a naming problem that does not exist.
+                    error "Numbat: nothing to pile up -- the BAM channel and the " +
+                          "annotated object had no sample in common.\n" +
+                          "  If an earlier error appears above, THAT is the cause: " +
+                          "NUMBAT_PREP never produced per-sample barcodes, so this join " +
+                          "had nothing to match against. Fix that failure first; this " +
+                          "line is a consequence of it, not an independent problem.\n" +
+                          "  If the rest of the run succeeded, the two keys genuinely " +
+                          "disagree:\n" +
+                          "    BAM key    = the directory two levels above the .bam " +
                           "(--input_bam_path '<...>/<SAMPLE>/outs/*.bam')\n" +
-                          "  Sample key = --numbat_sample_col ('${params.numbat_sample_col}'), " +
-                          "falling back to orig.ident/sample/patient_id\n" +
-                          "These must be the same strings. Rename the BAM directories or " +
-                          "set --numbat_sample_col to the column that matches them."
+                          "    Sample key = --numbat_sample_col " +
+                          "('${params.numbat_sample_col}'), falling back to " +
+                          "orig.ident/sample/patient_id\n" +
+                          "  These must be the same strings. Rename the BAM directories " +
+                          "or set --numbat_sample_col to the column that matches them."
                 }
 
             NUMBAT_PILEUP(ch_pileup_in, ch_gmap, ch_snpvcf, ch_paneldir)

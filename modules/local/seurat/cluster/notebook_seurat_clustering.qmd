@@ -127,6 +127,74 @@ for(sub_directory in c('data', 'figures')) {
 # BPCells must be loaded (above) for the object to deserialize and resolve.
 seurat_object <- readRDS(file = seurat_object)
 
+# Re-root those lazy chains onto the store STAGED IN THIS TASK.
+#
+# `open_matrix_dir()` records an ABSOLUTE path, so every layer written by
+# SEURAT_NORMALIZE points at .../data/bpcells_counts inside the directory that
+# task ran in. On AWS Batch each task gets its own scratch dir, so that path is
+# gone by the time this one starts and the first operation that touches counts
+# dies with `Missing directory: /tmp/nxf.XXXXXXXX/data/bpcells_counts` -- which
+# is what killed CLUSTER:SEURAT_CLUSTER three times on Cirro (2026-10-16), at
+# the materialise_layers chunk, 42 chunks in. It never showed locally because
+# there the writing task's directory still exists under work/.
+#
+# The store itself IS an input to this process (stageAs data/bpcells_counts), so
+# only the recorded root is wrong. Rewriting it costs nothing and changes no
+# values: verified in syedsazaidi/scratch-cluster:latest that counts and data
+# re-materialise bit-identical to the same object read before its store moved,
+# across all three layer chains (counts -> MatrixDir; data -> log1p/scale over
+# it; scale.data -> an 11-deep chain).
+.bp_store_dirs <- function(m) {
+  if (methods::is(m, 'MatrixDir')) return(m@dir)
+  out <- character(0)
+  if (methods::.hasSlot(m, 'matrix'))      out <- c(out, .bp_store_dirs(m@matrix))
+  if (methods::.hasSlot(m, 'matrix_list')) out <- c(out, unlist(lapply(m@matrix_list, .bp_store_dirs)))
+  out
+}
+.bp_reroot <- function(m, new_dir) {
+  if (methods::is(m, 'MatrixDir')) { m@dir <- new_dir; return(m) }
+  if (methods::.hasSlot(m, 'matrix'))      m@matrix      <- .bp_reroot(m@matrix, new_dir)
+  if (methods::.hasSlot(m, 'matrix_list')) m@matrix_list <- lapply(m@matrix_list, .bp_reroot, new_dir = new_dir)
+  m
+}
+
+# normalizePath so the comparison below is against a real path (Nextflow stages
+# this input as a symlink when the executor is local, and as a copy on Batch);
+# when it is absent, keep an absolute path anyway so the error names a real place.
+.staged_store <- if(dir.exists(file.path('data', 'bpcells_counts'))) {
+  normalizePath(file.path('data', 'bpcells_counts'))
+} else {
+  file.path(getwd(), 'data', 'bpcells_counts')
+}
+for(.ln in SeuratObject::Layers(seurat_object, assay = 'RNA')) {
+
+  .lay <- SeuratObject::LayerData(seurat_object, assay = 'RNA', layer = .ln)
+  if(!methods::is(.lay, 'IterableMatrix')) next
+
+  .dirs <- unique(.bp_store_dirs(.lay))
+  if(!length(.dirs) || identical(.dirs, .staged_store)) next
+
+  # One store per layer is the only shape this pipeline produces (SEURAT_MERGE
+  # and SCDBLFINDER each write a single directory). If that ever changes, stop:
+  # pointing several roots at one directory would silently return wrong counts.
+  if(length(.dirs) > 1L) {
+    stop(sprintf(paste("Layer '%s' is backed by %d different BPCells stores (%s).",
+                       "Re-rooting them all onto %s would corrupt it."),
+                 .ln, length(.dirs), paste(.dirs, collapse = ', '), .staged_store))
+  }
+  if(!dir.exists(.staged_store)) {
+    stop(sprintf(paste("Layer '%s' is backed by %s, which does not exist, and no BPCells",
+                       "store is staged at %s. SEURAT_CLUSTER must receive the store",
+                       "emitted by the QC stage."),
+                 .ln, .dirs, .staged_store))
+  }
+
+  SeuratObject::LayerData(seurat_object, assay = 'RNA', layer = .ln) <-
+    .bp_reroot(.lay, .staged_store)
+  message(sprintf("Re-rooted BPCells layer '%s': %s -> %s", .ln, .dirs, .staged_store))
+}
+rm(.bp_store_dirs, .bp_reroot)
+
 # Cell number
 ncell <- dim(seurat_object)[2]
 
