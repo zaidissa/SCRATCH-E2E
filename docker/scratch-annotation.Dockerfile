@@ -102,6 +102,17 @@ RUN Rscript -e "BiocManager::install(c( \
 RUN Rscript -e 'remotes::install_github("ctlab/fgsea")'
 
 # Seurat and wrappers
+#
+# NOTE (2026-10-16): the published `latest` built from this file reports Seurat
+# 5.0.0, not the v5.3.1 asked for here -- devtools::install_local() resolved to
+# an already-installed copy instead of building the zip, and nothing checked.
+# Paired with SeuratObject 5.3.0 that combination makes PackageCheck() and
+# FetchData(slot=) defunct and kills the whole annotation stage; see the warning
+# in conf/containers.config. A from-scratch rebuild of this image MUST assert
+# the resulting versions (stopifnot on packageVersion) before being pushed, and
+# must not be pinned in containers.config until the scType notebook renders in
+# it. The image in use today is this one plus a SeuratObject pin:
+# docker/scratch-annotation-so.Dockerfile.
 RUN wget https://github.com/satijalab/seurat/archive/refs/tags/v5.3.1.zip -O /opt/seurat-v5.zip \
   && wget https://github.com/satijalab/seurat-data/archive/refs/heads/seurat5.zip -O /opt/seurat-data.zip \
   && wget https://github.com/satijalab/seurat-wrappers/archive/refs/heads/seurat5.zip -O /opt/seurat-wrappers.zip \
