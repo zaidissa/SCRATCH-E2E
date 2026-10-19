@@ -149,6 +149,99 @@ def resolve_numbat_bam(ds: PreprocessDataset, start: str) -> None:
     ds.logger.info(f"Numbat: derived --input_bam_path from the input dataset: {bam_glob}")
 
 
+def describe_exp_table(body: str) -> list:
+    """Lines describing a metadata CSV. Pure, so it can be tested off-platform."""
+    lines = [ln for ln in body.splitlines() if ln.strip()]
+    if not lines:
+        return ["the table is empty."]
+
+    columns = [c.strip().strip('"') for c in lines[0].split(",")]
+    out = [f"columns: {', '.join(columns)}"]
+
+    if "sample" in columns:
+        idx = columns.index("sample")
+        values = []
+        for ln in lines[1:]:
+            cells = [c.strip().strip('"') for c in ln.split(",")]
+            if len(cells) > idx and cells[idx] and cells[idx] not in values:
+                values.append(cells[idx])
+        out.append(
+            f"sample values ({len(values)} distinct, possibly truncated): "
+            f"{', '.join(values)}"
+        )
+        out.append(
+            "QC's merge joins these to orig.ident, which is the cellranger "
+            "output DIRECTORY name. Strings that differ join nothing."
+        )
+    else:
+        out.append(
+            "WARNING: no `sample` column. The merge notebook stops on this, but "
+            "only after every per-sample QC task has already run."
+        )
+
+    absent = [c for c in ("patient_id", "timepoint", "condition", "batch")
+              if c not in columns]
+    if absent:
+        out.append(
+            f"no {', '.join('`' + c + '`' for c in absent)} column, so the merged "
+            "object will not carry it. Stages keyed on it fall back to another "
+            "sample column, and condition-level tests have no design factor."
+        )
+    return out
+
+
+def log_exp_table_columns(ds: PreprocessDataset, start: str) -> None:
+    """Print the columns of the metadata table QC's merge step will read.
+
+    Starting at `align` the table is the samplesheet written above, and
+    build_samplesheet() has already asserted its required columns. Starting
+    anywhere later, input_exp_table points at a PREVIOUS run's
+    pipeline_info/samplesheet.valid.csv and nothing checks it at all.
+
+    That gap cost a full GBM run. SAMPLESHEET_CHECK copies the align
+    samplesheet verbatim, the merge notebook drops the fastq columns and joins
+    `orig.ident` to `sample`, and the join is an INNER join. Measured in
+    scratch-cluster:latest: a TOTAL key mismatch makes AddMetaData fail loudly
+    ("Cannot add more or less meta data without cell names"), but a column that
+    is simply ABSENT from the table passes through in silence -- the object is
+    built without it, and the first thing to notice is a notebook three stages
+    later asking for `patient_id`.
+
+    Logging the header is enough to answer it at launch: the column names say
+    whether the design factors survived, and the distinct `sample` values are
+    the exact strings the merge join needs `orig.ident` to equal. Diagnostic
+    only -- it never changes a parameter and never fails a launch, because a
+    cohort with no patient_id is still a legitimate run.
+    """
+    if start == "align":
+        return
+
+    path = str(ds.params.get("input_exp_table", "")).strip()
+    if not path.startswith("s3://"):
+        ds.logger.info(f"--input_exp_table is not an S3 path ({path!r}); not inspected.")
+        return
+
+    try:
+        import boto3
+
+        bucket, _, key = path[len("s3://"):].partition("/")
+        # The header and a few rows are all that is needed, and a metadata table
+        # for a 17-library cohort is a few kB in total.
+        body = (
+            boto3.client("s3")
+            .get_object(Bucket=bucket, Key=key, Range="bytes=0-65535")["Body"]
+            .read()
+            .decode("utf-8", "replace")
+        )
+    except Exception as exc:
+        ds.logger.info(f"--input_exp_table could not be read ({exc}); not inspected.")
+        return
+
+    ds.logger.info(f"--input_exp_table: {path}")
+    for line in describe_exp_table(body):
+        ds.logger.info(f"  {line}")
+
+
 def build_samplesheet(ds: PreprocessDataset) -> pd.DataFrame:
     """One row per sample, R1/R2 in columns — cellranger's layout, not Cirro's.
 
@@ -239,6 +332,9 @@ def setup_parameters(ds: PreprocessDataset):
     # therefore survives it, while a dataset with no BAMs leaves the field blank
     # and is dropped exactly as before.
     resolve_numbat_bam(ds, start)
+
+    # ---- the metadata table ---------------------------------------------
+    log_exp_table_columns(ds, start)
 
     # ---- blanks ---------------------------------------------------------
     dropped = [
