@@ -152,6 +152,24 @@ cell_annotation_files_aggregate <- cell_annotation_files_aggregate %>%
     scytpe_subset = sctype
   )
 
+# The state notebooks RE-CLUSTER their own subset, so the `seurat_clusters`
+# column in those CSVs is a state-local id -- 0..k within TAM_BloodDerived, and
+# again 0..k within T_Cells -- not the cohort-level cluster the object carries.
+# AddMetaData below matches by column name, so passing it through replaced
+# `seurat_clusters` for every cell that has a state annotation and left it alone
+# for every cell that does not: one column holding two different clusterings,
+# with nothing in the log to say so. Measured on a 1,000-cell stand-in: 600 of
+# 1,000 cells rewritten and the levels 0-9 collapsed to {0,1,2,7,8,9}. Everything
+# downstream that keys on seurat_clusters -- this notebook's own composition
+# barplot, inferCNV's groupings, stratify, the stage reports -- was reading that.
+# The state-local id is worth keeping, so keep it under its own name.
+if ("seurat_clusters" %in% colnames(cell_annotation_files_aggregate)) {
+
+  colnames(cell_annotation_files_aggregate)[
+    colnames(cell_annotation_files_aggregate) == "seurat_clusters"] <- "sctype_state_cluster"
+
+}
+
 ```
 
 
