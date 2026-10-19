@@ -148,6 +148,27 @@ if (length(nb_files)) {
 
 have_ic <- !is.null(ic) && nrow(ic) > 0
 have_nb <- !is.null(nb) && nrow(nb) > 0
+
+# The agreement statistics below are computed only when BOTH callers produced
+# per-cell output. The save chunk guarded them with `exists()`, and `exists()`
+# is not a test of whether THIS notebook defined a name -- it walks the search
+# path. `kappa` is a base R function (the condition number of a matrix), so
+# `exists("kappa")` was TRUE on a single-caller run, `round(kappa, 4)` was
+# handed a closure, and the chunk died with "non-numeric argument to
+# mathematical function". The object this stage must emit is written in that
+# same chunk and is a REQUIRED output, so a one-caller run failed the task and
+# STRATIFY never executed at all.
+#
+# That is not a rare configuration: Numbat needs a BAM and routinely scores
+# some samples and not others (one real sample produced no calls), and
+# --skip_infercnv is a supported way to test Numbat on its own.
+#
+# Initialising the metrics to NA removes the guard entirely rather than fixing
+# one name: the save chunk now reads values this notebook definitely owns.
+pct     <- NA_real_
+kappa   <- NA_real_
+only_ic <- NA_integer_
+only_nb <- NA_integer_
 cat("inferCNV per-cell scores:", if (have_ic) nrow(ic) else 0, "\n")
 cat("Numbat per-cell calls   :", if (have_nb) nrow(nb) else 0, "\n")
 
@@ -592,11 +613,11 @@ if (isTRUE(as.logical(params$auto_save))) {
                if (have_ic) cmp[!is.na(infercnv_score), .N] else 0L,
                if (have_nb) cmp[!is.na(numbat_call), .N] else 0L,
                n_both,
-               if (exists("pct")) round(pct, 2) else NA_real_,
-               if (exists("kappa")) round(kappa, 4) else NA_real_,
-               if (!is.na(auc)) round(auc, 4) else NA_real_,
-               if (exists("only_ic")) only_ic else NA_integer_,
-               if (exists("only_nb")) only_nb else NA_integer_))
+               round(pct, 2),
+               round(kappa, 4),
+               round(auc, 4),
+               only_ic,
+               only_nb))
   fwrite(summary_dt, file.path("data", paste0(project_name, "_cnv_caller_summary.csv")))
   if (!is.null(bycell)) fwrite(bycell, file.path("data", paste0(project_name, "_cnv_agreement_by_celltype.csv")))
 
