@@ -97,6 +97,49 @@ workflow NUMBAT {
             //
             // BAM key   = the grandparent directory name (…/<sample>/outs/x.bam)
             // Sample key = --numbat_sample_col, falling back to orig.ident
+            // A PARTIAL mismatch is still silent. `ifEmpty` below only fires when
+            // NOTHING matches; with 17 libraries, three BAM directories named
+            // differently from their sample column means three samples get no
+            // Numbat call and the run says nothing at all. That is the caller
+            // STRATIFY is told to trust over the others
+            // (cnv_caller_priority = numbat), so those samples quietly fall back
+            // to inferCNV or to the annotation label.
+            //
+            // Report the join itself, both sides, by name. `println` and not
+            // `log.warn`: inside a `subscribe` closure the logger produces no
+            // output at all (same reason `workflow.onComplete` has to use
+            // `println`), so a log call here would look correct and print
+            // nothing — verified against 26.04.6 on a three-key harness.
+            //
+            // The keys are collected through a TAGGED mix rather than paired with
+            // `combine` or `merge`: both of those FLATTEN two list-emitting
+            // channels into one list, which loses the boundary between the sides.
+            // `combine` failed with "Unknown method invocation `intersect` on
+            // String type" and `merge` handed the closure a single
+            // [A, B, C, A, B] — measured, not assumed.
+            ch_bam.map { tuple('bam', it[0]) }
+                .mix(ch_barcodes.map { tuple('obj', it[0]) })
+                .collect(flat: false)
+                .subscribe { rows ->
+                    def bam_keys = rows.findAll { it[0] == 'bam' }.collect { it[1] }.unique().sort()
+                    def obj_keys = rows.findAll { it[0] == 'obj' }.collect { it[1] }.unique().sort()
+                    def matched  = bam_keys.intersect(obj_keys)
+                    def bam_only = bam_keys - obj_keys
+                    def obj_only = obj_keys - bam_keys
+                    if (bam_only || obj_only) {
+                        println "WARNING: Numbat will phase ${matched.size()} of " +
+                            "${bam_keys.size()} BAM sample(s). " +
+                            (bam_only ? "No post-QC cells for: ${bam_only.join(', ')}. " : '') +
+                            (obj_only ? "No BAM for: ${obj_only.join(', ')}. " : '') +
+                            "Those samples get NO Numbat call, and STRATIFY falls back to " +
+                            "the other callers or the annotation label for their cells. " +
+                            "The BAM key is the directory two levels above the .bam; the " +
+                            "sample key is --numbat_sample_col ('${params.numbat_sample_col}')."
+                    } else {
+                        println "Numbat: all ${matched.size()} sample(s) matched a BAM."
+                    }
+                }
+
             ch_pileup_in = ch_bam.join(ch_barcodes, failOnMismatch: false, remainder: false)
                 .ifEmpty {
                     // This fires whenever the join is empty, which has TWO causes, and
