@@ -595,13 +595,32 @@ The @fig-feat-markers represents a 'FeaturePlot' which allows coloring the cells
 #| fig-height: 20
 #| fig-align: center
 
-vp <- VlnPlot(
-  object = seurat_object,
-  ncol = 2,
-  features = unique(seurat_object$sctype)
-)
+# One panel per state that was actually assigned -- but only for states that
+# have a module-score column to plot. `unique(seurat_object$sctype)` is not that
+# set: scType writes "Unknown" for any cluster whose best score falls below
+# ncells/4 (see the classification chunk above), and "Unknown" is a label, not a
+# signature, so VlnPlot aborts the notebook with "None of the requested
+# variables were found: Unknown". Every state task on a cohort where one cluster
+# comes out low-confidence would die here, 38 chunks in. The major notebook asks
+# for `names(non_malignant_markers)` and never had the problem.
+vln_features <- intersect(unique(seurat_object$sctype),
+                          colnames(seurat_object@meta.data))
 
-print (vp)
+if (!length(vln_features)) {
+
+  message("Skipping the signature violin plot: no assigned state has a module-score column.")
+
+} else {
+
+  vp <- VlnPlot(
+    object = seurat_object,
+    ncol = 2,
+    features = vln_features
+  )
+
+  print (vp)
+
+}
 ```
 
 :::{.callout-tip}
@@ -653,9 +672,33 @@ all_markers <- FindAllMarkers(
 ```{r deg_table, message = FALSE, warning = FALSE, echo = TRUE}
 #| column: screen-inset-shaded
 
-# Reordering all markers data.frame
-all_markers <- all_markers %>%
-  select(cluster, gene, pct.1, pct.2, p_val, avg_log2FC)
+# Reordering all markers data.frame.
+#
+# FindAllMarkers returns a data.frame with NO COLUMNS when nothing passes the
+# thresholds, and that happens whenever the subset resolves to a single cluster
+# -- a real possibility for the smaller states, which is exactly where this
+# notebook is fanned out seven ways. `select()` on a zero-column frame aborts
+# with a subscript-out-of-bounds error and takes the task down after the
+# annotation, the module scores and every figure have already succeeded. Report
+# the empty result instead of dying on it.
+deg_columns <- c("cluster", "gene", "pct.1", "pct.2", "p_val", "avg_log2FC")
+
+if (!all(deg_columns %in% colnames(all_markers))) {
+
+  message(
+    "No differentially expressed genes passed the thresholds ",
+    "(logfc >= ", thr_fold_change, ", min.pct >= ", thr_min_percentage,
+    "); the table below is empty.")
+
+  all_markers <- as.data.frame(
+    setNames(replicate(length(deg_columns), character(0), simplify = FALSE), deg_columns))
+
+} else {
+
+  all_markers <- all_markers %>%
+    select(all_of(deg_columns))
+
+}
 
 # Printing out all markers
 DT::datatable(all_markers, 
@@ -708,15 +751,48 @@ seurat_cluster_composition <- seurat_cluster_composition %>%
 #| fig-height: 10
 #| fig-align: center
 
-# Boxplot
-csp <- SCP::CellStatPlot(
-  seurat_object,
-  stat.by = "patient_id", 
-  group.by = "sctype", 
-  label = TRUE
-)
+# Composition of the states found here, broken down by whatever identifies a
+# sample in THIS object.
+#
+# `stat.by` was hardcoded to "patient_id". That column is optional: it reaches
+# the object only if --input_exp_table carries it and SEURAT_MERGE joined it in,
+# and when it is missing SCP::StatPlot aborts with "patient_id is not in the
+# meta.data" -- taking the whole notebook down at chunk 48 of 55, after the
+# annotation, the module scores, the DEGs and every other figure had already
+# succeeded. That is how all seven SCYTPE_STATE_ANNOTATION tasks died on Cirro
+# (dataset 2f81c8ef, 2026-10-19). The clustering notebook already guards the
+# same column (`if (all(group_vars %in% colnames(seurat_object@meta.data)))`);
+# this one did not.
+#
+# Resolve against the object in the order the rest of the pipeline uses, and
+# name the column that was used so the report is not silently about something
+# else. seurat_clusters is last and always present, so the figure still renders.
+stat_candidates <- c("patient_id", "sample_id", "orig.ident", "sample", "seurat_clusters")
+stat_by <- stat_candidates[stat_candidates %in% colnames(seurat_object@meta.data)][1]
 
-print (csp)
+if (is.na(stat_by)) {
+
+  message(
+    "Skipping the composition barplot: none of ",
+    paste(stat_candidates, collapse = ", "), " is in the metadata.")
+
+} else {
+
+  if (!identical(stat_by, "patient_id")) {
+    message(sprintf(
+      "Composition barplot grouped by '%s' (patient_id is not in the metadata).", stat_by))
+  }
+
+  csp <- SCP::CellStatPlot(
+    seurat_object,
+    stat.by = stat_by,
+    group.by = "sctype",
+    label = TRUE
+  )
+
+  print (csp)
+
+}
 ```
 
 :::{.callout-tip}
