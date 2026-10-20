@@ -1009,6 +1009,7 @@ if (isTRUE(params$show_sample_overlap_heatmap) && length(samples_vec) > 1) {
 # phenotypic-flux-plot
 # phenotypic-flux-plot
 ```{r}
+#| label: phenotypic-flux-plot
 # #| label: phenotypic-flux-plot
 # if (isTRUE(params$show_phenotypic_flux) && nrow(flux_tbl) > 0) {
 #   flux_plot_tbl <- flux_tbl %>%
@@ -1068,7 +1069,6 @@ if (isTRUE(params$show_sample_overlap_heatmap) && length(samples_vec) > 1) {
 
 
 
-#| label: phenotypic-flux-plot
 if (isTRUE(params$show_phenotypic_flux) && nrow(flux_tbl) > 0) {
   flux_plot_tbl <- flux_tbl %>%
     group_by(clone_id) %>%

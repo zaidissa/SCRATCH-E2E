@@ -200,10 +200,10 @@ seurat_object <- AddMetaData(
 #| fig-cap: "Azimuth annotation UMAP"
 #| fig-width: 12
 #| fig-height: 9
+#| warning: false
 # SCP declares manual colour/fill scales that ggplot2 4.0 reports as having no
 # shared levels with the layer data. Cosmetic -- the colours are correct -- but
 # it printed three notices into the report directly above the figure.
-#| warning: false
 
 annotation_UMAP <- SCP::CellDimPlot(
   srt = seurat_object,
@@ -378,13 +378,13 @@ if (exists("cell_hierarchical") && length(cell_hierarchical$height)) {
 ```
 
 ```{r figDendrogram}
-# `text` is not a ggplot aesthetic -- ggplotly consumes it for the hover label --
-# so a static build warns "Ignoring unknown aesthetics: text".
 #| warning: false
 #| fig-cap: 'Dendrogram'
 #| fig-width: 10
 #| fig-height: 12
 #| fig-align: center
+# `text` is not a ggplot aesthetic -- ggplotly consumes it for the hover label --
+# so a static build warns "Ignoring unknown aesthetics: text".
 
 # Base graphics could not be made to appear here: the previous version drew the
 # tree correctly to figures/FigDendogram.png but emitted NOTHING inline, leaving
@@ -573,12 +573,12 @@ if (exists("DE_azimuth_sig") &&
 #| warning: false
 #| message: false
 #| fig-cap: "Azimuth DE heatmap (top markers per label)"
-# Enlarged to the size the removed duplicate used -- at 14x10 the gene names
-# were unreadable. `dev: pdf` dropped: it made this the only raster-less figure
-# in the report and it rendered smaller than everything around it.
 #| fig-width: 16
 #| fig-height: 12
 #| fig-path: "figures/azimuth_de_heatmap_"
+# Enlarged to the size the removed duplicate used -- at 14x10 the gene names
+# were unreadable. `dev: pdf` dropped: it made this the only raster-less figure
+# in the report and it rendered smaller than everything around it.
 
 if (exists("DE_azimuth_sig") &&
     is.data.frame(DE_azimuth_sig) &&

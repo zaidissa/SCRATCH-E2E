@@ -589,12 +589,7 @@ The @fig-feat-markers represents a 'FeaturePlot' which allows coloring the cells
 
 ### Violin Plot
 
-```{r violin_plot}
-#| label: fig-violin
-#| fig-width: 14
-#| fig-height: 20
-#| fig-align: center
-
+```{r violin_features}
 # One panel per state that was actually assigned -- but only for states that
 # have a module-score column to plot. `unique(seurat_object$sctype)` is not that
 # set: scType writes "Unknown" for any cluster whose best score falls below
@@ -603,9 +598,22 @@ The @fig-feat-markers represents a 'FeaturePlot' which allows coloring the cells
 # variables were found: Unknown". Every state task on a cohort where one cluster
 # comes out low-confidence would die here, 38 chunks in. The major notebook asks
 # for `names(non_malignant_markers)` and never had the problem.
+#
+# Resolved in its OWN chunk so the figure chunk below can size itself from it:
+# a `!expr` chunk option is evaluated before the chunk body runs, so a variable
+# the body itself defines is not available to it.
 vln_features <- intersect(unique(seurat_object$sctype),
                           colnames(seurat_object@meta.data))
+```
 
+```{r violin_plot}
+#| label: fig-violin
+#| fig-width: 14
+#| fig-height: !expr max(8, 2.6 * ceiling(length(vln_features) / 2))
+#| fig-align: center
+# Computed, not a flat 20in. The number of states varies by parent lineage and
+# by cohort, and a constant height divided by however many rows turned up is
+# what collapsed the major notebook's violins into bare axis lines.
 if (!length(vln_features)) {
 
   message("Skipping the signature violin plot: no assigned state has a module-score column.")
@@ -615,8 +623,17 @@ if (!length(vln_features)) {
   vp <- VlnPlot(
     object = seurat_object,
     ncol = 2,
-    features = vln_features
-  )
+    features = vln_features,
+    pt.size = 0             # as in the major notebook: the jittered points,
+                            # one per cell, cover the violins completely
+  ) &
+    ggplot2::scale_y_continuous(n.breaks = 3) &
+    ggplot2::labs(x = NULL) &
+    ggplot2::theme(
+      axis.text.x = ggplot2::element_text(angle = 90, vjust = 0.5, hjust = 1, size = 5),
+      axis.text.y = ggplot2::element_text(size = 7),
+      plot.title  = ggplot2::element_text(size = 11, face = "bold")
+    )
 
   print (vp)
 

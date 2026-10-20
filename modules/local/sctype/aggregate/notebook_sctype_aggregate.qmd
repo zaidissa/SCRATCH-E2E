@@ -285,10 +285,10 @@ plot(cell_hierarchical, main = "Dendrogram", xlab = "Index", ylab = "Height")
 ```{r barplot_composition}
 #| label: fig-bar-composition
 #| fig-cap: 'Cluster composition of each annotated population'
-# Flipped bars need HEIGHT (one row per label), not width. 29 labels at ~0.45in.
 #| fig-width: 12
 #| fig-height: 15
 #| fig-align: center
+# Flipped bars need HEIGHT (one row per label), not width. 29 labels at ~0.45in.
 
 # Composition of each annotated population by cluster.
 #

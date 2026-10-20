@@ -432,11 +432,11 @@ DT::datatable(
 #| fig-width: 15
 #| fig-height: 10
 #| layout-ncol: 2
+#| warning: false
 # SCP builds its own scale_*_manual internally and ggplot2 4.0 emits "No shared
 # levels found between `names(values)` of the manual scale and the data's fill
 # values" for it. Harmless, but without this it printed three times INTO the
 # report, directly above the figure, where it reads as a broken plot.
-#| warning: false
 
 
 SCP::CellDimPlot(
@@ -559,20 +559,46 @@ The @fig-feat-markers represents a 'FeaturePlot' which allows coloring the cells
 ```{r violin_plot}
 #| label: fig-violin
 #| fig-cap: "Signature score distribution per cluster"
-# Quarto scales a figure to the page width, so a WIDE figure shrinks everything
-# in it: at 18in each panel was squashed to a sliver once fitted to the page.
-# Narrower and taller renders each panel LARGER on screen. 7 panels, 2 columns,
-# 4 rows -> ~5.5 x 5in each.
 #| fig-width: 11
-#| fig-height: 20
+#| fig-height: !expr max(10, 2.6 * ceiling(length(non_malignant_markers) / 2))
 #| fig-align: center
 #| warning: false
-
+# Quarto scales a figure to the page width, so a WIDE figure shrinks everything
+# in it: at 18in each panel was squashed to a sliver once fitted to the page.
+# Narrower and taller renders each panel LARGER on screen.
+#
+# The height is COMPUTED, not a constant. It used to be a flat 20in, chosen when
+# the only database was ovarian: 7 panels / 2 columns = 4 rows, ~5in each. The
+# glioblastoma database has 17 Major_cells labels -> 9 rows, and at a fixed 20in
+# each row got 2.2in. One panel per marker is not optional here, so the figure
+# has to grow with the marker list instead of squeezing it.
+#
+# `!expr` is required for that: a chunk option is static YAML otherwise. Note
+# that the `#|` block must be CONTIGUOUS from the first line of the chunk -- a
+# plain `#` comment anywhere inside it silently ends the block and everything
+# after it is parsed as R comments, not options. That is exactly what had
+# happened here: fig-width/fig-height/fig-align/warning were all dead, the
+# figure rendered at knitr's default 7x5in, and 9 rows of panels collapsed into
+# bare axis lines with the y-breaks overprinting each other. Measured: the
+# published fig-violin.png was 2100x1500 = 7x5in at 300dpi, and a 7x5 render of
+# a 17-panel/56-cluster object reproduces it exactly.
 vp <- VlnPlot(
   object = seurat_object,
   features = names(non_malignant_markers),
   ncol = 2,                 # 2 wide instead of 3: each panel gets ~50% more width
   pt.size = 0               # 24k jittered points per panel hid the violins entirely
+  ) &
+  # 56 clusters on a 5.5in panel is ~0.1in per tick: horizontal labels overlap
+  # into an unreadable scribble. Rotated and small they stay legible. The
+  # per-panel "Identity" title is dropped -- it is the same on all 17 panels and
+  # the vertical space it costs is the space the violins need.
+  ggplot2::scale_y_continuous(n.breaks = 3) &
+  ggplot2::labs(x = NULL) &
+  ggplot2::theme(
+    axis.text.x = ggplot2::element_text(angle = 90, vjust = 0.5, hjust = 1, size = 5),
+    axis.text.y = ggplot2::element_text(size = 7),
+    plot.title  = ggplot2::element_text(size = 11, face = "bold"),
+    plot.margin = ggplot2::margin(4, 4, 2, 4)
   )
 
 vp
