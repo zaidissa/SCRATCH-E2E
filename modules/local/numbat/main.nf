@@ -173,9 +173,28 @@ process NUMBAT_PILEUP {
 
         # Re-indexing an 80 GB BAM costs more than the pileup, so the .bai is
         # staged alongside it; only build one if it genuinely is not there.
+        #
+        # LD_LIBRARY_PATH, scoped to this one command. The image carries TWO
+        # htslibs: Debian's 1.20 under /lib/x86_64-linux-gnu, which /usr/bin/
+        # samtools 1.20 is linked against, and a hand-built 1.15.1 under
+        # /usr/local/lib, which cellsnp-lite is linked against. /usr/local/lib
+        # wins in ld.so.conf, so samtools loads the 1.15.1 copy and dies with
+        #     samtools: symbol lookup error: undefined symbol: bam_aux_first,
+        #     version HTSLIB_1.17
+        # Upstream pkharchenkolab/numbat-rbase does NOT have this problem even
+        # though both libraries are present and the samtools binary is byte
+        # identical: its ld.so.cache was built before /usr/local/lib held an
+        # htslib. Adding procps in containers/numbat/Dockerfile ran apt's
+        # ldconfig trigger, the cache was regenerated, and /usr/local/lib took
+        # over -- so the procps layer broke samtools without touching it.
+        # Measured by diffing the two images (Cirro 2026-10-21, exit 127).
+        #
+        # Deleting the old library is NOT the fix: cellsnp-lite, which does the
+        # actual pileup, resolves to /usr/local/lib/libhts.so.3. Hence the
+        # per-command override rather than an ENV or a global ldconfig.
         if [ ! -s "${bam}.bai" ]; then
             echo "[numbat] no .bai staged -- indexing ${bam} (slow)" >&2
-            samtools index -@ ${task.cpus} ${bam}
+            LD_LIBRARY_PATH=/lib/x86_64-linux-gnu samtools index -@ ${task.cpus} ${bam}
         fi
 
         Rscript \$PILEUP \\

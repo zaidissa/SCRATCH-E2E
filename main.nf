@@ -430,10 +430,23 @@ workflow {
         if (params.input_bam_path) {
             // Carry the .bai alongside the BAM. Without it the pileup re-indexes an
             // 80 GB file on every attempt, which costs more than the pileup.
+            //
+            // `resolveSibling`, NOT `file("${bam}.bai")`. S3Path.toString() DROPS
+            // the scheme -- it returns /bucket/key, never s3://bucket/key -- so
+            // string-concatenating a suffix and handing it to file() builds a
+            // sun.nio.fs.UnixPath pointing at a LOCAL /bucket/... that cannot
+            // exist. exists() was therefore false for all 17 samples, the
+            // placeholder was staged every time, and each task fell into the slow
+            // index branch; on Cirro 2026-10-21 that is where the run died, 2h3m
+            // and 49.5 CPU-hours in, after staging 15 BAMs to do it.
+            // resolveSibling keeps the path on its own filesystem, so exists() is
+            // a real object lookup. Measured on 25.04.8: file("\${f}.bai") yields
+            // UnixPath, f.resolveSibling(f.name + '.bai') yields S3Path.
             ch_numbat_bam = Channel.fromPath(params.input_bam_path, checkIfExists: true)
                 .map { f ->
-                    def idx = file("${f}.bai")
-                    if (!idx.exists()) idx = file("${f.toString().replaceAll(/\.bam$/, '.bai')}")
+                    def idx = f.resolveSibling(f.name + '.bai')
+                    if (!idx.exists())
+                        idx = f.resolveSibling(f.name.replaceAll(/\.bam$/, '.bai'))
                     tuple(f.parent.parent.name, f,
                           idx.exists() ? idx : file("${projectDir}/assets/NO_FILE_bai"))
                     // A DEDICATED placeholder: reusing NO_FILE_gmap here would put two
