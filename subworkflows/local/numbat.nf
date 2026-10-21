@@ -26,6 +26,66 @@ workflow NUMBAT {
 
         if (asBool(params.run_numbat)) {
 
+            // The pileup image must be PULLABLE BY THE EXECUTOR, not merely
+            // present on the machine that built it. `scratch-numbat:procps` is a
+            // bare local tag, and Docker reads a reference with no '/' as a Docker
+            // Hub official image, so AWS Batch asked the Hub for
+            // library/scratch-numbat and got
+            //     CannotPullImageManifestError ... denied: requested access to the
+            //     resource is denied / unauthorized: authentication required
+            // That is a task-START failure, which `errorStrategy retry` cannot
+            // help: all 15 pileups were submitted, each retried three times, and
+            // the run died after 1h50m and 33 CPU-hours having produced no calls
+            // (Cirro 2026-10-20, dataset 9c9d99d4). The error names neither the
+            // image nor the parameter that chose it.
+            //
+            // conf/containers.config exists to prevent exactly this -- its header
+            // lists "local-only tags never pushed to a registry" as one of the
+            // three portability bugs it was written to remove -- and Numbat
+            // reintroduced one. Check it here, before NUMBAT_PREP spends an hour
+            // building per-sample inputs for a stage that cannot start.
+            //
+            // The test is just "does the reference contain a '/'", which is the
+            // same rule Docker applies when deciding whether a name is
+            // official-library shorthand. `syedsazaidi/scratch-cnv:latest` and
+            // `us.gcr.io/broad-dsde-methods/cellbender:0.3.0` pass;
+            // `nf-quarto:latest` and `scratch-numbat:procps` do not.
+            //
+            // Exempt only the local executor, where a locally built tag is the
+            // whole point. `workflow.profile` is NOT the discriminator: the
+            // documented laptop invocation is `-profile docker`, which leaves the
+            // executor at its default, and Cirro reports profile 'standard' while
+            // setting the executor from its own compute config. Read the executor
+            // itself -- null means Nextflow's default, which is local. Measured on
+            // both 25.04.8 (Cirro's version) and 26.04.6: `navigate` returns null
+            // when unset and 'awsbatch' when .cirro/process-compute.config is in
+            // play. A bare `session` is undefined under the strict parser, hence
+            // the fully qualified field.
+            def numbat_image = params.image_numbat?.toString()
+            def nxf_executor = nextflow.Global.session.config
+                                   .navigate('process.executor')?.toString() ?: 'local'
+            if (nxf_executor != 'local' && numbat_image && !numbat_image.contains('/')) {
+                error "Numbat's image '${numbat_image}' is a local-only Docker tag, so the " +
+                      "'${nxf_executor}' executor cannot pull it.\n" +
+                      "  A reference with no '/' is read as a Docker Hub official image " +
+                      "(library/${numbat_image.tokenize(':').first()}), which does not " +
+                      "exist, so every pileup task fails at image pull with \"denied: " +
+                      "requested access to the resource is denied\" -- after the whole " +
+                      "fan-out has already been submitted.\n" +
+                      "  Push it somewhere the executor can reach, then point this there:\n" +
+                      "      docker tag  ${numbat_image} <registry>/${numbat_image}\n" +
+                      "      docker push <registry>/${numbat_image}\n" +
+                      "      nextflow run ... --container_numbat '<registry>/${numbat_image}'\n" +
+                      "  The image is containers/numbat/Dockerfile = " +
+                      "pkharchenkolab/numbat-rbase:latest + procps. Almost all of its 43.8 GB " +
+                      "is the bundled 1000G panel, which the public base image already " +
+                      "carries, so a Docker Hub push cross-mounts those blobs and uploads " +
+                      "only the 4.8 MB procps layer.\n" +
+                      "  To reach STRATIFY without allele-aware CNV instead, set " +
+                      "--run_numbat false; the malignant split then rests on inferCNV and " +
+                      "the annotation label alone."
+            }
+
             // Fail early and legibly: the reference panel is a large external
             // download, and discovering it is missing after the pileup has
             // burned hours on a BAM is the worst time to find out.
