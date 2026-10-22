@@ -34,6 +34,8 @@ params:
   reference_labels: "T_Cells;NK_Cells;Myeloid;B_Plasma_Cells;Endothelial_Cells;Fibroblast"
   thr_cluster_size: 1000
   n_threads: 8
+  # 0 = no cap. See --cnv_infercnv_max_cells_per_group.
+  max_cells_per_group: 0
   n_memory: 16
   work_directory: !expr here::here()
   auto_save: true
@@ -70,6 +72,7 @@ thr_cluster_size <- params$thr_cluster_size
 
 # Dataflow/Computational parameters
 n_threads <- params$n_threads
+max_cells_per_group <- suppressWarnings(as.integer(params$max_cells_per_group))
 n_memory <- params$n_memory
 
 # Output parameters
@@ -186,6 +189,36 @@ seurat_object$reference_label <- as.character(seurat_object@meta.data[[reference
 # inferCNV needs a group label for every cell; NA is not a group.
 seurat_object$reference_label[is.na(seurat_object$reference_label) |
                               !nzchar(seurat_object$reference_label)] <- "Unassigned"
+
+# Optional cap on cells per group, applied BEFORE the vocabulary checks below so
+# that every number this notebook reports describes the object inferCNV actually
+# sees. Capping only shrinks groups that are over the limit, so no group can
+# disappear and the reference/observation checks still hold.
+#
+# Off unless --cnv_infercnv_max_cells_per_group is set; see that parameter in
+# nextflow.config for why this is opt-in rather than a default.
+if (!is.na(max_cells_per_group) && max_cells_per_group > 0L) {
+  .by   <- split(colnames(seurat_object), seurat_object$reference_label)
+  .size <- vapply(.by, length, integer(1))
+  if (any(.size > max_cells_per_group)) {
+    # Fixed seed: the same object must give the same subsample on a retry, or a
+    # resumed run would silently call CNV on different cells.
+    set.seed(022003)
+    .keep <- unlist(lapply(.by, function(bc)
+                 if (length(bc) > max_cells_per_group)
+                     sample(bc, max_cells_per_group) else bc),
+               use.names = FALSE)
+    message(sprintf(
+      "[inferCNV] capping %d group(s) at %s cells: %s cells -> %s cells. %s",
+      sum(.size > max_cells_per_group), format(max_cells_per_group, big.mark = ","),
+      format(ncol(seurat_object), big.mark = ","), format(length(.keep), big.mark = ","),
+      paste(sprintf("%s %s->%s", names(.size)[.size > max_cells_per_group],
+                    .size[.size > max_cells_per_group], max_cells_per_group),
+            collapse = "; ")))
+    message("[inferCNV] cells not sampled receive NO inferCNV score.")
+    seurat_object <- seurat_object[, .keep]
+  }
+}
 
 # No keep-list: every cell is retained. Reference cells form the baseline, all
 # others are observations.
