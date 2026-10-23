@@ -472,6 +472,11 @@ workflow {
 
         rep_cnv = CNV.out.infercnv
             .mix(CNV.out.numbat)
+            // Numbat's own figures. Without this the CNV stage report shows a
+            // single Numbat plot -- segment size by chromosome, which the
+            // concordance notebook draws itself -- and none of Numbat's: no
+            // phylogeny heatmap, no clone tree, no pseudobulk allele profiles.
+            .mix(CNV.out.numbat_figures)
             .mix(CNV.out.concordance)
             .mix(CNV.out.concordance_csv)
             .flatten()

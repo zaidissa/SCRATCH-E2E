@@ -44,6 +44,10 @@ workflow CNV {
         // of magnitude apart, and a report that can only answer the first
         // invites the second being answered wrongly.
         ch_numbat_segments = Channel.empty()
+        // Numbat's own figures, drawn by NUMBAT_REPORT from the finished
+        // output directories. Separate from the caller outputs because they
+        // feed the CNV stage report, not STRATIFY.
+        ch_numbat_figures = Channel.empty()
 
         // Per-cell calls, kept separate from the raw caller output directories.
         // These are what the stratification step consumes.
@@ -85,6 +89,7 @@ workflow CNV {
             // directory, which a flattened stage had also silently broken.
             // Directories stage as symlinks, so the 3.4 GB behind them costs nothing.
             ch_numbat_segments = NUMBAT.out.segments.flatten().map { it.parent }.unique()
+            ch_numbat_figures = NUMBAT.out.figures
         }
 
         if (!asBool(params.skip_copykat)) {
@@ -128,6 +133,7 @@ workflow CNV {
         copykat         = ch_copykat
         infercnv_meta   = ch_infercnv_meta
         numbat          = ch_numbat
+        numbat_figures  = ch_numbat_figures
         concordance     = ch_concordance
         concordance_csv = ch_concordance_csv
 }

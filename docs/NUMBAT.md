@@ -72,7 +72,11 @@ ALIGN (BAM) ──────────────────────�
                                                                       │
                                              NUMBAT_RUN <─────────────┘
                                                   │
-                                                  └──> *_numbat_calls.tsv ──> STRATIFY
+                                                  ├──> *_numbat_calls.tsv ──> STRATIFY
+                                                  │
+                                                  └──> numbat/<sample>/ ──> NUMBAT_REPORT
+                                                                                  │
+                                                                                  └──> figures
 ```
 
 Three processes rather than one, so the expensive pileup caches independently of
@@ -105,7 +109,54 @@ rather than failing the run.
 | `--numbat_min_cells` | `50` | below this a sample is skipped |
 | `--numbat_t` | `1e-5` | transition probability |
 | `--numbat_max_iter` | `2` | phylogeny refinement iterations |
+| `--numbat_min_llr` | `5` | log-likelihood-ratio floor for keeping a CNV |
+| `--skip_numbat_figures` | `false` | turn off `NUMBAT_REPORT` |
+| `--numbat_figures_ncut` | `4` | clone counts to re-cut the phylogeny at; `0` skips that panel |
+| `--numbat_figures_min_clone_cells` | `50` | smaller clones are left out of the pseudobulk figure |
+| `--numbat_figures_min_llr` | `10` | LLR floor for drawing a CNV on the pseudobulk figure |
 | `--container_numbat` | `pkgs/numbat:latest` | verify before production use |
+
+## Figures
+
+`run_numbat()` is called with `plot = FALSE`, so Numbat itself draws nothing.
+`NUMBAT_REPORT` draws the figures afterwards instead, per sample, from the
+output directory `NUMBAT_RUN` has already written — the posteriors, consensus
+segments, phylogeny and mutation graph are all written outside `run_numbat`'s
+own `if (plot)` branch, so nothing had to be recomputed to get them.
+
+It is a separate process on purpose. Nextflow's task hash covers a process's
+script text, so adding one plotting line to `NUMBAT_RUN` re-runs the model fit
+for every sample — 957 CPU-hours over 15 GBM libraries. Turning `plot = TRUE`
+on would do the same, *and* produce only five of the figures below: Numbat's
+internal plotting draws no phylogeny heatmap, no single-cell tree, no mutation
+history and no consensus plot.
+
+Per sample, published to `cnv/figures/` as PNG (plus PDF where the figure is
+not too dense to vectorise):
+
+| File | What it shows |
+|---|---|
+| `<sample>_phylo_heatmap.png` | the signature figure: single-cell phylogeny beside the per-cell CNV calls, with a clone bar and the tumour/normal divide |
+| `<sample>_phylo_heatmap_by_ncut.png` | the same heatmap re-cut at 1–4 clones, because the clone count is a choice rather than a measurement |
+| `<sample>_consensus_segments.png` | the CNV events along the genome |
+| `<sample>_segment_heatmap.png` | the same segments as a genome-wide heatmap, one row per group |
+| `<sample>_bulk_clone_profiles.png` | pseudobulk expression log-ratio over phased allele frequency, per clone — the only figure that shows the allelic evidence directly |
+| `<sample>_sc_phylogeny.png` | the phylogeny alone, each CNV placed on the branch where it was acquired |
+| `<sample>_mutation_history.png` | the clone tree, nodes sized by clone |
+| `<sample>_expression_rolling.png` | window-smoothed expression, clustered — the expression channel on its own |
+
+`cnv/data/<sample>_numbat_figure_manifest.tsv` names every figure, whether it
+was drawn, and why not when it was not. A figure browser cannot tell "not
+drawn" from "nothing to draw"; the manifest can. Every figure is attempted
+independently, and `NUMBAT_REPORT` is `errorStrategy = 'ignore'` — a picture
+must never cost a call.
+
+The CNV concordance report adds three more, cohort-wide, on the pipeline's own
+UMAP: Numbat's clone assignment; its aneuploidy posterior split into the
+**expression** and **allele** channels beside the joint result; and the most
+widely carried CNV segments one panel at a time. The split is the diagnostic —
+a cell that is positive on the allele channel but not on expression carries a
+copy-neutral event that no expression-based caller can see at all.
 
 ## How the calls are used
 

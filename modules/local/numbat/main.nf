@@ -286,3 +286,63 @@ process NUMBAT_RUN {
         touch numbat/${sample_id}/stub.txt
         """
 }
+
+
+// Numbat's own figures, drawn from a finished NUMBAT_RUN output directory.
+//
+// A SEPARATE process on purpose. Nextflow hashes a process's script text, so
+// adding the plotting to NUMBAT_RUN would re-run the model fit for every
+// sample -- 957 CPU-hours over 15 libraries on GBM-DFCI3, to produce pictures
+// from numbers that are already on disk. run_numbat() writes its posteriors,
+// consensus segments, phylogeny and mutation graph OUTSIDE its `if (plot)`
+// branch, so `plot = FALSE` cost us the figures and none of the data; this
+// reads that data back and draws them in minutes.
+//
+// Runs in the Numbat image because that is where the numbat R package and its
+// plotting stack live (ggtree, ggraph, tidygraph, patchwork, scistreer).
+// There is no quarto in that image, so this emits figure FILES rather than a
+// notebook -- which is what STAGE_REPORT consumes anyway: it builds the CNV
+// report from what the stage published.
+process NUMBAT_REPORT {
+
+    tag "Numbat figures: ${sample_id}"
+    label 'process_medium'
+
+    input:
+        tuple val(sample_id), path(numbat_dir)
+
+    output:
+        path "figures/numbat/*",                  emit: figures,  optional: true
+        path "data/*_numbat_figure_manifest.tsv", emit: manifest, optional: true
+
+    when:
+        task.ext.when == null || task.ext.when
+
+    script:
+        """
+        set -euo pipefail
+        mkdir -p figures/numbat data
+
+        # The last two positional arguments are the rolling-expression cluster
+        # count and the cell count above which the dense heatmaps are written
+        # as PNG only. Neither is worth a pipeline parameter: the first is
+        # Numbat's own default, and the second is a property of the PDF format
+        # rather than of the analysis.
+        numbat_figures.R \\
+            ${numbat_dir} ${sample_id} figures/numbat data \\
+            ${params.numbat_genome} \\
+            ${params.numbat_figures_ncut} \\
+            ${params.numbat_figures_min_clone_cells} \\
+            ${params.numbat_figures_min_llr} \\
+            3 3000
+        """
+
+    stub:
+        """
+        mkdir -p figures/numbat data
+        touch figures/numbat/${sample_id}_phylo_heatmap.png
+        touch figures/numbat/${sample_id}_consensus_segments.png
+        printf 'sample\\tfigure\\tstatus\\treason\\n${sample_id}\\tphylo_heatmap\\tdrawn\\t\\n' \\
+            > data/${sample_id}_numbat_figure_manifest.tsv
+        """
+}

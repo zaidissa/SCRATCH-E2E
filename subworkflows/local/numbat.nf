@@ -12,6 +12,7 @@ include { NUMBAT_FETCH_REFS } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_PREP   } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_PILEUP } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_RUN    } from '../../modules/local/numbat/main.nf'
+include { NUMBAT_REPORT } from '../../modules/local/numbat/main.nf'
 
 workflow NUMBAT {
 
@@ -23,6 +24,7 @@ workflow NUMBAT {
 
         ch_calls = Channel.empty()
         ch_segments = Channel.empty()
+        ch_figures = Channel.empty()
 
         if (asBool(params.run_numbat)) {
 
@@ -236,6 +238,32 @@ workflow NUMBAT {
             NUMBAT_RUN(ch_run_in)
             ch_calls = NUMBAT_RUN.out.calls
             ch_segments = NUMBAT_RUN.out.segments
+
+            // Numbat's own figures. Drawn in a SEPARATE task from the finished
+            // output directory rather than inside NUMBAT_RUN, because the task
+            // hash covers the process script: one plotting line added to
+            // NUMBAT_RUN re-runs the model fit for all 15 libraries (957 CPU
+            // hours, measured on GBM-DFCI3) to redraw pictures from numbers
+            // that are already on disk.
+            //
+            // `detail` is declared as numbat/<sample>/**, so it emits the
+            // FILES; the directory is recovered from them and the sample id
+            // from the directory's name -- the same shape cnv.nf already uses
+            // to stage the segment consensus. The grandparent test is what
+            // keeps a nested file from contributing its own subdirectory as a
+            // second, wrong "sample": only a file sitting directly in
+            // numbat/<sample>/ has 'numbat' two levels up.
+            if (!asBool(params.skip_numbat_figures)) {
+                ch_numbat_dirs = NUMBAT_RUN.out.detail
+                    .flatten()
+                    .map { f -> f.parent }
+                    .filter { d -> d.parent.name == 'numbat' }
+                    .unique()
+                    .map { d -> tuple(d.name, d) }
+
+                NUMBAT_REPORT(ch_numbat_dirs)
+                ch_figures = NUMBAT_REPORT.out.figures
+            }
         }
 
     emit:
@@ -243,4 +271,6 @@ workflow NUMBAT {
         // Per-SEGMENT consensus calls, keyed by sample. Distinct from `calls`,
         // which is per cell.
         segments = ch_segments
+        // Numbat's own diagnostic figures, one set per sample.
+        figures = ch_figures
 }

@@ -275,6 +275,251 @@ if (!is.null(segs) && nrow(segs)) {
 }
 ```
 
+## Where Numbat's calls fall on the map
+
+Numbat's own vignette draws its per-cell posteriors on an expression embedding,
+and that is the figure that answers the question a table cannot: are the cells
+Numbat calls aneuploid *one coherent population*, or scattered through
+clusters that the annotation calls immune?
+
+Numbat does not produce one posterior, it produces three. It scores each cell
+from **expression** dosage and from **allele** imbalance separately, then
+combines them. Splitting them apart is the diagnostic: where the two channels
+agree the call is solid; where only the allele channel fires, the event is
+copy-neutral LOH, which no expression-based caller can see at all; where only
+expression fires, the "CNV" may be a transcriptional programme.
+
+Drawn on this pipeline's own UMAP rather than the vignette's pagoda2
+embedding, so these panels sit in the same coordinates as every other figure
+in the report.
+
+```{r numbat-embedding-read}
+#| code-fold: true
+
+# The embedding. Subset-by-membership, not intersect(): on an object with no
+# reductions at all, names() is NULL and intersect(x, NULL) returns NULL, whose
+# [1] is NULL -- so `if (!is.na(red))` dies with "argument is of length zero"
+# rather than taking the guarded branch. Subsetting a character vector always
+# yields a character vector, so [1] is NA_character_. This is the same idiom
+# the cell-type and sample columns above already use. Measured on R 4.3.
+emb <- NULL
+red_candidates <- c("umap", "umap.harmony", "umap_harmony", "wnn.umap", "umap_rna", "tsne")
+red <- red_candidates[red_candidates %in% names(obj@reductions)][1]
+if (!is.na(red)) {
+  emb <- tryCatch({
+    e <- as.data.table(Embeddings(obj, red), keep.rownames = "cell_id")
+    setnames(e, 2:3, c("dim1", "dim2"))
+    e[, cell_id := as.character(cell_id)]
+    e[, .(cell_id, dim1, dim2)]
+  }, error = function(e) NULL)
+}
+
+# `_numbat_calls.tsv` carries the JOINT posterior only. The two channels it was
+# built from live in clone_post_<i>.tsv, inside the per-sample output directory
+# that cnv.nf already stages here alongside the calls.
+#
+# Numbat keys cells by BARCODE, and a barcode is only unique within a sample --
+# "AAACCTGAGAAACCAT-1" exists in all seventeen libraries. So the join is on
+# (sample, barcode), and the barcode -> cell_id map is the calls table itself.
+nb_map <- NULL
+if (length(nb_files)) {
+  tsv <- nb_files[grepl("_numbat_calls\\.tsv$", nb_files)]
+  parts <- lapply(tsv, function(f) tryCatch({
+    d <- fread(f)
+    if (!all(c("cell_id", "barcode", "sample") %in% names(d))) return(NULL)
+    unique(d[, .(cell_id = as.character(cell_id), barcode = as.character(barcode),
+                 sample = as.character(sample))])
+  }, error = function(e) NULL))
+  parts <- Filter(function(x) !is.null(x) && nrow(x), parts)
+  if (length(parts)) nb_map <- rbindlist(parts, fill = TRUE)
+}
+
+cp <- NULL
+cp_files <- nb_files[grepl("clone_post_\\d+\\.tsv$", nb_files)]
+if (length(cp_files)) {
+  # One clone_post per iteration; the HIGHEST is the converged one. Ordered
+  # numerically, not lexically -- clone_post_10 sorts before clone_post_2.
+  by_sample <- split(cp_files, sub("^.*/([^/]+)/clone_post_.*$", "\\1", cp_files))
+  parts <- lapply(names(by_sample), function(smp) tryCatch({
+    f <- by_sample[[smp]]
+    f <- f[order(as.integer(sub("^.*clone_post_(\\d+)\\.tsv$", "\\1", f)))]
+    d <- fread(f[length(f)])
+    if (!nrow(d) || !"cell" %in% names(d)) return(NULL)
+    keep <- intersect(c("cell", "clone_opt", "p_cnv", "p_cnv_x", "p_cnv_y"), names(d))
+    d <- d[, ..keep]
+    setnames(d, "cell", "barcode")
+    d[, barcode := as.character(barcode)][, sample := smp]
+    d
+  }, error = function(e) NULL))
+  parts <- Filter(function(x) !is.null(x) && nrow(x), parts)
+  if (length(parts)) cp <- rbindlist(parts, fill = TRUE)
+}
+
+nb_emb <- NULL
+join_note <- NULL
+if (!is.null(emb) && !is.null(cp) && !is.null(nb_map)) {
+  # clone_post's `sample` is the output DIRECTORY name; the calls table's is
+  # --numbat_sample_col. They are the same string by construction, but if a
+  # future change ever parts them this join goes silently empty, so fall back
+  # to the barcode alone and say that is what happened.
+  j <- merge(cp, nb_map, by = c("sample", "barcode"), all.x = FALSE)
+  if (!nrow(j)) {
+    j <- merge(cp[, !"sample"], unique(nb_map[, .(cell_id, barcode)]),
+               by = "barcode", all.x = FALSE, allow.cartesian = TRUE)
+    # Without the dedupe this does not merely match arbitrarily, it DUPLICATES:
+    # one barcode shared by two libraries produces two rows for each of the two
+    # cells, and every cell is then drawn twice with two different posteriors.
+    # Measured: 800 cells in, 1,600 rows out.
+    n_before <- nrow(j)
+    j <- unique(j, by = "cell_id")
+    join_note <- sprintf(paste("the per-sample join was empty, so cells were matched on",
+                               "barcode alone; %s of %s candidate rows were dropped to keep",
+                               "one posterior per cell, and which one survives is arbitrary"),
+                         format(n_before - nrow(j), big.mark = ","),
+                         format(n_before, big.mark = ","))
+  }
+  if (nrow(j)) nb_emb <- merge(emb, j, by = "cell_id", all.x = FALSE)
+}
+
+cat("Embedding:", if (is.na(red)) "none found" else red,
+    "| clone_post cells:", if (is.null(cp)) 0 else nrow(cp),
+    "| placed on the embedding:", if (is.null(nb_emb)) 0 else nrow(nb_emb), "\n")
+```
+
+```{r numbat-embedding-guard, results = 'asis'}
+if (have_nb && is.null(nb_emb)) {
+  scratch_finding(sprintf(paste(
+    "Numbat produced calls but its clone posteriors could not be placed on the",
+    "embedding, so the clone and channel panels below are missing. %s. The",
+    "per-segment panels read a different file and may still appear, and nothing",
+    "else in this report is affected -- the calls themselves are intact."),
+    if (is.na(red)) "The object carries no UMAP reduction"
+    else if (is.null(cp)) "No clone_post_<i>.tsv was staged"
+    else "No cell matched between clone_post and the calls table"),
+    type = "note", title = "Numbat posteriors not mapped")
+} else if (!is.null(join_note)) {
+  scratch_finding(sprintf("Numbat posteriors were mapped, but %s.", join_note),
+                  type = "caution", title = "Approximate cell matching")
+}
+```
+
+```{r fig-numbat-clones, fig.width = 8, fig.height = 6}
+#| label: fig-numbat-clones
+#| fig-cap: "Numbat clone assignment on the UMAP"
+if (!is.null(nb_emb) && "clone_opt" %in% names(nb_emb)) {
+  d <- nb_emb[!is.na(clone_opt)]
+  if (nrow(d)) {
+    d[, clone := factor(clone_opt)]
+    p <- ggplot(d[sample(.N)], aes(x = dim1, y = dim2, colour = clone)) +
+      geom_point(size = 0.3, alpha = 0.8) +
+      scale_colour_scratch(name = "Clone") +
+      guides(colour = guide_legend(override.aes = list(size = 3))) +
+      labs(title = "Numbat clones",
+           subtitle = "Clone 1 is the normal genotype; the rest are tumour subclones",
+           x = paste0(red, " 1"), y = paste0(red, " 2")) +
+      theme_scratch(grid = "none")
+    p
+  }
+}
+```
+
+```{r fig-numbat-posteriors, fig.width = 12, fig.height = 4.5}
+#| label: fig-numbat-posteriors
+#| fig-cap: "Aneuploidy posterior per cell, by evidence channel"
+if (!is.null(nb_emb) && all(c("p_cnv", "p_cnv_x", "p_cnv_y") %in% names(nb_emb))) {
+  # Numbat builds p_cnv_x from exp_post and p_cnv_y from allele_post
+  # (get_clone_post in the package's main.R), so x is EXPRESSION and y is
+  # ALLELE. The published vignette labels its own panels the other way round;
+  # these follow the source.
+  d <- melt(nb_emb[, .(dim1, dim2, Expression = p_cnv_x, Allele = p_cnv_y, Joint = p_cnv)],
+            id.vars = c("dim1", "dim2"), variable.name = "channel", value.name = "posterior")
+  d <- d[!is.na(posterior)]
+  if (nrow(d)) {
+    d[, channel := factor(channel, levels = c("Expression", "Allele", "Joint"))]
+    p <- ggplot(d[sample(.N)], aes(x = dim1, y = dim2, colour = posterior)) +
+      geom_point(size = 0.25, alpha = 0.85) +
+      scale_colour_gradient2(low = "#2166AC", mid = "grey92", high = "#B2182B",
+                             midpoint = 0.5, limits = c(0, 1), name = "P(aneuploid)") +
+      facet_wrap(~ channel, nrow = 1) +
+      labs(title = "The two channels Numbat combines, and the result",
+           subtitle = paste("Expression dosage alone, phased allele imbalance alone, and the joint",
+                            "posterior. A cell red in Allele but not Expression carries a",
+                            "copy-neutral event no expression-based caller can see."),
+           x = paste0(red, " 1"), y = paste0(red, " 2")) +
+      theme_scratch(grid = "none")
+    p
+  }
+}
+```
+
+```{r numbat-joint-post-read}
+#| code-fold: true
+
+# Per-SEGMENT posteriors, so a single CNV can be followed cell by cell. This is
+# the biggest file Numbat writes -- one row per cell per segment -- so only the
+# five columns this needs are read, and only the segments carried by the most
+# cells are drawn.
+jp <- NULL
+n_seg_panels <- 6L
+jp_files <- nb_files[grepl("joint_post_\\d+\\.tsv$", nb_files)]
+if (length(jp_files) && !is.null(nb_map)) {
+  by_sample <- split(jp_files, sub("^.*/([^/]+)/joint_post_.*$", "\\1", jp_files))
+  parts <- lapply(names(by_sample), function(smp) tryCatch({
+    f <- by_sample[[smp]]
+    f <- f[order(as.integer(sub("^.*joint_post_(\\d+)\\.tsv$", "\\1", f)))]
+    d <- fread(f[length(f)], select = c("cell", "CHROM", "seg", "cnv_state", "p_cnv"))
+    if (!nrow(d)) return(NULL)
+    d <- d[cnv_state != "neu" & !is.na(p_cnv)]
+    if (!nrow(d)) return(NULL)
+    d[, `:=`(barcode = as.character(cell), sample = smp)][, cell := NULL]
+    d
+  }, error = function(e) NULL))
+  parts <- Filter(function(x) !is.null(x) && nrow(x), parts)
+  if (length(parts)) {
+    jp <- rbindlist(parts, fill = TRUE)
+    jp <- merge(jp, nb_map, by = c("sample", "barcode"), all.x = FALSE)
+    if (!nrow(jp)) jp <- NULL
+  }
+}
+```
+
+```{r fig-numbat-segment-posteriors, fig.width = 12, fig.height = 7.5}
+#| label: fig-numbat-segment-posteriors
+#| fig-cap: "Per-cell posterior for individual CNV segments"
+if (!is.null(jp) && !is.null(emb)) {
+  # A segment is identified by SAMPLE as well as name. Numbat labels segments
+  # per sample -- "1a" is the first segment on chromosome 1 in THAT sample's
+  # own consensus -- so "1a" in one library and "1a" in another are different
+  # events, and may even carry different states. Ranking on `seg` alone put the
+  # same name in the table more than once and the join then multiplied every
+  # cell by it (3,634 rows out of 1,808, measured). The panel is therefore keyed
+  # on sample, segment and state together, and labelled with all three.
+  top <- jp[p_cnv > 0.5, .N, by = .(sample, seg, cnv_state)][order(-N)][seq_len(min(n_seg_panels, .N))]
+  d <- merge(jp, top[, .(sample, seg, cnv_state)], by = c("sample", "seg", "cnv_state"), all.x = FALSE)
+  d <- merge(emb, d, by = "cell_id", all.x = FALSE)
+  if (nrow(d) && nrow(top)) {
+    lab <- function(sm, sg, st) sprintf("%s · %s (%s)", sm, sg, toupper(st))
+    d[, panel := factor(lab(sample, seg, cnv_state), levels = top[, lab(sample, seg, cnv_state)])]
+    # Every panel holds one sample's cells only, so the rest of the cohort is
+    # drawn underneath in grey -- otherwise each panel is a different-shaped
+    # cloud and they cannot be compared by eye.
+    p <- ggplot(d[sample(.N)], aes(x = dim1, y = dim2)) +
+      geom_point(data = emb, aes(x = dim1, y = dim2), colour = "grey88",
+                 size = 0.18, alpha = 0.6, inherit.aes = FALSE) +
+      geom_point(aes(colour = p_cnv), size = 0.25, alpha = 0.9) +
+      scale_colour_gradient2(low = "#2166AC", mid = "grey92", high = "#B2182B",
+                             midpoint = 0.5, limits = c(0, 1), name = "Posterior") +
+      facet_wrap(~ panel, nrow = 2) +
+      labs(title = sprintf("The %d most widely carried CNV segments, cell by cell", nrow(top)),
+           subtitle = paste("One panel per segment, in the sample that called it:",
+                            "red cells carry it, blue do not, grey is the rest of the cohort"),
+           x = paste0(red, " 1"), y = paste0(red, " 2")) +
+      theme_scratch(grid = "none")
+    p
+  }
+}
+```
+
 ## Do the callers rank cells the same way?
 
 The threshold-free question, and the one worth asking first: **ignoring where
