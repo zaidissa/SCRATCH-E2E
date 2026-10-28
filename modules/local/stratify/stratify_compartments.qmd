@@ -461,6 +461,39 @@ callers <- unique(callers)   # a caller carried on the object AND staged as a fi
 cat("\nCNV callers contributing:", if (length(callers)) paste(callers, collapse = ", ") else "none", "\n")
 ```
 
+```{r caller-availability-finding, results = 'asis'}
+# Zero callers is not a quieter version of one caller -- it changes what this
+# stage IS. With no CNV evidence every cell falls through to `annotation_call`,
+# so the split stops being a measurement of aneuploidy and becomes a rename of
+# the annotation: whatever scType called Malignant is the tumour compartment.
+# That is a defensible fallback and an indefensible silence, and until now the
+# only trace was the word "none" in a code-chunk's stdout.
+#
+# It is reachable: INFERCNV, SCEVAN and COPYKAT_PROCESS are set to `ignore`
+# after their retries so one caller cannot destroy a finished cohort, and
+# NUMBAT_RUN has been for longer. Every one of those failing in the same run
+# leaves exactly this state.
+if (!length(callers)) {
+  scratch_finding(sprintf(paste(
+    "**No CNV caller contributed, so this split is the annotation relabelled.**",
+    "Every cell was assigned from `%s` alone: labels matching the tumour",
+    "lineage (%s) became malignant, labels matching a reference lineage became",
+    "non-malignant, and the rest are ambiguous. No aneuploidy was measured.",
+    "Treat the two compartments as a cell-type grouping, not as a tumour call.",
+    "The CNV stage either ran no caller (`--skip_infercnv`, `--run_numbat false`)",
+    "or every caller it ran failed -- the CNV stage report names which."),
+    col_ct, paste(tumor_labels, collapse = ", ")),
+    type = "caution", title = "No CNV evidence: the split is annotation-only")
+} else if (length(callers) == 1L) {
+  scratch_finding(sprintf(paste(
+    "One CNV caller contributed (**%s**), so `--stratify_min_callers` has",
+    "nothing to arbitrate and no caller disagreement can be reported.",
+    "The split rests on that caller plus the lineage gate."),
+    callers),
+    type = "note", title = "Single-caller split")
+}
+```
+
 ```{r annotation-evidence}
 # Annotation-derived call: tumour lineage vs known-reference lineage.
 ann <- meta[, .(cell_id, lab = as.character(get(col_ct)))]
