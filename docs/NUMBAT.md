@@ -66,35 +66,113 @@ this pipeline I could not confirm.
 ## How it runs
 
 ```
-ANNOTATION ──> NUMBAT_PREP ──> per-sample counts + barcode→cell_id map
-                                        │
-ALIGN (BAM) ────────────────────────────┴──> NUMBAT_PILEUP ──> phased allele counts
-                                                                      │
-                                             NUMBAT_RUN <─────────────┘
-                                                  │
-                                                  ├──> *_numbat_calls.tsv ──> STRATIFY
-                                                  │
-                                                  └──> numbat/<sample>/ ──> NUMBAT_REPORT
-                                                                                  │
-                                                                                  └──> figures
+ANNOTATION ──> NUMBAT_PREP ──> per-INDIVIDUAL pooled counts + cell map
+                                  │        + per-library barcodes
+                                  │        + groups.tsv (library → individual)
+                                  │
+ALIGN (BAMs) ─────────────────────┴──> NUMBAT_PILEUP ──> phased allele counts
+                                       one task per individual,      (one table
+                                       all of their BAMs at once      per library)
+                                                             │
+                                       NUMBAT_RUN <──────────┘
+                                       one task per individual
+                                            │
+                                            ├──> *_numbat_calls.tsv ──> STRATIFY
+                                            ├──> *_numbat_by_library.tsv
+                                            └──> numbat/<individual>/ ──> NUMBAT_REPORT
+                                                                              │
+                                                                              └──> figures
 ```
 
 Three processes rather than one, so the expensive pileup caches independently of
 the model fit — retuning `--numbat_t` or `--numbat_max_iter` re-runs only
 `NUMBAT_RUN`.
 
-**The barcode problem, and why `NUMBAT_PREP` exists.** The BAM speaks raw
-cellranger barcodes (`AACGT…-1`); the merged Seurat object speaks whatever
-Seurat's merge produced (`SAMPLE_AACGT…-1`, `AACGT…-1_1`, …). Rather than
-guessing that mapping with a regex at join time, `NUMBAT_PREP` writes an
-explicit `barcode → cell_id` table per sample and `numbat_run.R` joins through
-it, so the calls come back keyed to the pipeline's own cell ids. It also builds
-the count matrix from **post-QC** cells, so Numbat does not model droplets that
-were already discarded.
+## Numbat runs per individual, not per library
 
-Samples are inner-joined on sample id: a sample needs both a BAM and surviving
-post-QC cells to be processed. Samples that fail either condition are skipped
-rather than failing the run.
+This is not a performance choice. **Numbat cannot report "there is no tumour
+here."** `numbat:::mark_tumor_lineage()` assigns the tumour compartment with
+
+```r
+tumor_root  = mut_nodes[which.max(mut_burdens)]
+compartment = ifelse(seq > 0, "tumor", "normal")
+```
+
+— no significance test, no null. Whatever segments survive `--numbat_min_llr`
+go on a phylogeny and the heaviest clade becomes `tumor`, and `which.max()`
+always returns something. Run per library, a PBMC or matched-normal library
+therefore does **not** come back empty: it comes back with its own noise
+partitioned into tumour and normal. That is exactly what was observed on
+GBM-DFCI3 — neoplastic calls in libraries that should be ~0% tumour.
+
+Pooled across the individual's libraries, the real aneuploid clones carry
+overwhelming mutation burden, `tumor_root` lands on the genuine tumour clade,
+and the normal cells stay in the normal compartment where they belong.
+
+It is also what Numbat documents. Its own `pileup_and_phase.R`:
+
+```
+--label    Individual label. One per run.
+--samples  Sample name(s); comma delimited if multiple.
+           All samples must belong to the same individual.
+```
+
+Grouping therefore buys three things:
+
+1. **A normal anchor**, as above.
+2. **Joint phasing.** `numbat:::genotype(label, samples, …)` genotypes every
+   library of the individual together, so a heterozygous site gets coverage from
+   all of them — which is the allelic power Numbat has and the other callers
+   do not.
+3. **An internal expression reference.** `numbat::ref_hca` is 12 generic
+   profiles from a different study, and the gap between it and the real cohort
+   is read as expression CNV signal. With the libraries pooled, the
+   individual's own immune and stromal cells are usually numerous enough to
+   build a reference from instead. On a two-library test: 83 reference-lineage
+   cells pooled (internal reference) versus 44 and 21 split per library (both
+   fall back to `ref_hca`).
+
+The grouping column is `--numbat_group_col`, default `patient_id`, falling back
+through `patient`, `subject_id`, `donor_id` and finally the library column.
+**That last fallback reproduces the per-library behaviour**, so it is reported as
+a warning in both the task log and the run console rather than taken silently —
+as is a cohort where every group happens to hold one library.
+
+**Barcodes collide across libraries.** Two libraries of one patient both contain
+`AACGT…-1`, so pooling them naively merges distinct cells. Every cell is
+namespaced `<library>_<raw barcode>` — the same shape Numbat's own example uses
+(`df_allele_example$cell` is `ATC2_TCCTAATCACAACCGC-1`). The pileup still writes
+one allele table per library with raw barcodes; `numbat_run.R` applies the
+prefix as it concatenates them.
+
+**Why `NUMBAT_PREP` exists at all.** The BAM speaks raw cellranger barcodes; the
+merged Seurat object speaks whatever Seurat's merge produced (`SAMPLE_AACGT…-1`,
+`AACGT…-1_1`, …). Rather than guessing that mapping with a regex at join time,
+`NUMBAT_PREP` writes an explicit `cell → barcode → cell_id` table and
+`numbat_run.R` joins through it, so the calls come back keyed to the pipeline's
+own cell ids. It also builds the count matrix from **post-QC** cells, so Numbat
+does not model droplets that were already discarded.
+
+`NUMBAT_PREP` runs in `image_cnv` (Seurat, no numbat) and `NUMBAT_RUN` in the
+numbat image (numbat, no Seurat). That is why PREP *selects* the reference cells
+and RUN *aggregates* them — `aggregate_counts()` needs the numbat package.
+
+Libraries are inner-joined on library id: a library needs both a BAM and
+surviving post-QC cells to be processed. Libraries that fail either condition
+are skipped rather than failing the run.
+
+### Checking the result
+
+`NUMBAT_RUN` publishes `<individual>_numbat_by_library.tsv`:
+
+| sample | n_cells | malignant | pct_malignant | reference_basis |
+|---|---|---|---|---|
+| …-TUMOUR-LIB | 4182 | 3604 | 86.2 | internal |
+| …-PBMC-LIB | 2910 | 7 | 0.2 | internal |
+
+A library you expect to be ~0% neoplastic saying otherwise is visible here, in
+`.command.log` and in the published table — rather than only after someone plots
+the final object.
 
 ## Parameters
 
@@ -105,8 +183,10 @@ rather than failing the run.
 | `--numbat_snpvcf` | — | required when enabled |
 | `--numbat_paneldir` | — | required when enabled |
 | `--numbat_genome` | `hg38` | must match `--genome` |
-| `--numbat_sample_col` | `sample_id` | column that defines a sample |
-| `--numbat_min_cells` | `50` | below this a sample is skipped |
+| `--numbat_sample_col` | `sample_id` | column that defines a **library** (must match the BAM directory names) |
+| `--numbat_group_col` | `patient_id` | column that defines an **individual** — the unit Numbat runs on |
+| `--numbat_min_ref_cells` | `50` | reference-lineage cells needed before an internal expression reference replaces `ref_hca` |
+| `--numbat_min_cells` | `50` | below this an individual is skipped |
 | `--numbat_t` | `1e-5` | transition probability |
 | `--numbat_max_iter` | `2` | phylogeny refinement iterations |
 | `--numbat_min_llr` | `5` | log-likelihood-ratio floor for keeping a CNV |
@@ -119,7 +199,7 @@ rather than failing the run.
 ## Figures
 
 `run_numbat()` is called with `plot = FALSE`, so Numbat itself draws nothing.
-`NUMBAT_REPORT` draws the figures afterwards instead, per sample, from the
+`NUMBAT_REPORT` draws the figures afterwards instead, per individual, from the
 output directory `NUMBAT_RUN` has already written — the posteriors, consensus
 segments, phylogeny and mutation graph are all written outside `run_numbat`'s
 own `if (plot)` branch, so nothing had to be recomputed to get them.

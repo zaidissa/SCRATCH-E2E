@@ -76,17 +76,34 @@ process NUMBAT_FETCH_REFS {
 
 process NUMBAT_PREP {
 
-    tag "Numbat: per-sample inputs"
+    tag "Numbat: per-individual inputs"
     label 'process_medium'
+
+    // Splits the annotated object by INDIVIDUAL, not by library. See the header
+    // of bin/numbat_prep.R for why: numbat:::mark_tumor_lineage() has no null
+    // and always labels its heaviest clade "tumor", so a library with no
+    // malignant cells cannot come back empty -- it comes back with its own
+    // noise partitioned into tumour and normal. Pooling an individual's
+    // libraries gives the real clones something to dominate.
+    //
+    // `helpers` is assets/viz/scratch_report.R, staged for its label matcher.
+    // The reference lineages that define the null in STRATIFY must be the same
+    // cells that define the expression reference here, and two copies of one
+    // matching rule diverge silently -- the notebook that draws the concordance
+    // figure already shares it for exactly that reason.
 
     input:
         path seurat_object
+        path helpers
 
     output:
-        path "numbat_input/*_counts.rds",   emit: counts
-        path "numbat_input/*_barcodes.tsv", emit: barcodes
-        path "numbat_input/*_cellmap.tsv",  emit: cellmap
-        path "numbat_input/samples.txt",    emit: samples
+        path "numbat_input/*_counts.rds",        emit: counts
+        path "numbat_input/*_barcodes.tsv",      emit: barcodes
+        path "numbat_input/*_cellmap.tsv",       emit: cellmap
+        path "numbat_input/*_refcells.tsv",      emit: refcells
+        path "numbat_input/groups.tsv",          emit: groups
+        path "numbat_input/grouping_report.tsv", emit: grouping_report
+        path "numbat_input/samples.txt",         emit: samples
 
     when:
         task.ext.when == null || task.ext.when
@@ -95,44 +112,87 @@ process NUMBAT_PREP {
         """
         set -euo pipefail
         mkdir -p numbat_input
-        numbat_prep.R ${seurat_object} ${params.numbat_sample_col} numbat_input
+        numbat_prep.R ${seurat_object} \\
+            ${params.numbat_sample_col} \\
+            ${params.numbat_group_col} \\
+            ${params.celltype_col} \\
+            '${params.stratify_reference_labels}' \\
+            ${params.numbat_min_ref_cells} \\
+            numbat_input ${helpers}
         """
 
     stub:
         """
         mkdir -p numbat_input
-        touch numbat_input/TESTA_counts.rds
+        touch numbat_input/PT1_counts.rds
+        printf 'cell\\tcelltype\\n' > numbat_input/PT1_refcells.tsv
         echo "AACGTAACGTAACGTA-1" > numbat_input/TESTA_barcodes.tsv
-        printf 'cell_id\\tbarcode\\tsample\\nTESTA_AACGTAACGTAACGTA-1\\tAACGTAACGTAACGTA-1\\tTESTA\\n' > numbat_input/TESTA_cellmap.tsv
-        echo TESTA > numbat_input/samples.txt
+        echo "AACGTAACGTAACGTC-1" > numbat_input/TESTB_barcodes.tsv
+        printf 'cell_id\\tbarcode\\tcell\\tlibrary\\tgroup\\n' > numbat_input/PT1_cellmap.tsv
+        printf 'TESTA_AACGTAACGTAACGTA-1\\tAACGTAACGTAACGTA-1\\tTESTA_AACGTAACGTAACGTA-1\\tTESTA\\tPT1\\n' >> numbat_input/PT1_cellmap.tsv
+        printf 'TESTB_AACGTAACGTAACGTC-1\\tAACGTAACGTAACGTC-1\\tTESTB_AACGTAACGTAACGTC-1\\tTESTB\\tPT1\\n' >> numbat_input/PT1_cellmap.tsv
+        printf 'library\\tgroup\\nTESTA\\tPT1\\nTESTB\\tPT1\\n' > numbat_input/groups.tsv
+        printf 'group\\tn_libraries\\tlibraries\\tn_cells\\tn_reference_cells\\treference_basis\\nPT1\\t2\\tTESTA,TESTB\\t2\\t0\\tref_hca\\n' > numbat_input/grouping_report.tsv
+        echo PT1 > numbat_input/samples.txt
         """
 }
 
 
 process NUMBAT_PILEUP {
 
-    tag "Numbat pileup: ${sample_id}"
+    tag "Numbat pileup: ${group_id}"
     label 'process_high'
 
     // The heavy step: walks the BAM for allele counts at heterozygous SNPs and
     // phases them against a population reference panel.
 
+    // ONE TASK PER INDIVIDUAL, not per library. pileup_and_phase.R takes
+    // comma-delimited --samples/--bams/--barcodes and says so itself: "All
+    // samples must belong to the same individual." It genotypes them jointly
+    // (numbat:::genotype(label, samples, ...)), so a heterozygous site gets
+    // coverage from every library the individual contributed -- which is the
+    // allelic power that expression-only callers have none of.
+    //
+    // stageAs is REQUIRED here and not cosmetic: every cellranger BAM is named
+    // possorted_genome_bam.bam, so staging several into one task directory
+    // collides and Nextflow aborts with "input file name collision". 'bam??/*'
+    // puts each in its own numbered directory keeping its basename, and the
+    // .bai lands beside its .bam because both declarations number in list
+    // order. Measured on 25.04.8 (Cirro's version) and 26.04.6: three BAMs
+    // passed in the order C,A,B staged as in01=C, in02=A, in03=B, with each
+    // index in the matching directory -- list order, not sorted. The subworkflow
+    // sorts the rows by library before building the lists, so the order is
+    // deterministic and the task hash is stable across runs.
+
     input:
-        tuple val(sample_id), path(bam), path(bai), path(barcodes)
+        tuple val(group_id), val(libs),
+              path(bams,     stageAs: 'bam??/*'),
+              path(bais,     stageAs: 'bam??/*'),
+              path(barcodes, stageAs: 'bc??/*')
         path  gmap
         path  snpvcf
         path  paneldir
 
     output:
-        tuple val(sample_id), path("pileup/${sample_id}_allele_counts.tsv.gz"), emit: alleles
+        // One allele table PER LIBRARY, jointly phased. numbat_run.R
+        // concatenates them, namespacing each cell as "<library>_<barcode>".
+        tuple val(group_id), path("pileup/*_allele_counts.tsv.gz"), emit: alleles
 
     when:
         task.ext.when == null || task.ext.when
 
     script:
+        def libList = (libs      instanceof List ? libs      : [libs]).collect { it.toString() }
+        def bamList = (bams      instanceof List ? bams      : [bams]).collect { it.toString() }
+        def bcList  = (barcodes  instanceof List ? barcodes  : [barcodes]).collect { it.toString() }
+        if (libList.size() != bamList.size() || libList.size() != bcList.size())
+            error "NUMBAT_PILEUP ${group_id}: ${libList.size()} librar(ies), " +
+                  "${bamList.size()} BAM(s), ${bcList.size()} barcode file(s) -- these must match."
         """
         set -euo pipefail
         mkdir -p pileup
+
+        echo "[numbat] individual=${group_id} libraries=${libList.join(',')}"
 
         # Reference resolution. The numbat image already ships all three (verified
         # in pkharchenkolab/numbat-rbase: /data/1000G_<build>, /data/genome1K...vcf,
@@ -192,65 +252,95 @@ process NUMBAT_PILEUP {
         # Deleting the old library is NOT the fix: cellsnp-lite, which does the
         # actual pileup, resolves to /usr/local/lib/libhts.so.3. Hence the
         # per-command override rather than an ENV or a global ldconfig.
-        if [ ! -s "${bam}.bai" ]; then
-            echo "[numbat] no .bai staged -- indexing ${bam} (slow)" >&2
-            LD_LIBRARY_PATH=/lib/x86_64-linux-gnu samtools index -@ ${task.cpus} ${bam}
-        fi
+        for b in ${bamList.join(' ')}; do
+            if [ ! -s "\$b.bai" ]; then
+                echo "[numbat] no .bai staged for \$b -- indexing (slow)" >&2
+                LD_LIBRARY_PATH=/lib/x86_64-linux-gnu samtools index -@ ${task.cpus} "\$b"
+            fi
+        done
 
         Rscript \$PILEUP \\
-            --label     ${sample_id} \\
-            --samples   ${sample_id} \\
-            --bams      ${bam} \\
-            --barcodes  ${barcodes} \\
+            --label     ${group_id} \\
+            --samples   ${libList.join(',')} \\
+            --bams      ${bamList.join(',')} \\
+            --barcodes  ${bcList.join(',')} \\
             --outdir    pileup \\
             --gmap      \$GMAP \\
             --snpvcf    \$SNPVCF \\
             --paneldir  \$PANELDIR \\
             --ncores    ${task.cpus}
 
-        # pileup_and_phase.R names its output <label>_allele_counts.tsv.gz;
-        # normalise in case a version writes it elsewhere in the tree.
-        if [ ! -f "pileup/${sample_id}_allele_counts.tsv.gz" ]; then
-            found=\$(find pileup -name "*allele_counts.tsv.gz" | head -1)
-            [ -n "\$found" ] && cp "\$found" "pileup/${sample_id}_allele_counts.tsv.gz"
-        fi
+        # pileup_and_phase.R writes {outdir}/{sample}_allele_counts.tsv.gz once
+        # per library. Fail loudly if a library produced none: an allele table
+        # that is quietly absent costs that library its allelic channel, which is
+        # the only thing Numbat has over inferCNV, and nothing downstream can
+        # tell the difference between "no table" and "no events".
+        for lb in ${libList.join(' ')}; do
+            if [ ! -s "pileup/\${lb}_allele_counts.tsv.gz" ]; then
+                found=\$(find pileup -name "\${lb}*allele_counts.tsv.gz" | head -1)
+                if [ -n "\$found" ]; then
+                    cp "\$found" "pileup/\${lb}_allele_counts.tsv.gz"
+                else
+                    echo "pileup produced no allele table for library \$lb of ${group_id}." >&2
+                    exit 1
+                fi
+            fi
+        done
         """
 
     stub:
+        // `script:` and `stub:` are separate closures -- a def in one is not
+        // visible in the other ("No such variable: libList"), and because a stub
+        // only runs under -stub the failure hides until someone stub-tests the DAG.
+        def libList = (libs instanceof List ? libs : [libs]).collect { it.toString() }
         """
         mkdir -p pileup
-        printf 'cell\\tsnp_id\\tCHROM\\tPOS\\tREF\\tALT\\tAD\\tDP\\tGT\\n' | gzip > pileup/${sample_id}_allele_counts.tsv.gz
+        for lb in ${libList.join(' ')}; do
+            printf 'cell\\tsnp_id\\tCHROM\\tPOS\\tREF\\tALT\\tAD\\tDP\\tGT\\n' | gzip > "pileup/\${lb}_allele_counts.tsv.gz"
+        done
         """
 }
 
 
 process NUMBAT_RUN {
 
-    tag "Numbat: ${sample_id}"
+    tag "Numbat: ${group_id}"
     label 'process_high'
 
+    // One task per INDIVIDUAL, over that individual's pooled libraries. The
+    // allele tables arrive one per library (jointly phased) and keep their
+    // library-named basenames, which is how numbat_run.R knows which prefix to
+    // put on each cell before concatenating them.
+
     input:
-        tuple val(sample_id), path(alleles), path(counts), path(cellmap)
+        tuple val(group_id), path(alleles), path(counts), path(cellmap), path(refcells)
 
     output:
-        path "numbat/${sample_id}_numbat_calls.tsv", emit: calls
+        path "numbat/${group_id}_numbat_calls.tsv", emit: calls
         // The whole point of the nocalls note is to explain a 0-row table to
         // whoever reads the RESULTS, so it has to be a declared output --
         // undeclared files stay in the work dir and publishDir copies nothing.
-        path "numbat/${sample_id}_numbat_nocalls.txt", emit: nocalls, optional: true
-        path "numbat/${sample_id}/**",               emit: detail,  optional: true
+        path "numbat/${group_id}_numbat_nocalls.txt", emit: nocalls, optional: true
+        // Malignant fraction PER LIBRARY within the individual. This is the
+        // number the old per-library configuration got wrong and the first one a
+        // reviewer checks: a PBMC or matched-normal library should be ~0%
+        // neoplastic, and now that is a published table rather than something
+        // only visible after plotting the final object.
+        path "numbat/${group_id}_numbat_by_library.tsv", emit: by_library, optional: true
+        path "numbat/${group_id}/**",               emit: detail,  optional: true
         // The EVENT-level table: one row per CNV segment, with cnv_state
         // (loh/amp/del/bamp), coordinates, LLR and gene/SNP support. The
         // per-cell calls above answer "how many cells", not "how many CNVs" --
         // a distinction worth keeping, since they differ by two orders of
         // magnitude (9,227 cells vs 66 segments on this data).
-        path "numbat/${sample_id}/segs_consensus_*.tsv", emit: segments, optional: true
-        path "figures/numbat/**",                    emit: figures, optional: true
+        path "numbat/${group_id}/segs_consensus_*.tsv", emit: segments, optional: true
+        path "figures/numbat/**",                   emit: figures, optional: true
 
     when:
         task.ext.when == null || task.ext.when
 
     script:
+        def alleleList = (alleles instanceof List ? alleles : [alleles]).collect { it.toString() }
         """
         set -euo pipefail
         mkdir -p numbat figures/numbat
@@ -259,31 +349,33 @@ process NUMBAT_RUN {
         export OMP_NUM_THREADS=${task.cpus}
         export OPENBLAS_NUM_THREADS=${task.cpus}
 
-        # Echo the threshold BEFORE running. Nextflow does not hash bin/ script
-        # contents, so an edit there alone will not re-run a cached task -- an
-        # earlier 3-hour run silently reused a stale task and reported a result
-        # for a threshold it never used. This line makes the value visible in
-        # .command.log within seconds, and its presence in the script also
-        # changes the task hash so the fix actually takes effect.
-        echo "[numbat] min_LLR=${params.numbat_min_llr} min_cells=${params.numbat_min_cells} t=${params.numbat_t} max_iter=${params.numbat_max_iter}"
+        # Echo the parameters BEFORE running. bin/ IS hashed per referenced
+        # script -- editing bin/numbat_run.R does re-run this task, measured on
+        # 25.04.8 and 26.04.6 -- but a params change alone would not be visible
+        # anywhere, and an earlier 3-hour run reported a result for a threshold
+        # it never used. This line puts the values in .command.log within
+        # seconds of the task starting.
+        echo "[numbat] group=${group_id} libraries=${alleleList.size()} min_LLR=${params.numbat_min_llr} min_cells=${params.numbat_min_cells} t=${params.numbat_t} max_iter=${params.numbat_max_iter}"
 
         numbat_run.R \\
-            ${counts} ${alleles} ${cellmap} \\
-            ${sample_id} numbat ${task.cpus} \\
+            ${counts} ${cellmap} ${refcells} \\
+            ${group_id} numbat ${task.cpus} \\
             ${params.numbat_min_cells} ${params.numbat_t} ${params.numbat_max_iter} \\
-            ${params.numbat_min_llr}
+            ${params.numbat_min_llr} ${params.numbat_min_ref_cells} \\
+            ${alleleList.join(' ')}
 
         # Numbat's own diagnostic plots, when it produced any.
-        find numbat/${sample_id} -name "*.png" -exec cp {} figures/numbat/ \\; 2>/dev/null || true
+        find numbat/${group_id} -name "*.png" -exec cp {} figures/numbat/ \\; 2>/dev/null || true
         """
 
     stub:
         """
-        mkdir -p numbat/${sample_id} figures/numbat
-        printf 'barcode\\tcell_id\\tsample\\tnumbat_call\\tp_cnv\\n' > numbat/${sample_id}_numbat_calls.tsv
-        printf 'AACGTAACGTAACGTA-1\\tTESTA_AACGTAACGTAACGTA-1\\tTESTA\\tmalignant\\t0.98\\n' >> numbat/${sample_id}_numbat_calls.tsv
-        printf 'stub: null-result note\\n' > numbat/${sample_id}_numbat_nocalls.txt
-        touch numbat/${sample_id}/stub.txt
+        mkdir -p numbat/${group_id} figures/numbat
+        printf 'cell\\tbarcode\\tcell_id\\tsample\\tgroup\\tnumbat_call\\tp_cnv\\n' > numbat/${group_id}_numbat_calls.tsv
+        printf 'TESTA_AACGTAACGTAACGTA-1\\tAACGTAACGTAACGTA-1\\tTESTA_AACGTAACGTAACGTA-1\\tTESTA\\t${group_id}\\tmalignant\\t0.98\\n' >> numbat/${group_id}_numbat_calls.tsv
+        printf 'sample\\tn_cells\\tmalignant\\tpct_malignant\\treference_basis\\nTESTA\\t1\\t1\\t100.0\\tref_hca\\n' > numbat/${group_id}_numbat_by_library.tsv
+        printf 'stub: null-result note\\n' > numbat/${group_id}_numbat_nocalls.txt
+        touch numbat/${group_id}/stub.txt
         """
 }
 
@@ -305,11 +397,11 @@ process NUMBAT_RUN {
 // report from what the stage published.
 process NUMBAT_REPORT {
 
-    tag "Numbat figures: ${sample_id}"
+    tag "Numbat figures: ${group_id}"
     label 'process_medium'
 
     input:
-        tuple val(sample_id), path(numbat_dir)
+        tuple val(group_id), path(numbat_dir)
 
     output:
         path "figures/numbat/*",                  emit: figures,  optional: true
@@ -329,7 +421,7 @@ process NUMBAT_REPORT {
         # Numbat's own default, and the second is a property of the PDF format
         # rather than of the analysis.
         numbat_figures.R \\
-            ${numbat_dir} ${sample_id} figures/numbat data \\
+            ${numbat_dir} ${group_id} figures/numbat data \\
             ${params.numbat_genome} \\
             ${params.numbat_figures_ncut} \\
             ${params.numbat_figures_min_clone_cells} \\
@@ -340,9 +432,9 @@ process NUMBAT_REPORT {
     stub:
         """
         mkdir -p figures/numbat data
-        touch figures/numbat/${sample_id}_phylo_heatmap.png
-        touch figures/numbat/${sample_id}_consensus_segments.png
-        printf 'sample\\tfigure\\tstatus\\treason\\n${sample_id}\\tphylo_heatmap\\tdrawn\\t\\n' \\
-            > data/${sample_id}_numbat_figure_manifest.tsv
+        touch figures/numbat/${group_id}_phylo_heatmap.png
+        touch figures/numbat/${group_id}_consensus_segments.png
+        printf 'sample\\tfigure\\tstatus\\treason\\n${group_id}\\tphylo_heatmap\\tdrawn\\t\\n' \\
+            > data/${group_id}_numbat_figure_manifest.tsv
         """
 }
