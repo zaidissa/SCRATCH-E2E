@@ -149,8 +149,22 @@ def resolve_numbat_bam(ds: PreprocessDataset, start: str) -> None:
     ds.logger.info(f"Numbat: derived --input_bam_path from the input dataset: {bam_glob}")
 
 
-def describe_exp_table(body: str) -> list:
-    """Lines describing a metadata CSV. Pure, so it can be tested off-platform."""
+def describe_exp_table(body: str, run_numbat: bool = False) -> list:
+    """Lines describing a metadata CSV. Pure, so it can be tested off-platform.
+
+    `run_numbat` escalates the missing-`patient_id` case from a note to a
+    blocking-looking warning, because that one combination is not cosmetic:
+    Numbat groups libraries by patient_id, and without it numbat_prep.R falls
+    back to the library column and runs PER LIBRARY. That is the configuration
+    numbat:::mark_tumor_lineage() cannot survive -- it has no null, so a library
+    with no malignant cells still returns neoplastic calls.
+
+    This happened. The GBM1-DFCI3 runs of 2026-10-22 and 2026-10-23 both logged
+    "no `patient_id` ... column" as one INFO line among forty, enabled Numbat,
+    and spent 1,166.7 CPU hours producing per-library calls -- while the
+    pipeline's own per-individual support sat there unused. The information was
+    present and not loud enough to act on.
+    """
     lines = [ln for ln in body.splitlines() if ln.strip()]
     if not lines:
         return ["the table is empty."]
@@ -187,6 +201,30 @@ def describe_exp_table(body: str) -> list:
             "object will not carry it. Stages keyed on it fall back to another "
             "sample column, and condition-level tests have no design factor."
         )
+
+    if run_numbat and "patient_id" not in columns:
+        out.append("")
+        out.append("*" * 72)
+        out.append("WARNING: --run_numbat is ON and this table has no `patient_id`.")
+        out.append("")
+        out.append("  Numbat groups libraries by patient_id. Without it, numbat_prep.R")
+        out.append("  falls back to the library column and runs PER LIBRARY --")
+        out.append("  numbat:::mark_tumor_lineage() has no null, so it always labels its")
+        out.append("  heaviest clade 'tumor' and a library with no malignant cells comes")
+        out.append("  back with neoplastic calls anyway. Pooling an individual's")
+        out.append("  libraries is what gives the phylogeny a real normal anchor.")
+        out.append("")
+        out.append("  Fix it WITHOUT re-running alignment: point --input_exp_table at a")
+        out.append("  CSV of `sample,patient_id[,timepoint]` whose `sample` values are")
+        out.append("  exactly the strings listed above. QC's merge joins them to")
+        out.append("  orig.ident with an INNER join, so every library must appear.")
+        out.append("  assets/metadata/gbm1_dfci3_exp_table.csv is the one for this cohort.")
+        out.append("")
+        out.append("  Launching anyway is legitimate -- a genuinely one-library-per-patient")
+        out.append("  cohort has nothing to pool -- but then expect per-library calls and")
+        out.append("  read pct_malignant_gated rather than pct_malignant_raw.")
+        out.append("*" * 72)
+
     return out
 
 
@@ -237,8 +275,12 @@ def log_exp_table_columns(ds: PreprocessDataset, start: str) -> None:
         ds.logger.info(f"--input_exp_table could not be read ({exc}); not inspected.")
         return
 
+    # run_numbat is a form checkbox, so it arrives as a bool or as a string.
+    numbat_on = str(ds.params.get("run_numbat", False)).strip().lower() in (
+        "true", "yes", "y", "on", "1"
+    )
     ds.logger.info(f"--input_exp_table: {path}")
-    for line in describe_exp_table(body):
+    for line in describe_exp_table(body, run_numbat=numbat_on):
         ds.logger.info(f"  {line}")
 
 
