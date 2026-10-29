@@ -84,15 +84,16 @@ the notebook's own design-factor detection picks up `timepoint` and
 `sample_type`. `numbat_prep.R` then reports `Libraries: 17 | Groups: 1`. Without
 the table it reports `Groups: 17` and the per-library warning.
 
-### What `sample_type` does and does not reach
+### Where `sample_type` goes
 
-Nothing in the pipeline reads a column called `sample_type`; the merge is
-generic, so it lands in `@meta.data` and is detected as a design factor, and
-that is all. In particular **the Numbat per-library table does not carry it** —
-`numbat_run.R` keys on `library` and `group`, so the tumour-vs-PBMC malignant
-fraction still has to be obtained by joining this file to
-`cnv/data/<individual>_numbat_by_library.tsv` by hand. Wiring it through `numbat_prep.R`'s
-cellmap would make that automatic.
+The merge is generic, so it lands in `@meta.data` and is picked up as a design
+factor. Beyond that, `--numbat_sample_type_col` carries it through
+`numbat_prep.R`'s cell map into `NUMBAT_RUN`, which adds a `sample_type` column
+to `<individual>_numbat_by_library.tsv` and publishes the same figures pooled by
+compartment as `<individual>_numbat_by_sample_type.tsv` — gated and raw, both
+into `cnv/data/`. The per-compartment percentages are printed to the run's
+console as well. Nothing in the model uses the column: it changes what is
+reported, never what is called.
 
 Also note that the 5 `NB` libraries stay in the same Numbat group as the 12
 tumour ones, which is deliberate: internal normals from the same experiment are

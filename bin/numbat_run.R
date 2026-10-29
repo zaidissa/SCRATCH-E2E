@@ -308,6 +308,13 @@ post <- post[, ..keep]
 map_cols <- c("cell", "cell_id", "barcode", "library", "group")
 has_gate <- "in_reference_lineage" %in% names(cellmap)
 if (has_gate) map_cols <- c(map_cols, "in_reference_lineage")
+# The compartment the library came from. Optional for the same reason the gate
+# is: an older cellmap simply has no such column, and the compartment split is
+# then absent rather than wrong. A column present but all-NA counts as absent,
+# because a table split into one group called "NA" is worse than no split.
+has_stype <- "sample_type" %in% names(cellmap) &&
+             any(!is.na(cellmap$sample_type) & nzchar(as.character(cellmap$sample_type)))
+if (has_stype) map_cols <- c(map_cols, "sample_type")
 res_dt <- merge(cellmap[, ..map_cols], post, by = "cell", all.x = FALSE)
 setnames(res_dt, "library", "sample")
 if (!nrow(res_dt)) stop(sprintf("[%s] no Numbat cell matched the cell map", group_id))
@@ -348,9 +355,54 @@ if (has_gate) {
                         "pct_malignant_raw", "malignant_gated",
                         "pct_malignant_gated", "gate_overrode"))
 }
+if (has_stype) {
+  st_by_lib <- res_dt[, .(sample_type = sample_type[1]), by = .(sample)]
+  by_lib <- merge(by_lib, st_by_lib, by = "sample", all.x = TRUE)
+  setcolorder(by_lib, c("sample", "sample_type"))
+}
 by_lib[, reference_basis := ref_basis]
 by_lib[, n_reference_columns := if (ref_basis == "internal") ncol(ref) else NA_integer_]
 fwrite(by_lib, file.path(outdir, paste0(group_id, "_numbat_by_library.tsv")), sep = "\t")
+
+# ---------------------------------------------------------------------------
+# Per-COMPARTMENT breakdown: the reviewer's check, computed.
+#
+# "In theory there should be almost zero neoplastic cells in PBMCs" is a
+# statement about a compartment, not about a library, and until the compartment
+# travelled with the cells it could only be answered by joining this table to
+# the metadata by hand. Pooling the libraries of one compartment also makes the
+# number stabler than any single library's: a 358-cell library and a 10,517-cell
+# library carry very different weight, and reading them as peers is its own
+# source of alarm.
+#
+# Both percentages appear here for the same reason they do per library. The raw
+# one cannot be ~0 for any compartment -- mark_tumor_lineage() always labels its
+# heaviest clade tumour -- so judging a blood compartment by it will always look
+# like an overcall. The gated one is what the stratified object uses.
+# ---------------------------------------------------------------------------
+if (has_stype) {
+  by_st <- res_dt[, .(
+    n_libraries = uniqueN(sample),
+    n_cells     = .N,
+    malignant   = sum(numbat_call == "malignant", na.rm = TRUE),
+    pct_malignant_raw = round(100 * mean(numbat_call == "malignant", na.rm = TRUE), 1)
+  ), by = .(sample_type)][order(sample_type)]
+  if (has_gate) {
+    gated_st <- res_dt[, .(
+      n_reference_lineage = sum(in_reference_lineage %in% c(TRUE, "TRUE", "True")),
+      malignant_gated = sum(numbat_call == "malignant" &
+                            !(in_reference_lineage %in% c(TRUE, "TRUE", "True")), na.rm = TRUE)
+    ), by = .(sample_type)]
+    by_st <- merge(by_st, gated_st, by = "sample_type", all.x = TRUE)
+    by_st[, pct_malignant_gated := round(100 * malignant_gated / pmax(n_cells, 1L), 1)]
+    by_st[, gate_overrode := malignant - malignant_gated]
+    setcolorder(by_st, c("sample_type", "n_libraries", "n_cells",
+                         "n_reference_lineage", "malignant", "pct_malignant_raw",
+                         "malignant_gated", "pct_malignant_gated", "gate_overrode"))
+  }
+  by_st[, reference_basis := ref_basis]
+  fwrite(by_st, file.path(outdir, paste0(group_id, "_numbat_by_sample_type.tsv")), sep = "\t")
+}
 
 message(sprintf("[%s] %d cells called | per library:", group_id, nrow(res_dt)))
 pct_raw <- if (has_gate) by_lib$pct_malignant_raw else by_lib$pct_malignant
@@ -370,3 +422,36 @@ if (has_gate)
   message(sprintf(paste("[%s] 'raw' is Numbat's ungated compartment_opt and is non-zero even",
                         "for a library with no malignant cells; 'after lineage gate' is what",
                         "the stratified compartments use."), group_id))
+
+if (has_stype) {
+  message(sprintf("[%s] per sample type:", group_id))
+  for (i in seq_len(nrow(by_st))) {
+    if (has_gate) {
+      message(sprintf("  %-16s %2d librar%s %7d cells  %6d malignant raw (%.1f%%)  %6d after lineage gate (%.1f%%)",
+                      by_st$sample_type[i], by_st$n_libraries[i],
+                      if (by_st$n_libraries[i] == 1L) "y " else "ies",
+                      by_st$n_cells[i], by_st$malignant[i], by_st$pct_malignant_raw[i],
+                      by_st$malignant_gated[i], by_st$pct_malignant_gated[i]))
+    } else {
+      message(sprintf("  %-16s %2d librar%s %7d cells  %6d malignant (%.1f%%)",
+                      by_st$sample_type[i], by_st$n_libraries[i],
+                      if (by_st$n_libraries[i] == 1L) "y " else "ies",
+                      by_st$n_cells[i], by_st$malignant[i], by_st$pct_malignant_raw[i]))
+    }
+  }
+  # Which compartment is supposed to be tumour-free is a biological fact this
+  # script has no way to know -- sample_type is a free-text column -- so the
+  # comparison is stated rather than judged. Naming the span is enough: a
+  # compartment whose gated fraction is far below the others is the expected
+  # shape, and one where they are all alike is the finding.
+  if (has_gate && nrow(by_st) > 1L) {
+    lo <- by_st[which.min(pct_malignant_gated)]
+    hi <- by_st[which.max(pct_malignant_gated)]
+    message(sprintf(paste("[%s] gated malignant fraction spans %.1f%% (%s) to %.1f%% (%s).",
+                          "A compartment expected to be tumour-free should sit at the low",
+                          "end; if it does not, raise --numbat_min_llr or lower",
+                          "--numbat_max_entropy before trusting the calls."),
+                    group_id, lo$pct_malignant_gated, lo$sample_type,
+                    hi$pct_malignant_gated, hi$sample_type))
+  }
+}

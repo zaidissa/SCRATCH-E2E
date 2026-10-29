@@ -79,6 +79,7 @@ ALIGN (BAMs) ─────────────────────┴�
                                             │
                                             ├──> *_numbat_calls.tsv ──> STRATIFY
                                             ├──> *_numbat_by_library.tsv
+                                            ├──> *_numbat_by_sample_type.tsv
                                             └──> numbat/<individual>/ ──> NUMBAT_REPORT
                                                                               │
                                                                               └──> figures
@@ -165,10 +166,10 @@ are skipped rather than failing the run.
 
 `NUMBAT_RUN` publishes `<individual>_numbat_by_library.tsv`:
 
-| sample | n_cells | n_reference_lineage | malignant | pct_malignant_raw | malignant_gated | pct_malignant_gated | gate_overrode | reference_basis | n_reference_columns |
-|---|---|---|---|---|---|---|---|---|---|
-| …-TUMOUR-LIB | 4182 | 578 | 3604 | 86.2 | 3598 | 86.0 | 6 | internal | 11 |
-| …-PBMC-LIB | 2910 | 2847 | 331 | 11.4 | 9 | 0.3 | 322 | internal | 11 |
+| sample | sample_type | n_cells | n_reference_lineage | malignant | pct_malignant_raw | malignant_gated | pct_malignant_gated | gate_overrode | reference_basis | n_reference_columns |
+|---|---|---|---|---|---|---|---|---|---|---|
+| …-TUMOUR-LIB | TP | 4182 | 578 | 3604 | 86.2 | 3598 | 86.0 | 6 | internal | 11 |
+| …-PBMC-LIB | NB | 2910 | 2847 | 331 | 11.4 | 9 | 0.3 | 322 | internal | 11 |
 
 **Read both percentages.** They answer different questions and only one of them
 is the result.
@@ -187,6 +188,47 @@ calls is reasonable.
 
 A PBMC library showing `11.4` raw and `0.3` gated is working correctly. A PBMC
 library showing a high number in *both* is a real problem.
+
+### The same numbers per compartment
+
+"There should be almost zero neoplastic cells in PBMC" is a claim about a
+**compartment**, not about one library, so the same figures are pooled by
+`sample_type` into `<individual>_numbat_by_sample_type.tsv`:
+
+| sample_type | n_libraries | n_cells | n_reference_lineage | malignant | pct_malignant_raw | malignant_gated | pct_malignant_gated | gate_overrode | reference_basis |
+|---|---|---|---|---|---|---|---|---|---|
+| TP | 12 | 49 180 | 8 112 | 41 030 | 83.4 | 40 902 | 83.2 | 128 | internal |
+| NB | 5 | 10 431 | 10 092 | 1 204 | 11.5 | 31 | 0.3 | 1 173 | internal |
+
+Pooling matters for more than tidiness. A 358-cell library and a 10,517-cell
+library are not peers, and reading their percentages side by side invites alarm
+about whichever happens to be small. The compartment number is the one that is
+stable enough to argue from.
+
+Both tables are published to `cnv/data/`, and the per-compartment figures are
+also printed to the run's console — before the pileup, Numbat says whether the
+split will be available at all, because discovering afterwards that the one
+table a reviewer asked for was never written costs another full run.
+
+`sample_type` comes from `--input_exp_table` and is carried by the cell map, not
+re-derived; the column name is `--numbat_sample_type_col`, resolved against
+`sample_type`, `compartment`, `tissue`, `sample_source` and `origin` in turn.
+Nothing in the model uses it. With no such column the per-compartment table is
+simply not written, and the run says so loudly in both the PREP log and the
+console — a library that should be tumour-free is otherwise indistinguishable
+from a tumour library in these tables, which is how the question came to be
+argued instead of computed.
+
+`numbat_prep.R` also logs which compartments the **baseline** drew from:
+
+```
+[ref] DFCI3: baseline cells by sample type: NB=650, TP=410
+```
+
+A reference built only from tumour-infiltrating immune cells and one built from
+matched blood both satisfy the maintainer's preference for internal normals, but
+they are not the same reference, and this is the only place that difference is
+recorded.
 
 ## What the expression reference is built from
 
@@ -283,6 +325,7 @@ Without it the only trace of a dropped column is a line in `.command.log`.
 | `--numbat_min_ref_cells` | `100` | reference-lineage cells needed before an internal expression reference replaces `ref_hca`. Raised from 50 together with the per-column floor: a column can never exceed the total |
 | `--numbat_cluster_col` | `seurat_clusters` | cluster column the reference columns are built on. Unset/unmatched degrades to one column per cell type, with a warning |
 | `--numbat_ref_min_group_cells` | `100` | per-**column** cell floor; the author's number in `mouse.Rmd` §4 |
+| `--numbat_sample_type_col` | `sample_type` | metadata column naming the compartment (tumour / blood / matched normal). Purely descriptive: it adds the per-compartment table and nothing else. Absent, that table is skipped with a warning |
 | `--numbat_extra_reference_clusters` | `''` | clusters admitted to the reference regardless of label. Empty by default — see the caveat above |
 | `--numbat_min_cells` | `50` | below this an individual is skipped |
 | `--numbat_t` | `1e-5` | transition probability |

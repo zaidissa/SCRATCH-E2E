@@ -255,6 +255,25 @@ workflow NUMBAT {
                             "for an internal expression reference and fall back to numbat::ref_hca " +
                             "(--numbat_min_ref_cells = ${params.numbat_min_ref_cells})."
                     }
+                    // Whether the compartment split will exist at all. Saying
+                    // this BEFORE the pileup matters: the run is hours long, and
+                    // discovering afterwards that the one table a reviewer asked
+                    // for was never written is a second run, not a second look.
+                    def st = rows.collect { it.sample_types }
+                                 .findAll { it && it != 'NA' && it != '' }
+                    if (st) {
+                        println "Numbat: sample types present: " +
+                            "${st.join(' / ')}. The malignant fraction will also be " +
+                            "published per compartment (*_numbat_by_sample_type.tsv)."
+                    } else {
+                        println "WARNING: no sample-type column, so Numbat cannot report " +
+                            "the malignant fraction per compartment. \"There should be almost " +
+                            "zero neoplastic cells in PBMC\" is a claim about a compartment, " +
+                            "and without this column it can only be checked by joining the " +
+                            "per-library table to the metadata by hand. Add sample_type to " +
+                            "--input_exp_table, or set --numbat_sample_type_col."
+                    }
+
                     // How many COLUMNS each internal reference has. Numbat picks
                     // the best-fitting column per pseudobulk, so a single-column
                     // baseline gives it nothing to choose from -- and that is
@@ -336,6 +355,35 @@ workflow NUMBAT {
             NUMBAT_RUN(ch_run_in)
             ch_calls = NUMBAT_RUN.out.calls
             ch_segments = NUMBAT_RUN.out.segments
+
+            // The reviewer's number, in the run's own console output. It is
+            // already in .command.log and in a published table; repeating it
+            // here is deliberate, because the one place everybody looks at is
+            // the terminal, and "the PBMCs look a bit strange" was a reading of
+            // a table nobody had reason to doubt.
+            //
+            // Both percentages, always. The raw one cannot be near zero for any
+            // compartment -- mark_tumor_lineage() always labels its heaviest
+            // clade tumour -- so printing it alone would reproduce exactly the
+            // misreading this is meant to prevent.
+            NUMBAT_RUN.out.by_sample_type
+                .splitCsv(header: true, sep: '\t')
+                .collect(flat: false)
+                .subscribe { rows ->
+                    rows.each { r ->
+                        def gated = r.containsKey('pct_malignant_gated')
+                        println "Numbat [${r.sample_type}]: ${r.n_cells} cells over " +
+                            "${r.n_libraries} librar(ies), ${r.pct_malignant_raw}% malignant raw" +
+                            (gated ? ", ${r.pct_malignant_gated}% after the lineage gate" : '') + '.'
+                    }
+                    if (rows.size() > 1 && rows[0].containsKey('pct_malignant_gated')) {
+                        def sorted = rows.sort { (it.pct_malignant_gated as Double) }
+                        println "Numbat: gated malignant fraction runs from " +
+                            "${sorted.first().pct_malignant_gated}% (${sorted.first().sample_type}) to " +
+                            "${sorted.last().pct_malignant_gated}% (${sorted.last().sample_type}). " +
+                            "A compartment expected to be tumour-free belongs at the low end."
+                    }
+                }
 
             // Numbat's own figures. Drawn in a SEPARATE task from the finished
             // output directory rather than inside NUMBAT_RUN, because the task

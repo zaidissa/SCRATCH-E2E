@@ -100,17 +100,19 @@
 # Usage:
 #   numbat_prep.R <annotated.rds> <sample_col> <group_col> <celltype_col> \
 #                 <reference_labels> <min_ref_cells> <outdir> [helpers.R] \
-#                 [cluster_col] [min_ref_group_cells] [extra_ref_clusters]
+#                 [cluster_col] [min_ref_group_cells] [extra_ref_clusters] \
+#                 [sample_type_col]
 #
-# The last three are appended rather than inserted so an older caller keeps
+# The last four are appended rather than inserted so an older caller keeps
 # working: with no cluster column resolved the reference falls back to one
-# column per cell type, which is what this script did before.
+# column per cell type, which is what this script did before, and with no
+# sample-type column the cell map simply carries NA.
 #
 # Writes:
 #   <library>_barcodes.tsv   raw barcodes, one file per library (pileup input)
 #   <group>_counts.rds       pooled counts, colnames "<library>_<barcode>"
 #   <group>_cellmap.tsv      cell_id, barcode, cell, library, group,
-#                            in_reference_lineage
+#                            in_reference_lineage, sample_type
 #   <group>_refcells.tsv     cells for the internal expression reference, with
 #                            the ref_group column that becomes a lambdas_ref
 #                            COLUMN (<label>__c<cluster>)
@@ -142,6 +144,7 @@ helpers       <- if (length(args) >= 8) args[[8]] else ""
 clust_col_in  <- if (length(args) >= 9) args[[9]] else ""
 min_ref_group <- if (length(args) >= 10) suppressWarnings(as.integer(args[[10]])) else NA_integer_
 extra_clust_in <- if (length(args) >= 11) args[[11]] else ""
+st_col_in     <- if (length(args) >= 12) args[[12]] else ""
 if (is.na(min_ref_cells)) min_ref_cells <- 100L
 # Per-COLUMN floor. 100 is the number used in the package author's own reference
 # construction (vignettes/mouse.Rmd section 4: `filter(n() > 100)`).
@@ -224,6 +227,22 @@ if (is.na(clust_col))
                 "COLUMN PER CELL TYPE, which averages several clusters together and is",
                 "coarser than Numbat's own worked example. Set --numbat_cluster_col."))
 
+# The biological compartment the library came from -- tumour, peripheral blood,
+# matched normal. Purely descriptive here: nothing in the selection or the
+# grouping depends on it, and prep does not know which values mean "tumour".
+# It is carried so numbat_run.R can report the malignant fraction PER
+# COMPARTMENT, which is the check a reviewer actually applies ("there should be
+# almost zero neoplastic cells in PBMC"). Without it that check needs a manual
+# join against the metadata table, which is how it came to be argued rather
+# than computed.
+st_col <- pick_col(c(st_col_in, "sample_type", "compartment", "tissue",
+                     "sample_source", "origin"), "Sample type")
+if (is.na(st_col))
+  message(paste("[warn] No sample-type column found, so the Numbat tables cannot be split",
+                "by compartment. A library that should be ~0% neoplastic (PBMC, matched",
+                "normal) is then indistinguishable from a tumour library in those tables.",
+                "Supply sample_type via --input_exp_table, or set --numbat_sample_type_col."))
+
 ref_labels <- trimws(strsplit(ref_labels_in, "[;,]")[[1]])
 ref_labels <- ref_labels[nzchar(ref_labels)]
 
@@ -245,6 +264,7 @@ meta$.library <- as.character(meta[[sample_col]])
 meta$.group   <- as.character(meta[[group_col]])
 meta$.ct      <- if (is.na(ct_col)) NA_character_ else as.character(meta[[ct_col]])
 meta$.clust   <- if (is.na(clust_col)) NA_character_ else as.character(meta[[clust_col]])
+meta$.stype   <- if (is.na(st_col)) NA_character_ else as.character(meta[[st_col]])
 meta$.barcode <- raw_barcode(meta$.cell_id)
 
 bad <- is.na(meta$.barcode) | is.na(meta$.library) | is.na(meta$.group)
@@ -254,7 +274,8 @@ if (any(bad)) {
   meta <- meta[!bad, , drop = FALSE]
 }
 
-dt <- as.data.table(meta[, c(".cell_id", ".library", ".group", ".ct", ".clust", ".barcode")])
+dt <- as.data.table(meta[, c(".cell_id", ".library", ".group", ".ct", ".clust",
+                             ".stype", ".barcode")])
 setnames(dt, sub("^\\.", "", names(dt)))
 
 # The namespaced cell id. This is what Numbat sees, in both the count matrix
@@ -386,6 +407,19 @@ for (g in groups) {
                     g, nrow(ref_cells), n_ref_cols, min_ref_cells))
   }
 
+  # Which compartments the baseline was actually built from. Rule 4 of the
+  # maintainer's guidance prefers internal normals over an external dataset, and
+  # a reference drawn entirely from tumour tissue still satisfies that -- but it
+  # is worth saying out loud which it was, because a baseline built only from
+  # tumour-infiltrating immune cells and one built from matched blood are not
+  # the same baseline.
+  if (!is.na(st_col) && nrow(ref_cells)) {
+    st_of_ref <- sub$stype[match(ref_cells$cell, sub$cell)]
+    tab <- sort(table(ifelse(is.na(st_of_ref), "NA", st_of_ref)), decreasing = TRUE)
+    message(sprintf("[ref] %s: baseline cells by sample type: %s", g,
+                    paste(sprintf("%s=%d", names(tab), as.integer(tab)), collapse = ", ")))
+  }
+
   saveRDS(mat, file.path(outdir, paste0(g, "_counts.rds")))
   # Always written, possibly header-only: an optional per-group file would have
   # to be joined with `remainder`, and a group silently missing its reference
@@ -399,7 +433,11 @@ for (g in groups) {
   # annotation, the label matcher or Seurat -- none of which exist in the numbat
   # image. The raw fraction is the one a reviewer sees first and the one that is
   # structurally guaranteed to be non-zero.
-  fwrite(sub[, .(cell_id, barcode, cell, library, group, in_reference_lineage)],
+  # sample_type rides along for the same reason: numbat_run.R has neither the
+  # metadata table nor Seurat, so a column it cannot see is a split it cannot
+  # report. Always present, NA when no such column was resolved.
+  fwrite(sub[, .(cell_id, barcode, cell, library, group, in_reference_lineage,
+                 sample_type = stype)],
          file.path(outdir, paste0(g, "_cellmap.tsv")), sep = "\t")
 
   written <- c(written, g)
@@ -407,7 +445,9 @@ for (g in groups) {
     group = g, n_libraries = length(libs), libraries = paste(libs, collapse = ","),
     n_cells = nrow(sub), n_reference_cells = n_ref,
     n_reference_usable = nrow(ref_cells), n_reference_columns = n_ref_cols,
-    reference_basis = ref_basis)
+    reference_basis = ref_basis,
+    sample_types = if (is.na(st_col)) NA_character_
+                   else paste(sort(unique(sub$stype[!is.na(sub$stype)])), collapse = ","))
   message(sprintf("[ok] %s: %d genes x %d cells from %d librar%s (%s)",
                   g, nrow(mat), ncol(mat), length(libs),
                   if (length(libs) == 1L) "y" else "ies", paste(libs, collapse = ", ")))

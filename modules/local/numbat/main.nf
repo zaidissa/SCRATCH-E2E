@@ -122,7 +122,8 @@ process NUMBAT_PREP {
             numbat_input ${helpers} \\
             ${params.numbat_cluster_col} \\
             ${params.numbat_ref_min_group_cells} \\
-            '${params.numbat_extra_reference_clusters}'
+            '${params.numbat_extra_reference_clusters}' \\
+            ${params.numbat_sample_type_col}
         """
 
     stub:
@@ -133,11 +134,11 @@ process NUMBAT_PREP {
         printf 'ref_group\\tcelltype\\tcluster\\tn_cells\\tadmitted\\tbasis\\n' > numbat_input/PT1_refgroups.tsv
         echo "AACGTAACGTAACGTA-1" > numbat_input/TESTA_barcodes.tsv
         echo "AACGTAACGTAACGTC-1" > numbat_input/TESTB_barcodes.tsv
-        printf 'cell_id\\tbarcode\\tcell\\tlibrary\\tgroup\\tin_reference_lineage\\n' > numbat_input/PT1_cellmap.tsv
-        printf 'TESTA_AACGTAACGTAACGTA-1\\tAACGTAACGTAACGTA-1\\tTESTA_AACGTAACGTAACGTA-1\\tTESTA\\tPT1\\tFALSE\\n' >> numbat_input/PT1_cellmap.tsv
-        printf 'TESTB_AACGTAACGTAACGTC-1\\tAACGTAACGTAACGTC-1\\tTESTB_AACGTAACGTAACGTC-1\\tTESTB\\tPT1\\tTRUE\\n' >> numbat_input/PT1_cellmap.tsv
+        printf 'cell_id\\tbarcode\\tcell\\tlibrary\\tgroup\\tin_reference_lineage\\tsample_type\\n' > numbat_input/PT1_cellmap.tsv
+        printf 'TESTA_AACGTAACGTAACGTA-1\\tAACGTAACGTAACGTA-1\\tTESTA_AACGTAACGTAACGTA-1\\tTESTA\\tPT1\\tFALSE\\tTP\\n' >> numbat_input/PT1_cellmap.tsv
+        printf 'TESTB_AACGTAACGTAACGTC-1\\tAACGTAACGTAACGTC-1\\tTESTB_AACGTAACGTAACGTC-1\\tTESTB\\tPT1\\tTRUE\\tNB\\n' >> numbat_input/PT1_cellmap.tsv
         printf 'library\\tgroup\\nTESTA\\tPT1\\nTESTB\\tPT1\\n' > numbat_input/groups.tsv
-        printf 'group\\tn_libraries\\tlibraries\\tn_cells\\tn_reference_cells\\tn_reference_usable\\tn_reference_columns\\treference_basis\\nPT1\\t2\\tTESTA,TESTB\\t2\\t0\\t0\\t0\\tref_hca\\n' > numbat_input/grouping_report.tsv
+        printf 'group\\tn_libraries\\tlibraries\\tn_cells\\tn_reference_cells\\tn_reference_usable\\tn_reference_columns\\treference_basis\\tsample_types\\nPT1\\t2\\tTESTA,TESTB\\t2\\t0\\t0\\t0\\tref_hca\\tNB,TP\\n' > numbat_input/grouping_report.tsv
         echo PT1 > numbat_input/samples.txt
         """
 }
@@ -332,6 +333,12 @@ process NUMBAT_RUN {
         // neoplastic, and now that is a published table rather than something
         // only visible after plotting the final object.
         path "numbat/${group_id}_numbat_by_library.tsv", emit: by_library, optional: true
+        // The same figures pooled by COMPARTMENT. "There should be almost zero
+        // neoplastic cells in PBMC" is a claim about a compartment, and pooling
+        // its libraries is also what stops a 358-cell library being read as the
+        // peer of a 10,000-cell one. Optional: written only when the metadata
+        // carried a sample-type column at all.
+        path "numbat/${group_id}_numbat_by_sample_type.tsv", emit: by_sample_type, optional: true
         path "numbat/${group_id}/**",               emit: detail,  optional: true
         // The EVENT-level table: one row per CNV segment, with cnv_state
         // (loh/amp/del/bamp), coordinates, LLR and gene/SNP support. The
@@ -379,7 +386,8 @@ process NUMBAT_RUN {
         mkdir -p numbat/${group_id} figures/numbat
         printf 'cell\\tbarcode\\tcell_id\\tsample\\tgroup\\tnumbat_call\\tp_cnv\\n' > numbat/${group_id}_numbat_calls.tsv
         printf 'TESTA_AACGTAACGTAACGTA-1\\tAACGTAACGTAACGTA-1\\tTESTA_AACGTAACGTAACGTA-1\\tTESTA\\t${group_id}\\tmalignant\\t0.98\\n' >> numbat/${group_id}_numbat_calls.tsv
-        printf 'sample\\tn_cells\\tn_reference_lineage\\tmalignant\\tpct_malignant_raw\\tmalignant_gated\\tpct_malignant_gated\\tgate_overrode\\treference_basis\\tn_reference_columns\\nTESTA\\t1\\t0\\t1\\t100.0\\t1\\t100.0\\t0\\tref_hca\\tNA\\n' > numbat/${group_id}_numbat_by_library.tsv
+        printf 'sample\\tsample_type\\tn_cells\\tn_reference_lineage\\tmalignant\\tpct_malignant_raw\\tmalignant_gated\\tpct_malignant_gated\\tgate_overrode\\treference_basis\\tn_reference_columns\\nTESTA\\tTP\\t1\\t0\\t1\\t100.0\\t1\\t100.0\\t0\\tref_hca\\tNA\\n' > numbat/${group_id}_numbat_by_library.tsv
+        printf 'sample_type\\tn_libraries\\tn_cells\\tn_reference_lineage\\tmalignant\\tpct_malignant_raw\\tmalignant_gated\\tpct_malignant_gated\\tgate_overrode\\treference_basis\\nTP\\t1\\t1\\t0\\t1\\t100.0\\t1\\t100.0\\t0\\tref_hca\\n' > numbat/${group_id}_numbat_by_sample_type.tsv
         printf 'stub: null-result note\\n' > numbat/${group_id}_numbat_nocalls.txt
         touch numbat/${group_id}/stub.txt
         """
