@@ -1,10 +1,11 @@
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Numbat — allele-aware CNV calling  (opt-in)
+    Numbat — allele-aware CNV calling
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    Enabled with --run_numbat true. Off by default because, unlike the other
-    three callers, it needs the aligned BAM plus a phasing reference panel.
+    ON by default (--run_numbat, true since a588a94). Unlike the other callers
+    it needs the aligned BAM plus a phasing reference panel; a run with no BAM
+    switches it off with a warning rather than failing.
 
     What it adds over inferCNV / SCEVAN / CopyKAT: those infer copy number from
     expression smoothed along the genome, so they are structurally blind to

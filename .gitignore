@@ -38,3 +38,7 @@ assets/numbat_refs/
 
 # Fetched at runtime by NICHENET_FETCH_REFS (~320 MB from Zenodo).
 assets/nichenet_fetched/
+
+# Build artefact of docs/CNV_CALLING_EXPLAINED.qmd; the PDF is committed, the
+# intermediate self-contained HTML is not.
+docs/CNV_CALLING_EXPLAINED.html

@@ -1,0 +1,125 @@
+/* Print-first stylesheet for the CNV explainer. Rendered to HTML by quarto and
+   then to PDF by headless Chrome, so @page is what sets the page geometry. */
+
+@page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+
+:root {
+  --ink:      #1a1a1a;
+  --muted:    #55606b;
+  --rule:     #d4d9de;
+  --accent:   #1f5673;
+  --surface:  #f4f6f8;
+  --codebg:   #f7f7f5;
+}
+
+html { font-size: 10.5pt; }
+
+body {
+  font-family: "Charter", "Georgia", "Times New Roman", serif;
+  color: var(--ink);
+  line-height: 1.5;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  background: #fff;
+}
+
+/* Quarto wraps content in #quarto-document-content / .page-columns; flatten it. */
+#quarto-content, main, .page-columns, .content { display: block !important; max-width: none !important; }
+
+/* ---- title block ------------------------------------------------------- */
+#title-block-header { border-bottom: 2px solid var(--accent); padding-bottom: 0.6em; margin-bottom: 1.6em; }
+h1.title { font-size: 22pt; line-height: 1.15; margin: 0 0 0.15em 0; letter-spacing: -0.01em; }
+.subtitle, p.subtitle { font-size: 12pt; color: var(--muted); font-style: italic; margin: 0 0 0.4em 0; }
+.quarto-title-meta, .date { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 8.5pt; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.quarto-title-meta-heading { display: none; }
+
+/* ---- headings ---------------------------------------------------------- */
+h1, h2, h3, h4 { font-family: "Helvetica Neue", Arial, sans-serif; font-weight: 600; color: var(--accent); page-break-after: avoid; break-after: avoid; }
+h2 { font-size: 14.5pt; margin: 1.9em 0 0.55em; padding-bottom: 0.2em; border-bottom: 1px solid var(--rule); }
+h3 { font-size: 11.5pt; margin: 1.5em 0 0.4em; color: var(--ink); }
+h4 { font-size: 10.5pt; margin: 1.2em 0 0.3em; color: var(--muted); font-style: italic; }
+
+p { margin: 0 0 0.7em; orphans: 3; widows: 3; }
+
+/* ---- table of contents ------------------------------------------------- */
+#TOC, nav[role="doc-toc"] {
+  /* Quarto's own JS relocates or hides the TOC at runtime; headless Chrome
+     executes that JS before printing, so this has to win outright. */
+  display: block !important;
+  visibility: visible !important;
+  position: static !important;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.9em 1.2em 1em;
+  margin: 0 0 2em;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 9pt;
+  page-break-after: always;
+}
+#TOC > h2, nav[role="doc-toc"] > h2 { font-size: 9pt; text-transform: uppercase; letter-spacing: 0.1em; border: 0; margin: 0 0 0.6em; color: var(--muted); }
+#TOC ul, nav[role="doc-toc"] ul { list-style: none; padding-left: 1em; margin: 0.15em 0; }
+#TOC > ul, nav[role="doc-toc"] > ul { padding-left: 0; }
+#TOC a, nav[role="doc-toc"] a { color: var(--ink); text-decoration: none; }
+
+/* ---- tables ------------------------------------------------------------ */
+table { border-collapse: collapse; width: 100%; margin: 0.9em 0 1.2em; font-size: 8.8pt; font-family: "Helvetica Neue", Arial, sans-serif; }
+/* A long table may span pages; a ROW may not be cut in half. */
+tr { page-break-inside: avoid; break-inside: avoid; }
+thead { display: table-header-group; }
+caption { caption-side: top; text-align: left; font-size: 8.5pt; color: var(--muted); padding-bottom: 0.35em; }
+th { text-align: left; vertical-align: bottom; background: var(--surface); border-bottom: 1.5px solid var(--accent); padding: 0.45em 0.6em; font-weight: 600; }
+td { vertical-align: top; padding: 0.42em 0.6em; border-bottom: 1px solid var(--rule); }
+tbody tr:last-child td { border-bottom: 1.5px solid var(--rule); }
+
+/* ---- code -------------------------------------------------------------- */
+code, pre { font-family: "SF Mono", "Menlo", "Consolas", monospace; }
+code { font-size: 0.88em; background: var(--codebg); padding: 0.08em 0.3em; border-radius: 2px; }
+pre {
+  background: var(--codebg);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--accent);
+  border-radius: 2px;
+  padding: 0.7em 0.9em;
+  font-size: 8.4pt;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  page-break-inside: avoid;
+  break-inside: avoid;
+  margin: 0.8em 0 1em;
+}
+pre code { background: none; padding: 0; font-size: inherit; }
+div.sourceCode { margin: 0.8em 0 1em; }
+
+/* ---- key points (::: {.keypoint}) ------------------------------------- */
+div.keypoint {
+  background: #eef4f8;
+  border: 1px solid #c3d6e2;
+  border-left: 4px solid var(--accent);
+  border-radius: 2px;
+  padding: 0.75em 1em 0.55em;
+  margin: 1.1em 0 1.3em;
+  font-size: 9.6pt;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+div.keypoint > p:last-child { margin-bottom: 0; }
+div.keypoint > p:first-child { margin-top: 0; }
+
+/* ---- lists ------------------------------------------------------------- */
+ul, ol { margin: 0 0 0.8em; padding-left: 1.4em; }
+li { margin-bottom: 0.22em; }
+
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid #b8ccd8; }
+
+/* Hide quarto chrome that has no meaning on paper. */
+.quarto-title-banner, #quarto-margin-sidebar, #quarto-sidebar-toc-left,
+.nav-footer, footer.footer, #quarto-back-to-top, .toc-actions { display: none !important; }
+
+@media print {
+  a { border-bottom: none; }
+  h2 { page-break-before: auto; }
+}

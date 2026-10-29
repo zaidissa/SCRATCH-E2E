@@ -1,6 +1,7 @@
 # Numbat — allele-aware CNV calling
 
-Opt-in fourth CNV caller. Off by default.
+Allele-aware CNV caller. **On by default** (`run_numbat = true`); a run with no
+BAM switches it off with a warning rather than failing.
 
 ```bash
 nextflow run . -profile docker \
