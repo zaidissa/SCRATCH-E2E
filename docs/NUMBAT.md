@@ -165,14 +165,109 @@ are skipped rather than failing the run.
 
 `NUMBAT_RUN` publishes `<individual>_numbat_by_library.tsv`:
 
-| sample | n_cells | malignant | pct_malignant | reference_basis |
-|---|---|---|---|---|
-| …-TUMOUR-LIB | 4182 | 3604 | 86.2 | internal |
-| …-PBMC-LIB | 2910 | 7 | 0.2 | internal |
+| sample | n_cells | n_reference_lineage | malignant | pct_malignant_raw | malignant_gated | pct_malignant_gated | gate_overrode | reference_basis | n_reference_columns |
+|---|---|---|---|---|---|---|---|---|---|
+| …-TUMOUR-LIB | 4182 | 578 | 3604 | 86.2 | 3598 | 86.0 | 6 | internal | 11 |
+| …-PBMC-LIB | 2910 | 2847 | 331 | 11.4 | 9 | 0.3 | 322 | internal | 11 |
 
-A library you expect to be ~0% neoplastic saying otherwise is visible here, in
-`.command.log` and in the published table — rather than only after someone plots
-the final object.
+**Read both percentages.** They answer different questions and only one of them
+is the result.
+
+`pct_malignant_raw` is Numbat's `compartment_opt` with nothing applied. For a
+library with no malignant cells it is **structurally guaranteed to be non-zero**:
+`mark_tumor_lineage()` always labels its heaviest clade `tumor`, so a PBMC
+library returns its own noise partitioned into tumour and normal. A high number
+in this column is not evidence of tumour.
+
+`pct_malignant_gated` is what survives the lineage gate, and what the stratified
+compartments actually use — a cell on one of the `--stratify_reference_labels`
+lineages is forced non-malignant regardless of the CNV call. `gate_overrode` is
+the difference, and reading it as an empirical false-positive rate for the CNV
+calls is reasonable.
+
+A PBMC library showing `11.4` raw and `0.3` gated is working correctly. A PBMC
+library showing a high number in *both* is a real problem.
+
+## What the expression reference is built from
+
+`lambdas_ref` is a gene × pseudobulk matrix, and `run_numbat()` has **no
+argument for reference cells** — no `ref_group_names`, no `normal_cells`. Unlike
+inferCNV, you do not tell Numbat which cells are normal; you hand it a profile
+matrix and it picks the best-fitting **column** per pseudobulk. Two consequences
+follow directly:
+
+- The cells that built the reference are **not held out**. Nothing connects
+  `lambdas_ref` back to `count_mat`, so those same cells are still scored and can
+  still be called tumour. The pipeline keeps them in `count_mat` deliberately —
+  removing them would also remove the diploid anchor the phylogeny needs — and
+  reports the gated percentage instead.
+- A column's *name* is for us, not for Numbat.
+
+### Columns are clusters, not cell type labels
+
+The package author's own reference construction uses raw unsupervised clusters
+with no annotation at all (`vignettes/mouse.Rmd` §4):
+
+```r
+clusters  = p2$clusters$PCA$multilevel
+ref_annot = data.frame(cell = names(clusters), group = unname(clusters))
+ref       = aggregate_counts(count_mat_ref,
+                ref_annot %>% group_by(group) %>% filter(n() > 100))
+```
+
+What a column needs is transcriptional homogeneity and enough cells. scType
+assigns **one label per cluster**, so grouping by label collapses several
+clusters into one averaged column and discards resolution the clustering already
+produced. `numbat_prep.R` therefore groups by `<label>__c<cluster>`, keeping the
+same eligibility rule and giving Numbat finer columns to match against. Measured
+on a fixture: 3 label columns → 4 cluster columns over the same 920 cells, with
+one `TAM_Microglial` label contributing two distinct columns.
+
+This also makes the per-column floor mean something. At label granularity every
+column has hundreds of cells and a floor never fires; at cluster granularity it
+is the actual quality control, which is why `--numbat_ref_min_group_cells` is
+**100** — the author's number above — rather than 20.
+
+### The five rules this follows
+
+From Numbat's maintainer in [kharchenkolab/numbat#224][i224]:
+
+| Rule | How it is satisfied |
+|---|---|
+| gene × cell-type matrix via `aggregate_counts()` **from raw counts**, *"don't use Seurat normalization"* | `numbat_prep.R` reads `LayerData(obj, layer = "counts")`; `numbat_run.R` calls `aggregate_counts(..., normalized = TRUE)` — raw in, normalized profile out |
+| include the relevant normal cell types *present in your sample* | partially — see the caveat below |
+| **no tumour/malignant cells** in the diploid reference | eligibility is `--stratify_reference_labels`, which excludes `Malignant` and the four labels Neftel malignant states also carry |
+| internal normals beat external datasets | the reference is built from the individual's own cells; `numbat::ref_hca` is only a fallback, and the log says when it fired |
+| raise `min_LLR` / lower `max_entropy` against false positives in normal cells | both reachable as `--numbat_min_llr` and `--numbat_max_entropy`, both left at Numbat's own defaults |
+
+[i224]: https://github.com/kharchenkolab/numbat/issues/224
+
+**The caveat on rule 2, stated plainly.** GBM tissue contains normal astrocytes,
+OPCs and neurons, and the GBM reference has **no glial or neural column at all**.
+That is not an oversight: the Neftel AC-like, OPC-like and NPC-like malignant
+states carry exactly the `Astrocyte`, `OPC`, `Radial_Glia` and `Neuron` labels,
+so admitting those labels would admit tumour and break rule 3. No label-based
+rule can separate the two.
+
+A *cluster* can be judged individually, with evidence from outside the
+annotation — a flat inferCNV profile, say. `--numbat_extra_reference_clusters`
+admits named clusters regardless of label, for exactly that. It is empty by
+default and should stay that way unless you have that evidence: deciding it from
+the annotation alone is circular, because the annotation is what the CNV call is
+meant to adjudicate.
+
+### Seeing what the baseline was
+
+`NUMBAT_PREP` publishes `<individual>_refgroups.tsv`, one row per column,
+including the ones the floor dropped:
+
+| ref_group | celltype | cluster | n_cells | admitted | basis |
+|---|---|---|---|---|---|
+| Monocyte__c6 | Monocyte | 6 | 250 | yes | reference_lineage |
+| TAM_Microglial__c1 | TAM_Microglial | 1 | 150 | yes | reference_lineage |
+| T_Cells__c4 | T_Cells | 4 | 40 | no_below_floor | reference_lineage |
+
+Without it the only trace of a dropped column is a line in `.command.log`.
 
 ## Parameters
 
@@ -185,11 +280,15 @@ the final object.
 | `--numbat_genome` | `hg38` | must match `--genome` |
 | `--numbat_sample_col` | `sample_id` | column that defines a **library** (must match the BAM directory names) |
 | `--numbat_group_col` | `patient_id` | column that defines an **individual** — the unit Numbat runs on |
-| `--numbat_min_ref_cells` | `50` | reference-lineage cells needed before an internal expression reference replaces `ref_hca` |
+| `--numbat_min_ref_cells` | `100` | reference-lineage cells needed before an internal expression reference replaces `ref_hca`. Raised from 50 together with the per-column floor: a column can never exceed the total |
+| `--numbat_cluster_col` | `seurat_clusters` | cluster column the reference columns are built on. Unset/unmatched degrades to one column per cell type, with a warning |
+| `--numbat_ref_min_group_cells` | `100` | per-**column** cell floor; the author's number in `mouse.Rmd` §4 |
+| `--numbat_extra_reference_clusters` | `''` | clusters admitted to the reference regardless of label. Empty by default — see the caveat above |
 | `--numbat_min_cells` | `50` | below this an individual is skipped |
 | `--numbat_t` | `1e-5` | transition probability |
 | `--numbat_max_iter` | `2` | phylogeny refinement iterations |
-| `--numbat_min_llr` | `5` | log-likelihood-ratio floor for keeping a CNV |
+| `--numbat_min_llr` | `5` | log-likelihood-ratio floor for keeping a CNV. Numbat's own default; raising it is the maintainer's first lever against false positives in normal cells |
+| `--numbat_max_entropy` | `0.5` | single-cell entropy ceiling. Numbat's own default; lowering it is the second lever. Neither has been calibrated on this cohort, so both are left where Numbat puts them |
 | `--skip_numbat_figures` | `false` | turn off `NUMBAT_REPORT` |
 | `--numbat_figures_ncut` | `4` | clone counts to re-cut the phylogeny at; `0` skips that panel |
 | `--numbat_figures_min_clone_cells` | `50` | smaller clones are left out of the pseudobulk figure |

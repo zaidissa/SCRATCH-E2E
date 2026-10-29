@@ -32,7 +32,8 @@
 # STRATIFY reads cell_id and numbat_call; the rest is for the report.
 #
 # Usage: numbat_run.R <counts.rds> <cellmap.tsv> <refcells.tsv> <group> <outdir> \
-#                     <ncores> <min_cells> <t> <max_iter> <min_LLR> <min_ref_cells> <alleles...>
+#                     <ncores> <min_cells> <t> <max_iter> <min_LLR> <min_ref_cells> \
+#                     <max_entropy> <alleles...>
 # ---------------------------------------------------------------------------
 
 suppressPackageStartupMessages({
@@ -42,9 +43,10 @@ suppressPackageStartupMessages({
 })
 
 a <- commandArgs(trailingOnly = TRUE)
-if (length(a) < 12L)
+if (length(a) < 13L)
   stop("usage: numbat_run.R <counts.rds> <cellmap.tsv> <refcells.tsv> <group> <outdir> ",
-       "<ncores> <min_cells> <t> <max_iter> <min_LLR> <min_ref_cells> <allele_counts.tsv.gz...>")
+       "<ncores> <min_cells> <t> <max_iter> <min_LLR> <min_ref_cells> <max_entropy> ",
+       "<allele_counts.tsv.gz...>")
 
 counts_path <- a[[1]]; map_path <- a[[2]]; refcells_path <- a[[3]]
 group_id    <- a[[4]]; outdir   <- a[[5]]
@@ -56,7 +58,14 @@ max_iter    <- as.integer(a[[9]])
 # was not reachable from the pipeline. Exposed so that advice is actionable.
 min_llr       <- as.numeric(a[[10]])
 min_ref_cells <- as.integer(a[[11]])
-allele_paths  <- a[12:length(a)]
+# Single-cell filtering threshold. Numbat's maintainer names this and min_LLR as
+# the two levers for "a tumor proportion much higher than orthogonal
+# measurements suggest" -- i.e. CNV false positives in normal cells
+# (kharchenkolab/numbat#224). Exposed at Numbat's own default of 0.5, so passing
+# it changes nothing until it is deliberately lowered.
+max_entropy   <- as.numeric(a[[12]])
+if (is.na(max_entropy)) max_entropy <- 0.5
+allele_paths  <- a[13:length(a)]
 
 dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
 
@@ -154,14 +163,30 @@ if (ncol(count_mat) < min_cells)
 # matcher); the aggregation happens here because aggregate_counts() needs the
 # numbat package, and prep runs in image_cnv, which has Seurat and no numbat.
 # The two images are mirrors of each other -- verified, not assumed.
+#
+# The `group` column handed to aggregate_counts is the lambdas_ref COLUMN name.
+# prep writes it as <celltype>__c<cluster>, one column per cluster, because
+# Numbat picks the best-fitting column per pseudobulk and the author's own
+# reference construction uses raw clusters (vignettes/mouse.Rmd section 4).
+# `ref_group` is read in preference to `celltype`; falling back to `celltype`
+# keeps an older refcells.tsv working.
+#
+# count_mat here is RAW counts and aggregate_counts does the normalisation
+# (normalized = TRUE). That ordering is a requirement, not a preference: the
+# maintainer's instruction is "created using numbat::aggregate_counts() from raw
+# counts ... Don't use Seurat normalization or other methods"
+# (kharchenkolab/numbat#224). numbat_prep.R reads layer = "counts" for the same
+# reason.
 ref <- NULL
 ref_basis <- "ref_hca"
 refcells <- tryCatch(fread(refcells_path), error = function(e) NULL)
+grp_col <- if (!is.null(refcells) && "ref_group" %in% names(refcells)) "ref_group" else "celltype"
 if (!is.null(refcells) && nrow(refcells) >= min_ref_cells &&
-    all(c("cell", "celltype") %in% names(refcells))) {
+    all(c("cell", grp_col) %in% names(refcells))) {
   refcells <- refcells[cell %in% colnames(count_mat)]
   if (nrow(refcells) >= min_ref_cells) {
-    annot <- data.frame(cell = refcells$cell, group = as.character(refcells$celltype),
+    annot <- data.frame(cell = refcells$cell,
+                        group = as.character(refcells[[grp_col]]),
                         stringsAsFactors = FALSE)
     ref <- tryCatch(
       numbat::aggregate_counts(count_mat[, annot$cell, drop = FALSE], annot,
@@ -171,8 +196,14 @@ if (!is.null(refcells) && nrow(refcells) >= min_ref_cells &&
                         group_id, conditionMessage(e))); NULL })
     if (!is.null(ref)) {
       ref_basis <- "internal"
-      message(sprintf("[%s] internal reference from %d of this individual's own cells over %d type(s)",
-                      group_id, nrow(annot), length(unique(annot$group))))
+      message(sprintf(paste("[%s] internal reference from %d of this individual's own cells",
+                            "over %d column(s), grouped by '%s'"),
+                      group_id, nrow(annot), length(unique(annot$group)), grp_col))
+      if (grp_col == "celltype")
+        message(sprintf(paste("[%s] [warn] refcells.tsv has no ref_group column, so the",
+                              "reference is ONE COLUMN PER CELL TYPE. That averages several",
+                              "clusters into each column; set --numbat_cluster_col so prep",
+                              "can write cluster-granular columns."), group_id))
     }
   }
 }
@@ -201,6 +232,7 @@ res <- try(
     ncores = ncores,
     max_iter = max_iter,
     min_LLR = min_llr,
+    max_entropy = max_entropy,
     plot = FALSE,
     out_dir = out_sub
   ),
@@ -270,8 +302,14 @@ post <- post[, ..keep]
 
 # Join back onto the pipeline's cell ids via the explicit map. `cell` is the
 # namespaced "<library>_<barcode>" that both sides were built from.
-res_dt <- merge(cellmap[, .(cell, cell_id, barcode, sample = library, group)],
-                post, by = "cell", all.x = FALSE)
+# in_reference_lineage comes from prep and is the SAME predicate
+# stratify_compartments.qmd gates on. Kept optional so an older cellmap still
+# joins; the gated column is then simply absent rather than wrong.
+map_cols <- c("cell", "cell_id", "barcode", "library", "group")
+has_gate <- "in_reference_lineage" %in% names(cellmap)
+if (has_gate) map_cols <- c(map_cols, "in_reference_lineage")
+res_dt <- merge(cellmap[, ..map_cols], post, by = "cell", all.x = FALSE)
+setnames(res_dt, "library", "sample")
 if (!nrow(res_dt)) stop(sprintf("[%s] no Numbat cell matched the cell map", group_id))
 
 fwrite(res_dt, file.path(outdir, paste0(group_id, "_numbat_calls.tsv")), sep = "\t")
@@ -288,11 +326,47 @@ by_lib <- res_dt[, .(
   malignant  = sum(numbat_call == "malignant", na.rm = TRUE),
   pct_malignant = round(100 * mean(numbat_call == "malignant", na.rm = TRUE), 1)
 ), by = .(sample)][order(sample)]
+
+# The RAW percentage above is Numbat's compartment_opt, ungated, and for a
+# library with no malignant cells it is structurally guaranteed to be non-zero:
+# mark_tumor_lineage() always labels the heaviest clade tumour. The percentage
+# that survives the lineage gate is what the final compartments actually use.
+# Reporting only the first is how a PBMC library comes to look neoplastic in a
+# table while the stratified object is fine -- two different numbers, one of
+# which nobody had reason to doubt.
+if (has_gate) {
+  gated <- res_dt[, .(
+    n_reference_lineage = sum(in_reference_lineage %in% c(TRUE, "TRUE", "True")),
+    malignant_gated = sum(numbat_call == "malignant" &
+                          !(in_reference_lineage %in% c(TRUE, "TRUE", "True")), na.rm = TRUE)
+  ), by = .(sample)]
+  by_lib <- merge(by_lib, gated, by = "sample", all.x = TRUE)
+  by_lib[, pct_malignant_gated := round(100 * malignant_gated / pmax(n_cells, 1L), 1)]
+  by_lib[, gate_overrode := malignant - malignant_gated]
+  setnames(by_lib, "pct_malignant", "pct_malignant_raw")
+  setcolorder(by_lib, c("sample", "n_cells", "n_reference_lineage", "malignant",
+                        "pct_malignant_raw", "malignant_gated",
+                        "pct_malignant_gated", "gate_overrode"))
+}
 by_lib[, reference_basis := ref_basis]
+by_lib[, n_reference_columns := if (ref_basis == "internal") ncol(ref) else NA_integer_]
 fwrite(by_lib, file.path(outdir, paste0(group_id, "_numbat_by_library.tsv")), sep = "\t")
 
 message(sprintf("[%s] %d cells called | per library:", group_id, nrow(res_dt)))
-for (i in seq_len(nrow(by_lib)))
-  message(sprintf("  %-40s %6d cells  %6d malignant (%.1f%%)",
-                  by_lib$sample[i], by_lib$n_cells[i],
-                  by_lib$malignant[i], by_lib$pct_malignant[i]))
+pct_raw <- if (has_gate) by_lib$pct_malignant_raw else by_lib$pct_malignant
+for (i in seq_len(nrow(by_lib))) {
+  if (has_gate) {
+    message(sprintf("  %-40s %6d cells  %6d malignant raw (%.1f%%)  %6d after lineage gate (%.1f%%)",
+                    by_lib$sample[i], by_lib$n_cells[i],
+                    by_lib$malignant[i], pct_raw[i],
+                    by_lib$malignant_gated[i], by_lib$pct_malignant_gated[i]))
+  } else {
+    message(sprintf("  %-40s %6d cells  %6d malignant (%.1f%%)",
+                    by_lib$sample[i], by_lib$n_cells[i],
+                    by_lib$malignant[i], pct_raw[i]))
+  }
+}
+if (has_gate)
+  message(sprintf(paste("[%s] 'raw' is Numbat's ungated compartment_opt and is non-zero even",
+                        "for a library with no malignant cells; 'after lineage gate' is what",
+                        "the stratified compartments use."), group_id))

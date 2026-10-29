@@ -101,6 +101,7 @@ process NUMBAT_PREP {
         path "numbat_input/*_barcodes.tsv",      emit: barcodes
         path "numbat_input/*_cellmap.tsv",       emit: cellmap
         path "numbat_input/*_refcells.tsv",      emit: refcells
+        path "numbat_input/*_refgroups.tsv",     emit: refgroups
         path "numbat_input/groups.tsv",          emit: groups
         path "numbat_input/grouping_report.tsv", emit: grouping_report
         path "numbat_input/samples.txt",         emit: samples
@@ -118,21 +119,25 @@ process NUMBAT_PREP {
             ${params.celltype_col} \\
             '${params.stratify_reference_labels}' \\
             ${params.numbat_min_ref_cells} \\
-            numbat_input ${helpers}
+            numbat_input ${helpers} \\
+            ${params.numbat_cluster_col} \\
+            ${params.numbat_ref_min_group_cells} \\
+            '${params.numbat_extra_reference_clusters}'
         """
 
     stub:
         """
         mkdir -p numbat_input
         touch numbat_input/PT1_counts.rds
-        printf 'cell\\tcelltype\\n' > numbat_input/PT1_refcells.tsv
+        printf 'cell\\tcelltype\\tcluster\\tref_group\\n' > numbat_input/PT1_refcells.tsv
+        printf 'ref_group\\tcelltype\\tcluster\\tn_cells\\tadmitted\\tbasis\\n' > numbat_input/PT1_refgroups.tsv
         echo "AACGTAACGTAACGTA-1" > numbat_input/TESTA_barcodes.tsv
         echo "AACGTAACGTAACGTC-1" > numbat_input/TESTB_barcodes.tsv
-        printf 'cell_id\\tbarcode\\tcell\\tlibrary\\tgroup\\n' > numbat_input/PT1_cellmap.tsv
-        printf 'TESTA_AACGTAACGTAACGTA-1\\tAACGTAACGTAACGTA-1\\tTESTA_AACGTAACGTAACGTA-1\\tTESTA\\tPT1\\n' >> numbat_input/PT1_cellmap.tsv
-        printf 'TESTB_AACGTAACGTAACGTC-1\\tAACGTAACGTAACGTC-1\\tTESTB_AACGTAACGTAACGTC-1\\tTESTB\\tPT1\\n' >> numbat_input/PT1_cellmap.tsv
+        printf 'cell_id\\tbarcode\\tcell\\tlibrary\\tgroup\\tin_reference_lineage\\n' > numbat_input/PT1_cellmap.tsv
+        printf 'TESTA_AACGTAACGTAACGTA-1\\tAACGTAACGTAACGTA-1\\tTESTA_AACGTAACGTAACGTA-1\\tTESTA\\tPT1\\tFALSE\\n' >> numbat_input/PT1_cellmap.tsv
+        printf 'TESTB_AACGTAACGTAACGTC-1\\tAACGTAACGTAACGTC-1\\tTESTB_AACGTAACGTAACGTC-1\\tTESTB\\tPT1\\tTRUE\\n' >> numbat_input/PT1_cellmap.tsv
         printf 'library\\tgroup\\nTESTA\\tPT1\\nTESTB\\tPT1\\n' > numbat_input/groups.tsv
-        printf 'group\\tn_libraries\\tlibraries\\tn_cells\\tn_reference_cells\\treference_basis\\nPT1\\t2\\tTESTA,TESTB\\t2\\t0\\tref_hca\\n' > numbat_input/grouping_report.tsv
+        printf 'group\\tn_libraries\\tlibraries\\tn_cells\\tn_reference_cells\\tn_reference_usable\\tn_reference_columns\\treference_basis\\nPT1\\t2\\tTESTA,TESTB\\t2\\t0\\t0\\t0\\tref_hca\\n' > numbat_input/grouping_report.tsv
         echo PT1 > numbat_input/samples.txt
         """
 }
@@ -355,13 +360,14 @@ process NUMBAT_RUN {
         # anywhere, and an earlier 3-hour run reported a result for a threshold
         # it never used. This line puts the values in .command.log within
         # seconds of the task starting.
-        echo "[numbat] group=${group_id} libraries=${alleleList.size()} min_LLR=${params.numbat_min_llr} min_cells=${params.numbat_min_cells} t=${params.numbat_t} max_iter=${params.numbat_max_iter}"
+        echo "[numbat] group=${group_id} libraries=${alleleList.size()} min_LLR=${params.numbat_min_llr} max_entropy=${params.numbat_max_entropy} min_cells=${params.numbat_min_cells} t=${params.numbat_t} max_iter=${params.numbat_max_iter}"
 
         numbat_run.R \\
             ${counts} ${cellmap} ${refcells} \\
             ${group_id} numbat ${task.cpus} \\
             ${params.numbat_min_cells} ${params.numbat_t} ${params.numbat_max_iter} \\
             ${params.numbat_min_llr} ${params.numbat_min_ref_cells} \\
+            ${params.numbat_max_entropy} \\
             ${alleleList.join(' ')}
 
         # Numbat's own diagnostic plots, when it produced any.
@@ -373,7 +379,7 @@ process NUMBAT_RUN {
         mkdir -p numbat/${group_id} figures/numbat
         printf 'cell\\tbarcode\\tcell_id\\tsample\\tgroup\\tnumbat_call\\tp_cnv\\n' > numbat/${group_id}_numbat_calls.tsv
         printf 'TESTA_AACGTAACGTAACGTA-1\\tAACGTAACGTAACGTA-1\\tTESTA_AACGTAACGTAACGTA-1\\tTESTA\\t${group_id}\\tmalignant\\t0.98\\n' >> numbat/${group_id}_numbat_calls.tsv
-        printf 'sample\\tn_cells\\tmalignant\\tpct_malignant\\treference_basis\\nTESTA\\t1\\t1\\t100.0\\tref_hca\\n' > numbat/${group_id}_numbat_by_library.tsv
+        printf 'sample\\tn_cells\\tn_reference_lineage\\tmalignant\\tpct_malignant_raw\\tmalignant_gated\\tpct_malignant_gated\\tgate_overrode\\treference_basis\\tn_reference_columns\\nTESTA\\t1\\t0\\t1\\t100.0\\t1\\t100.0\\t0\\tref_hca\\tNA\\n' > numbat/${group_id}_numbat_by_library.tsv
         printf 'stub: null-result note\\n' > numbat/${group_id}_numbat_nocalls.txt
         touch numbat/${group_id}/stub.txt
         """

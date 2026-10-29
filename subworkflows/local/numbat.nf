@@ -255,6 +255,26 @@ workflow NUMBAT {
                             "for an internal expression reference and fall back to numbat::ref_hca " +
                             "(--numbat_min_ref_cells = ${params.numbat_min_ref_cells})."
                     }
+                    // How many COLUMNS each internal reference has. Numbat picks
+                    // the best-fitting column per pseudobulk, so a single-column
+                    // baseline gives it nothing to choose from -- and that is
+                    // invisible in the calls themselves.
+                    def cols = rows.findAll { it.reference_basis == 'internal' && it.n_reference_columns }
+                    if (cols) {
+                        def ncol = cols.collect { it.n_reference_columns as Integer }
+                        println "Numbat: internal expression reference has ${ncol.min()}-${ncol.max()} " +
+                            "column(s) per individual (grouped by " +
+                            "${params.numbat_cluster_col}, floor " +
+                            "${params.numbat_ref_min_group_cells} cells/column)."
+                        def thin = ncol.count { it < 2 }
+                        if (thin > 0) {
+                            println "WARNING: ${thin} individual(s) have a single-column expression " +
+                                "reference. Numbat matches each pseudobulk against the columns of " +
+                                "lambdas_ref, so one column means no choice at all. Lower " +
+                                "--numbat_ref_min_group_cells, or check that " +
+                                "--numbat_cluster_col names a real cluster column."
+                        }
+                    }
                 }
 
             // library -> (bam, bai, barcodes, group), regrouped onto the individual.

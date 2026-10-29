@@ -58,15 +58,64 @@
 # image: numbat 1.4.2, no Seurat at all). Verified in both images rather than
 # assumed.
 #
+# REFERENCE COLUMNS ARE CLUSTERS, NOT CELL TYPE LABELS.
+#
+# `lambdas_ref` is a gene x pseudobulk matrix and Numbat picks the best-fitting
+# COLUMN per pseudobulk; the column names are labels for us, not for it. The
+# docs say as much ("columns are pseudobulk names"), and the author's own worked
+# example (vignettes/mouse.Rmd section 4) builds the reference from raw
+# unsupervised clusters with no annotation at all:
+#
+#     clusters  = p2$clusters$PCA$multilevel
+#     ref_annot = data.frame(cell = names(clusters), group = unname(clusters))
+#     ref       = aggregate_counts(count_mat_ref,
+#                                  ref_annot %>% group_by(group) %>% filter(n() > 100))
+#
+# So what a reference column needs is transcriptional homogeneity and enough
+# cells -- not a name. scType assigns ONE label per cluster (see
+# notebook_sctype_major.qmd: cluster-summed scores, top_n(1), stamped on every
+# cell in the cluster), so aggregating by label COLLAPSES several clusters into
+# one averaged column and throws away resolution we already paid for. Grouping
+# by <label>__c<cluster> instead keeps the same eligibility rule and hands
+# Numbat finer columns to match against.
+#
+# It also makes the per-column cell floor mean something. At label granularity
+# every column has hundreds to thousands of cells and the floor never fires; at
+# cluster granularity it is the actual quality control, which is why it is 100
+# here (the author's number) rather than 20.
+#
+# The eligibility rule is unchanged and deliberately conservative -- the twelve
+# reference lineages, which exclude Malignant and the four labels that Neftel
+# malignant states also carry (Astrocyte, OPC, Radial_Glia, Neuron). Numbat's
+# maintainer is explicit that "no tumor/malignant cells" may enter the diploid
+# reference (kharchenkolab/numbat#224), and in glioma those four labels cannot
+# distinguish a normal astrocyte from an AC-like tumour cell. The cost is that
+# the GBM reference has no glial or neural column at all, which is in tension
+# with the same maintainer's "include the relevant normal cell types present in
+# your sample". Cluster granularity is what makes that resolvable: a single
+# astrocyte CLUSTER judged normal can be admitted by hand, via
+# --numbat_extra_reference_clusters, where the LABEL never could. It is empty by
+# default, because deciding it from the annotation alone is circular.
+#
 # Usage:
 #   numbat_prep.R <annotated.rds> <sample_col> <group_col> <celltype_col> \
-#                 <reference_labels> <min_ref_cells> <outdir> [helpers.R]
+#                 <reference_labels> <min_ref_cells> <outdir> [helpers.R] \
+#                 [cluster_col] [min_ref_group_cells] [extra_ref_clusters]
+#
+# The last three are appended rather than inserted so an older caller keeps
+# working: with no cluster column resolved the reference falls back to one
+# column per cell type, which is what this script did before.
 #
 # Writes:
 #   <library>_barcodes.tsv   raw barcodes, one file per library (pileup input)
 #   <group>_counts.rds       pooled counts, colnames "<library>_<barcode>"
-#   <group>_cellmap.tsv      cell_id, barcode, cell, library, group
-#   <group>_refcells.tsv     cells for the internal expression reference
+#   <group>_cellmap.tsv      cell_id, barcode, cell, library, group,
+#                            in_reference_lineage
+#   <group>_refcells.tsv     cells for the internal expression reference, with
+#                            the ref_group column that becomes a lambdas_ref
+#                            COLUMN (<label>__c<cluster>)
+#   <group>_refgroups.tsv    one row per reference column: what the baseline is
+#                            actually built from, and what the floor dropped
 #   groups.tsv               library -> group map (drives the Nextflow grouping)
 #   grouping_report.tsv      per-group summary, for the report
 # ---------------------------------------------------------------------------
@@ -90,7 +139,24 @@ ref_labels_in <- args[[5]]
 min_ref_cells <- suppressWarnings(as.integer(args[[6]]))
 outdir        <- args[[7]]
 helpers       <- if (length(args) >= 8) args[[8]] else ""
-if (is.na(min_ref_cells)) min_ref_cells <- 50L
+clust_col_in  <- if (length(args) >= 9) args[[9]] else ""
+min_ref_group <- if (length(args) >= 10) suppressWarnings(as.integer(args[[10]])) else NA_integer_
+extra_clust_in <- if (length(args) >= 11) args[[11]] else ""
+if (is.na(min_ref_cells)) min_ref_cells <- 100L
+# Per-COLUMN floor. 100 is the number used in the package author's own reference
+# construction (vignettes/mouse.Rmd section 4: `filter(n() > 100)`).
+if (is.na(min_ref_group)) min_ref_group <- 100L
+# A column cannot be larger than the total, so a total floor below the per-column
+# floor can never be satisfied by a single column and would silently mean "any
+# one valid column is enough". Say so rather than letting the two disagree.
+if (min_ref_cells < min_ref_group) {
+  message(sprintf(paste("[warn] min_ref_cells (%d) is below the per-column floor (%d);",
+                        "raising it to %d so the two are consistent."),
+                  min_ref_cells, min_ref_group, min_ref_group))
+  min_ref_cells <- min_ref_group
+}
+extra_clusters <- trimws(strsplit(extra_clust_in, "[;,]")[[1]])
+extra_clusters <- extra_clusters[nzchar(extra_clusters)]
 
 dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
 
@@ -148,6 +214,16 @@ if (is.na(group_col)) {
 ct_col <- pick_col(c(ct_col_in, "scratch_celltype", "azimuth_labels", "sctype",
                      "cell_type", "celltype"), "Cell type")
 
+# The cluster the annotation was actually assigned on. Optional: without it the
+# reference degrades to one column per cell type, which is the previous
+# behaviour, so a cohort entered with a hand-made metadata table still runs.
+clust_col <- pick_col(c(clust_col_in, "seurat_clusters", "clusters", "cluster",
+                        "SCT_snn_res.0.8", "RNA_snn_res.0.8"), "Cluster")
+if (is.na(clust_col))
+  message(paste("[warn] No cluster column found. The expression reference will use ONE",
+                "COLUMN PER CELL TYPE, which averages several clusters together and is",
+                "coarser than Numbat's own worked example. Set --numbat_cluster_col."))
+
 ref_labels <- trimws(strsplit(ref_labels_in, "[;,]")[[1]])
 ref_labels <- ref_labels[nzchar(ref_labels)]
 
@@ -168,6 +244,7 @@ meta$.cell_id <- rownames(meta)
 meta$.library <- as.character(meta[[sample_col]])
 meta$.group   <- as.character(meta[[group_col]])
 meta$.ct      <- if (is.na(ct_col)) NA_character_ else as.character(meta[[ct_col]])
+meta$.clust   <- if (is.na(clust_col)) NA_character_ else as.character(meta[[clust_col]])
 meta$.barcode <- raw_barcode(meta$.cell_id)
 
 bad <- is.na(meta$.barcode) | is.na(meta$.library) | is.na(meta$.group)
@@ -177,7 +254,7 @@ if (any(bad)) {
   meta <- meta[!bad, , drop = FALSE]
 }
 
-dt <- as.data.table(meta[, c(".cell_id", ".library", ".group", ".ct", ".barcode")])
+dt <- as.data.table(meta[, c(".cell_id", ".library", ".group", ".ct", ".clust", ".barcode")])
 setnames(dt, sub("^\\.", "", names(dt)))
 
 # The namespaced cell id. This is what Numbat sees, in both the count matrix
@@ -222,31 +299,91 @@ for (g in groups) {
 
   # ----- cells for the individual's own expression reference --------------
   # Reference lineages ONLY: including tumour cells would flatten the very
-  # signal Numbat is looking for. Cell types with too few cells are dropped
-  # here -- a profile built from a handful of cells is noise wearing a cell-type
-  # name, and Numbat picks per pseudobulk among whatever columns it is given.
-  ref_cells <- data.table(cell = character(), celltype = character())
+  # signal Numbat is looking for, and the maintainer is explicit about it
+  # (kharchenkolab/numbat#224: "Make sure no tumor/malignant cells are included
+  # in your diploid reference").
+  #
+  # Each surviving CLUSTER becomes its own lambdas_ref column -- see the header
+  # for why that is finer than one column per label and not merely different.
+  ref_cols <- c("cell", "celltype", "cluster", "ref_group")
+  ref_cells <- setNames(data.table(character(), character(), character(), character()),
+                        ref_cols)
+  refgroups <- data.table(ref_group = character(), celltype = character(),
+                          cluster = character(), n_cells = integer(),
+                          admitted = character(), basis = character())
   n_ref <- 0L
-  if (!is.na(ct_col) && length(ref_labels)) {
-    is_ref <- match_labels(sub$ct, ref_labels)
-    is_ref[is.na(is_ref)] <- FALSE
-    n_ref <- sum(is_ref)
+  # Computed unconditionally and kept on `sub`: this is the SAME predicate
+  # stratify_compartments.qmd gates on, so the gated malignant fraction reported
+  # downstream means exactly what the final compartments mean. It is the label
+  # test ALONE -- a reference-lineage cell whose cluster fell below the column
+  # floor is still a reference-lineage cell, it just did not help build the
+  # baseline, and conflating the two would understate the gate.
+  is_ref <- if (!is.na(ct_col) && length(ref_labels)) {
+    v <- match_labels(sub$ct, ref_labels); v[is.na(v)] <- FALSE; v
+  } else rep(FALSE, nrow(sub))
+  sub[, in_reference_lineage := is_ref]
+
+  if (length(ref_labels) || length(extra_clusters)) {
+
+    # Explicit per-cluster opt-in. This is the ONLY route by which a label
+    # outside the reference list can reach the baseline, and it exists because
+    # in glioma the normal glial lineages share their labels with malignant
+    # states -- so the choice has to be made per cluster, by a human, with
+    # independent evidence. Never set by default.
+    is_extra <- !is.na(sub$clust) & as.character(sub$clust) %in% extra_clusters
+    if (any(is_extra)) {
+      ex <- sort(unique(as.character(sub$clust[is_extra])))
+      message(sprintf(paste("[ref] %s: admitting %d cell(s) from opted-in cluster(s) %s",
+                            "regardless of label (--numbat_extra_reference_clusters)."),
+                      g, sum(is_extra), paste(ex, collapse = ", ")))
+    }
+    eligible <- is_ref | is_extra
+    n_ref <- sum(eligible)
+
     if (n_ref > 0L) {
-      cand <- data.table(cell = sub$cell[is_ref], celltype = as.character(sub$ct[is_ref]))
-      keep_ct <- cand[, .N, by = celltype][N >= 20L, celltype]
-      ref_cells <- cand[celltype %in% keep_ct]
+      cand <- data.table(
+        cell     = sub$cell[eligible],
+        celltype = as.character(sub$ct[eligible]),
+        cluster  = if (is.na(clust_col)) NA_character_ else as.character(sub$clust[eligible]),
+        # is_ref wins when both apply, so "opt_in" marks only the columns that
+        # the label rule would NOT have admitted -- which is the whole point of
+        # auditing them. Note the opt-in does NOT make a cell count as
+        # in_reference_lineage: it changes what builds the baseline, never what
+        # the lineage gate overrides.
+        basis    = ifelse(is_ref[eligible], "reference_lineage", "opt_in"))
+      cand[is.na(celltype) | !nzchar(celltype), celltype := "unlabelled"]
+      # No cluster column resolved -> one column per cell type, the old shape.
+      cand[, ref_group := if (is.na(clust_col)) celltype
+                          else paste0(celltype, "__c", ifelse(is.na(cluster), "NA", cluster))]
+
+      counts_by <- cand[, .(n_cells = .N,
+                            celltype = celltype[1], cluster = cluster[1],
+                            basis = paste(sort(unique(basis)), collapse = "+")),
+                        by = ref_group]
+      counts_by[, admitted := ifelse(n_cells >= min_ref_group, "yes", "no_below_floor")]
+      refgroups <- counts_by[order(-n_cells),
+                             .(ref_group, celltype, cluster, n_cells, admitted, basis)]
+      ref_cells <- cand[ref_group %in% counts_by[admitted == "yes", ref_group],
+                        ..ref_cols]
+
+      dropped <- counts_by[admitted != "yes"]
+      if (nrow(dropped))
+        message(sprintf("[ref] %s: dropped %d column(s) below the %d-cell floor (%d cell(s)).",
+                        g, nrow(dropped), min_ref_group, sum(dropped$n_cells)))
     }
   }
+  n_ref_cols <- uniqueN(ref_cells$ref_group)
   ref_basis <- if (nrow(ref_cells) >= min_ref_cells) "internal" else "ref_hca"
   if (ref_basis == "internal") {
-    message(sprintf("[ref] %s: %d reference-lineage cell(s) over %d type(s): %s",
-                    g, nrow(ref_cells), uniqueN(ref_cells$celltype),
-                    paste(sort(unique(ref_cells$celltype)), collapse = ", ")))
+    message(sprintf("[ref] %s: %d cell(s) over %d reference column(s) (%d cell type(s)): %s",
+                    g, nrow(ref_cells), n_ref_cols, uniqueN(ref_cells$celltype),
+                    paste(sort(unique(ref_cells$ref_group)), collapse = ", ")))
   } else {
-    message(sprintf(paste("[ref] %s: only %d usable reference-lineage cell(s) (need %d);",
-                          "numbat_run.R will fall back to numbat::ref_hca. Tumour calls",
-                          "for this individual then rest on an external reference."),
-                    g, nrow(ref_cells), min_ref_cells))
+    message(sprintf(paste("[ref] %s: only %d usable reference cell(s) over %d column(s)",
+                          "(need %d); numbat_run.R will fall back to numbat::ref_hca.",
+                          "Tumour calls for this individual then rest on an external",
+                          "reference from a different study."),
+                    g, nrow(ref_cells), n_ref_cols, min_ref_cells))
   }
 
   saveRDS(mat, file.path(outdir, paste0(g, "_counts.rds")))
@@ -254,14 +391,23 @@ for (g in groups) {
   # to be joined with `remainder`, and a group silently missing its reference
   # would fall back to ref_hca with nothing saying so.
   fwrite(ref_cells, file.path(outdir, paste0(g, "_refcells.tsv")), sep = "\t")
-  fwrite(sub[, .(cell_id, barcode, cell, library, group)],
+  # What the baseline is actually made of, INCLUDING the columns the floor
+  # dropped. Without this the only trace of a discarded column is a log line.
+  fwrite(refgroups, file.path(outdir, paste0(g, "_refgroups.tsv")), sep = "\t")
+  # in_reference_lineage travels with the cell map so numbat_run.R can report a
+  # lineage-gated malignant fraction beside the raw one WITHOUT needing the
+  # annotation, the label matcher or Seurat -- none of which exist in the numbat
+  # image. The raw fraction is the one a reviewer sees first and the one that is
+  # structurally guaranteed to be non-zero.
+  fwrite(sub[, .(cell_id, barcode, cell, library, group, in_reference_lineage)],
          file.path(outdir, paste0(g, "_cellmap.tsv")), sep = "\t")
 
   written <- c(written, g)
   report[[length(report) + 1L]] <- data.table(
     group = g, n_libraries = length(libs), libraries = paste(libs, collapse = ","),
     n_cells = nrow(sub), n_reference_cells = n_ref,
-    n_reference_usable = nrow(ref_cells), reference_basis = ref_basis)
+    n_reference_usable = nrow(ref_cells), n_reference_columns = n_ref_cols,
+    reference_basis = ref_basis)
   message(sprintf("[ok] %s: %d genes x %d cells from %d librar%s (%s)",
                   g, nrow(mat), ncol(mat), length(libs),
                   if (length(libs) == 1L) "y" else "ies", paste(libs, collapse = ", ")))
@@ -306,4 +452,22 @@ if (nrow(no_internal)) {
   cat(sprintf(paste("[note] %d individual(s) had too few reference-lineage cells for an",
                     "internal expression reference and use numbat::ref_hca: %s\n"),
               nrow(no_internal), paste(no_internal$group, collapse = ", ")))
+}
+
+# How many COLUMNS each individual's baseline has, which is the thing this
+# script changed. Numbat matches per pseudobulk against these columns, so one
+# averaged column per cell type is strictly less to match against than one per
+# cluster. A group reporting a single column is a baseline with nothing to
+# choose from.
+cat("\n==== expression reference ====\n")
+print(rep_dt[, .(group, n_reference_cells, n_reference_usable,
+                 n_reference_columns, reference_basis)])
+thin <- rep_dt[reference_basis == "internal" & n_reference_columns < 2L]
+if (nrow(thin)) {
+  cat(sprintf(paste("[note] %d individual(s) have an internal reference with fewer than two",
+                    "columns (%s). Numbat picks the best-fitting column per pseudobulk, so a",
+                    "single-column reference gives it no choice; raising",
+                    "--numbat_ref_min_group_cells above the cluster sizes is the usual",
+                    "cause.\n"),
+              nrow(thin), paste(thin$group, collapse = ", ")))
 }
