@@ -71,9 +71,13 @@ ANNOTATION ──> NUMBAT_PREP ──> per-INDIVIDUAL pooled counts + cell map
                                   │        + per-library barcodes
                                   │        + groups.tsv (library → individual)
                                   │
-ALIGN (BAMs) ─────────────────────┴──> NUMBAT_PILEUP ──> phased allele counts
-                                       one task per individual,      (one table
-                                       all of their BAMs at once      per library)
+ALIGN (BAMs) ─────────────────────┴──> NUMBAT_CELLSNP ──> allele pileup
+                                       one task per LIBRARY,
+                                       all running side by side
+                                            │
+                                       NUMBAT_PHASE ──> phased allele counts
+                                       one task per individual:     (one table
+                                       joint genotype + Eagle2       per library)
                                                              │
                                        NUMBAT_RUN <──────────┘
                                        one task per individual

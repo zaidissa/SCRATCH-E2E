@@ -13,14 +13,16 @@
     dosage produces no expression signal. Numbat reads phased heterozygous SNPs
     from the BAM and sees it.
 
-    Three processes, kept separate so the expensive pileup caches independently
-    of the model fit:
+    Four processes, kept separate so the expensive pileup caches independently
+    of the phasing and the model fit:
 
-      NUMBAT_PREP     annotated object -> per-sample counts + an explicit
+      NUMBAT_PREP     annotated object -> per-individual counts + an explicit
                       barcode -> cell_id map (the BAM speaks raw cellranger
                       barcodes; the merged object does not)
-      NUMBAT_PILEUP   BAM + barcodes  -> phased allele counts   [per sample]
-      NUMBAT_RUN      counts + alleles -> per-cell calls         [per sample]
+      NUMBAT_CELLSNP  BAM + barcodes  -> allele pileup            [per library]
+      NUMBAT_PHASE    pileups -> joint genotype, Eagle2 phase,
+                      phased allele counts                        [per individual]
+      NUMBAT_RUN      counts + alleles -> per-cell calls          [per individual]
 
     The calls join STRATIFY's evidence pool as a fourth caller. No consensus
     logic changes: the tally already counts whatever callers ran, so enabling
@@ -145,37 +147,146 @@ process NUMBAT_PREP {
 }
 
 
-process NUMBAT_PILEUP {
+process NUMBAT_CELLSNP {
 
-    tag "Numbat pileup: ${group_id}"
+    tag "Numbat pileup: ${lib} (${group_id})"
     label 'process_high'
 
-    // The heavy step: walks the BAM for allele counts at heterozygous SNPs and
-    // phases them against a population reference panel.
-
-    // ONE TASK PER INDIVIDUAL, not per library. pileup_and_phase.R takes
-    // comma-delimited --samples/--bams/--barcodes and says so itself: "All
-    // samples must belong to the same individual." It genotypes them jointly
-    // (numbat:::genotype(label, samples, ...)), so a heterozygous site gets
-    // coverage from every library the individual contributed -- which is the
-    // allelic power that expression-only callers have none of.
+    // The heavy step: cellsnp-lite walks ONE library's BAM for allele counts at
+    // the 1000G SNP positions. One task per LIBRARY, so an individual's
+    // libraries pile up side by side.
     //
-    // stageAs is REQUIRED here and not cosmetic: every cellranger BAM is named
-    // possorted_genome_bam.bam, so staging several into one task directory
-    // collides and Nextflow aborts with "input file name collision". 'bam??/*'
-    // puts each in its own numbered directory keeping its basename, and the
-    // .bai lands beside its .bam because both declarations number in list
-    // order. Measured on 25.04.8 (Cirro's version) and 26.04.6: three BAMs
-    // passed in the order C,A,B staged as in01=C, in02=A, in03=B, with each
-    // index in the matching directory -- list order, not sorted. The subworkflow
-    // sorts the rows by library before building the lists, so the order is
-    // deterministic and the task hash is stable across runs.
+    // This is the first half of Numbat's pileup_and_phase.R, split off. That
+    // script builds one cellsnp-lite command per sample and runs them one after
+    // another (`sh run_pileup.sh`), so for one individual wall time was the SUM
+    // over its libraries -- for GBM1-DFCI3, 17 libraries in one task. Nothing
+    // in a pileup depends on another library: the joint step that makes
+    // per-individual Numbat worth having is the genotyping and phasing, which
+    // NUMBAT_PHASE still does over all of the individual's libraries at once.
+    //
+    // The command line is pileup_and_phase.R's 10x branch, flag for flag
+    // (numbat-rbase:latest, bin/pileup_and_phase.R L163-174). The thread count
+    // only changes how fast it runs, not what it writes, so the tables are the
+    // ones the single-task version would have produced.
 
     input:
-        tuple val(group_id), val(libs),
-              path(bams,     stageAs: 'bam??/*'),
-              path(bais,     stageAs: 'bam??/*'),
-              path(barcodes, stageAs: 'bc??/*')
+        tuple val(group_id), val(lib), path(bam), path(bai), path(barcodes)
+        path  snpvcf
+
+    output:
+        // A directory named after the library. NUMBAT_PHASE puts it where
+        // pileup_and_phase.R expects it: {outdir}/pileup/{sample}/.
+        tuple val(group_id), val(lib), path("${lib}", type: 'dir'), emit: pileup
+
+    when:
+        task.ext.when == null || task.ext.when
+
+    script:
+        """
+        set -euo pipefail
+
+        # A staged NO_FILE placeholder means "not supplied -- use the image copy".
+        # The resolution and the checks are the same as in NUMBAT_PHASE.
+        SNPVCF="${snpvcf}"
+        case "\$SNPVCF" in *NO_FILE*) SNPVCF=\$(ls /data/genome1K.phase3.SNP_AF5e2.chr1toX.${params.numbat_genome}.vcf* 2>/dev/null | head -1) ;; esac
+        [ -s "\$SNPVCF" ] || { echo "numbat SNP VCF '\$SNPVCF' is missing or empty." >&2; exit 1; }
+        echo "[numbat] individual=${group_id} library=${lib} snpvcf=\$SNPVCF"
+
+        # Re-indexing an 80 GB BAM costs more than the pileup, so the .bai is
+        # staged alongside it; only build one if it genuinely is not there.
+        #
+        # LD_LIBRARY_PATH, scoped to this one command. The image carries TWO
+        # htslibs: Debian's 1.20 under /lib/x86_64-linux-gnu, which /usr/bin/
+        # samtools 1.20 is linked against, and a hand-built 1.15.1 under
+        # /usr/local/lib, which cellsnp-lite is linked against. /usr/local/lib
+        # wins in ld.so.conf, so samtools loads the 1.15.1 copy and dies with
+        #     samtools: symbol lookup error: undefined symbol: bam_aux_first,
+        #     version HTSLIB_1.17
+        # Upstream pkharchenkolab/numbat-rbase does NOT have this problem even
+        # though both libraries are present and the samtools binary is byte
+        # identical: its ld.so.cache was built before /usr/local/lib held an
+        # htslib. Adding procps in containers/numbat/Dockerfile ran apt's
+        # ldconfig trigger, the cache was regenerated, and /usr/local/lib took
+        # over -- so the procps layer broke samtools without touching it.
+        # Measured by diffing the two images (Cirro 2026-10-21, exit 127).
+        #
+        # Deleting the old library is NOT the fix: cellsnp-lite, which does the
+        # actual pileup, resolves to /usr/local/lib/libhts.so.3. Hence the
+        # per-command override rather than an ENV or a global ldconfig.
+        if [ ! -s "${bam}.bai" ]; then
+            echo "[numbat] no .bai staged for ${bam} -- indexing (slow)" >&2
+            LD_LIBRARY_PATH=/lib/x86_64-linux-gnu samtools index -@ ${task.cpus} "${bam}"
+        fi
+
+        cellsnp-lite \\
+            -s ${bam} \\
+            -b ${barcodes} \\
+            -O ${lib} \\
+            -R "\$SNPVCF" \\
+            -p ${task.cpus} \\
+            --minMAF 0 \\
+            --minCOUNT 2 \\
+            --UMItag Auto \\
+            --cellTAG CB
+
+        # pileup_and_phase.R reads exactly these four files per sample. Check
+        # them HERE, where a failure costs one library and retries alone, rather
+        # than in NUMBAT_PHASE, where it would cost the individual. An empty VCF
+        # is checked as well: upstream stops on "0 variants" too, but only after
+        # every other library has been piled up.
+        for f in cellSNP.base.vcf cellSNP.tag.AD.mtx cellSNP.tag.DP.mtx cellSNP.samples.tsv; do
+            [ -s "${lib}/\$f" ] || { echo "cellsnp-lite wrote no ${lib}/\$f" >&2; exit 1; }
+        done
+        if ! grep -v -m1 '^#' "${lib}/cellSNP.base.vcf" >/dev/null; then
+            echo "pileup VCF for ${lib} has 0 variants" >&2; exit 1
+        fi
+
+        # The OTH matrix is never read downstream. It is as large as AD and DP,
+        # and every byte of a declared output is copied to and from S3 on Cirro.
+        rm -f "${lib}/cellSNP.tag.OTH.mtx"
+        """
+
+    stub:
+        """
+        mkdir -p ${lib}
+        for f in cellSNP.base.vcf cellSNP.tag.AD.mtx cellSNP.tag.DP.mtx cellSNP.samples.tsv; do
+            echo stub > ${lib}/\$f
+        done
+        """
+}
+
+
+process NUMBAT_PHASE {
+
+    tag "Numbat phasing: ${group_id}"
+    label 'process_medium'
+
+    // ONE TASK PER INDIVIDUAL: the second half of pileup_and_phase.R, over the
+    // pileups NUMBAT_CELLSNP made one library at a time.
+    //
+    // This is the part that has to be joint. pileup_and_phase.R says so itself
+    // ("All samples must belong to the same individual"): it genotypes the
+    // libraries together (numbat:::genotype(label, samples, vcfs, ...)), so a
+    // heterozygous site gets coverage from every library the individual
+    // contributed -- the allelic power expression-only callers lack -- and
+    // Eagle2 phases that one genotype. Each library's allele table is then cut
+    // from the shared phase.
+    //
+    // It runs Numbat's own script, minus the pileup block
+    // (bin/numbat_phase_only.sh says what is cut and refuses to run if the
+    // upstream script no longer has that shape). No BAM is staged: the script
+    // only checks that --bams and --barcodes EXIST before reaching the cut
+    // block, and the real files are hundreds of GB on S3 for an individual
+    // like GBM1-DFCI3. Empty placeholders satisfy those checks, and nothing
+    // after the cut reads them.
+    //
+    // stageAs 'snp??/*': each library's pileup directory keeps its own name in
+    // a numbered directory, so no library name can collide with anything the
+    // script creates in the task directory. The subworkflow sorts the rows by
+    // library, so the order -- and the task hash -- are stable across runs.
+
+    input:
+        tuple val(group_id), val(libs), path(pileups, stageAs: 'snp??/*')
         path  gmap
         path  snpvcf
         path  paneldir
@@ -189,15 +300,14 @@ process NUMBAT_PILEUP {
         task.ext.when == null || task.ext.when
 
     script:
-        def libList = (libs      instanceof List ? libs      : [libs]).collect { it.toString() }
-        def bamList = (bams      instanceof List ? bams      : [bams]).collect { it.toString() }
-        def bcList  = (barcodes  instanceof List ? barcodes  : [barcodes]).collect { it.toString() }
-        if (libList.size() != bamList.size() || libList.size() != bcList.size())
-            error "NUMBAT_PILEUP ${group_id}: ${libList.size()} librar(ies), " +
-                  "${bamList.size()} BAM(s), ${bcList.size()} barcode file(s) -- these must match."
+        def libList = (libs    instanceof List ? libs    : [libs]).collect { it.toString() }
+        def dirList = (pileups instanceof List ? pileups : [pileups]).collect { it.toString() }
+        if (libList.size() != dirList.size())
+            error "NUMBAT_PHASE ${group_id}: ${libList.size()} librar(ies) but " +
+                  "${dirList.size()} pileup director(ies) -- these must match."
         """
         set -euo pipefail
-        mkdir -p pileup
+        mkdir -p pileup/pileup placeholders
 
         echo "[numbat] individual=${group_id} libraries=${libList.join(',')}"
 
@@ -225,7 +335,6 @@ process NUMBAT_PILEUP {
         fi
         echo "[numbat] gmap=\$GMAP"; echo "[numbat] snpvcf=\$SNPVCF"; echo "[numbat] paneldir=\$PANELDIR"
 
-        # Cellranger emits the index alongside the BAM; regenerate if absent.
         # pileup_and_phase.R is NOT on PATH in pkharchenkolab/numbat-rbase -- it
         # ships inside the installed R package at
         # /usr/local/lib/R/site-library/numbat/bin/. Ask R where it is rather than
@@ -237,44 +346,33 @@ process NUMBAT_PILEUP {
         [ -n "\$PILEUP" ] && [ -s "\$PILEUP" ] || {
             echo "pileup_and_phase.R not found on PATH or in the numbat R package." >&2; exit 1; }
         echo "[numbat] pileup_and_phase.R=\$PILEUP"
+        numbat_phase_only.sh "\$PILEUP" phase_only.R
 
-        # Re-indexing an 80 GB BAM costs more than the pileup, so the .bai is
-        # staged alongside it; only build one if it genuinely is not there.
-        #
-        # LD_LIBRARY_PATH, scoped to this one command. The image carries TWO
-        # htslibs: Debian's 1.20 under /lib/x86_64-linux-gnu, which /usr/bin/
-        # samtools 1.20 is linked against, and a hand-built 1.15.1 under
-        # /usr/local/lib, which cellsnp-lite is linked against. /usr/local/lib
-        # wins in ld.so.conf, so samtools loads the 1.15.1 copy and dies with
-        #     samtools: symbol lookup error: undefined symbol: bam_aux_first,
-        #     version HTSLIB_1.17
-        # Upstream pkharchenkolab/numbat-rbase does NOT have this problem even
-        # though both libraries are present and the samtools binary is byte
-        # identical: its ld.so.cache was built before /usr/local/lib held an
-        # htslib. Adding procps in containers/numbat/Dockerfile ran apt's
-        # ldconfig trigger, the cache was regenerated, and /usr/local/lib took
-        # over -- so the procps layer broke samtools without touching it.
-        # Measured by diffing the two images (Cirro 2026-10-21, exit 127).
-        #
-        # Deleting the old library is NOT the fix: cellsnp-lite, which does the
-        # actual pileup, resolves to /usr/local/lib/libhts.so.3. Hence the
-        # per-command override rather than an ENV or a global ldconfig.
-        for b in ${bamList.join(' ')}; do
-            if [ ! -s "\$b.bai" ]; then
-                echo "[numbat] no .bai staged for \$b -- indexing (slow)" >&2
-                LD_LIBRARY_PATH=/lib/x86_64-linux-gnu samtools index -@ ${task.cpus} "\$b"
-            fi
+        # Each library's pileup goes where the script reads it,
+        # {outdir}/pileup/{sample}/, and gets a placeholder BAM and barcode file
+        # for the existence checks (see the header comment).
+        libs=(${libList.join(' ')})
+        dirs=(${dirList.join(' ')})
+        bams=(); bcs=()
+        for i in "\${!libs[@]}"; do
+            lb="\${libs[\$i]}"; d="\${dirs[\$i]}"
+            [ "\$(basename "\$d")" = "\$lb" ] || {
+                echo "pileup directory \$d does not belong to library \$lb" >&2; exit 1; }
+            ln -s "\$PWD/\$d" "pileup/pileup/\$lb"
+            : > "placeholders/\$lb.bam"; : > "placeholders/\$lb.barcodes.tsv"
+            bams+=("placeholders/\$lb.bam"); bcs+=("placeholders/\$lb.barcodes.tsv")
         done
+        csv() { local IFS=,; echo "\$*"; }
 
-        Rscript \$PILEUP \\
+        Rscript phase_only.R \\
             --label     ${group_id} \\
-            --samples   ${libList.join(',')} \\
-            --bams      ${bamList.join(',')} \\
-            --barcodes  ${bcList.join(',')} \\
+            --samples   "\$(csv "\${libs[@]}")" \\
+            --bams      "\$(csv "\${bams[@]}")" \\
+            --barcodes  "\$(csv "\${bcs[@]}")" \\
             --outdir    pileup \\
-            --gmap      \$GMAP \\
-            --snpvcf    \$SNPVCF \\
-            --paneldir  \$PANELDIR \\
+            --gmap      "\$GMAP" \\
+            --snpvcf    "\$SNPVCF" \\
+            --paneldir  "\$PANELDIR" \\
             --ncores    ${task.cpus}
 
         # pileup_and_phase.R writes {outdir}/{sample}_allele_counts.tsv.gz once
@@ -282,16 +380,10 @@ process NUMBAT_PILEUP {
         # that is quietly absent costs that library its allelic channel, which is
         # the only thing Numbat has over inferCNV, and nothing downstream can
         # tell the difference between "no table" and "no events".
-        for lb in ${libList.join(' ')}; do
-            if [ ! -s "pileup/\${lb}_allele_counts.tsv.gz" ]; then
-                found=\$(find pileup -name "\${lb}*allele_counts.tsv.gz" | head -1)
-                if [ -n "\$found" ]; then
-                    cp "\$found" "pileup/\${lb}_allele_counts.tsv.gz"
-                else
-                    echo "pileup produced no allele table for library \$lb of ${group_id}." >&2
-                    exit 1
-                fi
-            fi
+        for lb in "\${libs[@]}"; do
+            [ -s "pileup/\${lb}_allele_counts.tsv.gz" ] || {
+                echo "phasing produced no allele table for library \$lb of ${group_id}." >&2
+                exit 1; }
         done
         """
 

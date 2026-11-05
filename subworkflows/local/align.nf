@@ -236,8 +236,8 @@ workflow ALIGN {
         // The microbiome and Numbat stages consume the aligned BAM, which lives
         // inside the same cellranger `outs` directory as the count matrices.
         //
-        // The INDEX travels with it. NUMBAT_PILEUP declares
-        // `tuple val(sample_id), path(bam), path(bai), path(barcodes)`, and
+        // The INDEX travels with it. NUMBAT_CELLSNP (formerly NUMBAT_PILEUP)
+        // stages `path(bam), path(bai), path(barcodes)` per library, and
         // main.nf's --input_bam_path branch builds that 3-tuple; emitting only
         // (sample, bam) here made the ALIGN-fed path one element short, so
         // `--from align --run_numbat true` — the only route that never needs a

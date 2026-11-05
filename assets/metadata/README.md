@@ -112,10 +112,11 @@ one, is the number to read for them.
 
 ## Resource consequence
 
-All 17 libraries in one group is the worst case for `NUMBAT_PILEUP`, because
-Numbat piles up samples **sequentially** — `pileup_and_phase.R` writes one
-`cellsnp-lite` command per sample into `run_pileup.sh` and runs the script — so
-wall time is the sum, not the max. `conf/base.config` raises PILEUP to 120 h and
-`NUMBAT_RUN` to 192 GB / 96 h. Both numbers are **estimates from the 2026-10
-failure pattern, not measurements**; replace them with the peak RSS and runtimes
-from that run's `report.html`.
+All 17 libraries in one group no longer costs pileup wall time: each library is
+piled up in its own `NUMBAT_CELLSNP` task, side by side, and only the joint
+genotyping and phasing (`NUMBAT_PHASE`) runs once for the individual. Numbat's
+own `pileup_and_phase.R` would have piled them up **one after another**.
+The model fit still pools them: `NUMBAT_RUN` is one task over ~59.6k cells,
+at 192 GB / 96 h. That number is an **estimate from the 2026-10 failure
+pattern, not a measurement**; replace it with the peak RSS and runtime from the
+next run's `report.html`.

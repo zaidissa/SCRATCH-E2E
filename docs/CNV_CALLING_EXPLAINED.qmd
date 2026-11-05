@@ -211,7 +211,8 @@ expression caller added agreement without adding information.
 | Process | Image | Input → Output |
 |---|---|---|
 | `NUMBAT_PREP` | `scratch-cnv` (Seurat, **no** numbat) | annotated object → per-library barcodes, pooled counts, cell map, reference-cell list |
-| `NUMBAT_PILEUP` | numbat image | BAM + barcodes → phased allele counts, per individual |
+| `NUMBAT_CELLSNP` | numbat image | BAM + barcodes → `cellsnp-lite` allele pileup, per library |
+| `NUMBAT_PHASE` | numbat image | pileups → joint genotype, Eagle2 phasing, allele counts, per individual |
 | `NUMBAT_RUN` | numbat image (numbat, **no** Seurat) | counts + alleles → per-cell calls |
 
 They are separate so the expensive pileup caches independently of the model fit:
@@ -330,18 +331,24 @@ raw one, is the number to read for a blood library.
 
 ### Step 4 — pileup and phasing
 
-`NUMBAT_PILEUP` runs the package's own `pileup_and_phase.R`: `cellsnp-lite`
-counts reads at known SNP positions in each BAM, then Eagle2 phases them against
-the 1000 Genomes panel, one chromosome at a time.
+This is the package's own `pileup_and_phase.R`, split in two.
+`NUMBAT_CELLSNP` runs its `cellsnp-lite` command, flag for flag, once per
+library: it counts reads at known SNP positions in that library's BAM.
+`NUMBAT_PHASE` then runs the rest of the script on one individual's pileups:
+joint genotyping, Eagle2 phasing against the 1000 Genomes panel one chromosome
+at a time, and one allele table per library.
 
 ::: {.keypoint}
-**Pooling costs wall time.** `pileup_and_phase.R` writes **one `cellsnp-lite`
-command per sample** into `run_pileup.sh` and then runs the script. Each command
-uses all `task.cpus` internally, so cores are not idle — but the samples are
-**serial**. Grouping 17 libraries into one individual turns 17 parallel pileups
-into one pileup of roughly 17×. `conf/base.config` allows 120 h for PILEUP and
-192 GB / 96 h for RUN; both are *estimates* from an observed failure pattern,
-not measurements.
+**Why it is split.** Left whole, `pileup_and_phase.R` writes **one
+`cellsnp-lite` command per sample** into `run_pileup.sh` and runs them one
+after another. Grouping 17 libraries into one individual would turn 17 parallel
+pileups into one task of roughly 17× the time. Nothing in a pileup depends on
+another library; only the genotyping and phasing are joint. So the pileups run
+side by side, and wall time is the slowest library rather than the sum.
+`NUMBAT_PHASE` runs Numbat's own script with only the pileup block removed
+(`bin/numbat_phase_only.sh` refuses to run if that block is not found), so the
+joint step is unchanged code. On the August HRS371755 pileup it produced the
+same allele table as the single-task version.
 :::
 
 ### Step 5 — the model

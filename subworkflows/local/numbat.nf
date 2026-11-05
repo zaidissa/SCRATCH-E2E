@@ -10,7 +10,8 @@
 include { asBool } from '../../lib/booleans.nf'
 include { NUMBAT_FETCH_REFS } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_PREP   } from '../../modules/local/numbat/main.nf'
-include { NUMBAT_PILEUP } from '../../modules/local/numbat/main.nf'
+include { NUMBAT_CELLSNP } from '../../modules/local/numbat/main.nf'
+include { NUMBAT_PHASE   } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_RUN    } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_REPORT } from '../../modules/local/numbat/main.nf'
 
@@ -125,7 +126,7 @@ workflow NUMBAT {
                 ch_snpvcf   = NUMBAT_FETCH_REFS.out.snpvcf
                 ch_paneldir = NUMBAT_FETCH_REFS.out.paneldir
             } else {
-                // Placeholders: NUMBAT_PILEUP resolves these to the in-image paths.
+                // Placeholders: NUMBAT_CELLSNP / NUMBAT_PHASE resolve these to the in-image paths.
                 ch_gmap     = Channel.value(nf_gmap)
                 ch_snpvcf   = Channel.value(nf_vcf)
                 ch_paneldir = Channel.value(nf_panel)
@@ -296,29 +297,13 @@ workflow NUMBAT {
                     }
                 }
 
-            // library -> (bam, bai, barcodes, group), regrouped onto the individual.
-            // Rows are SORTED BY LIBRARY before the lists are built: groupTuple
-            // emits in arrival order, which is not deterministic, and the three
-            // staged lists correspond to --samples positionally. Sorting makes
-            // the correspondence stable and the task hash reproducible.
-            ch_pileup_in = ch_bam
+            // library -> (group, library, bam, bai, barcodes): one pileup task
+            // per LIBRARY. The regrouping onto the individual happens after the
+            // pileup, in front of NUMBAT_PHASE.
+            ch_cellsnp_in = ch_bam
                 .join(ch_barcodes,  failOnMismatch: false, remainder: false)
                 .join(ch_lib2group, failOnMismatch: false, remainder: false)
                 .map { lib, bam, bai, bc, grp -> tuple(grp, lib, bam, bai, bc) }
-                .groupTuple()
-                .map { grp, libs, bams, bais, bcs ->
-                    // .toList() first: an IntRange is immutable and Groovy's
-                    // sort() is in-place, so sorting the range directly throws
-                    // UnsupportedOperationException at runtime -- which surfaces
-                    // only as a bare java.lang.UnsupportedOperationException with
-                    // no line number, and then as the ifEmpty() error below.
-                    def order = (0..<libs.size()).toList().sort { libs[it].toString() }
-                    tuple(grp,
-                          order.collect { libs[it] },
-                          order.collect { bams[it] },
-                          order.collect { bais[it] },
-                          order.collect { bcs[it]  })
-                }
                 .ifEmpty {
                     // This fires whenever the join is empty, which has TWO causes, and
                     // the common one is not a key mismatch. `ifEmpty` is a runtime
@@ -345,9 +330,51 @@ workflow NUMBAT {
                           "or set --numbat_sample_col to the column that matches them."
                 }
 
-            NUMBAT_PILEUP(ch_pileup_in, ch_gmap, ch_snpvcf, ch_paneldir)
+            NUMBAT_CELLSNP(ch_cellsnp_in, ch_snpvcf)
 
-            ch_run_in = NUMBAT_PILEUP.out.alleles
+            // How many libraries each individual sent to the pileup. Known as
+            // soon as the inputs are, so groupKey can release an individual to
+            // NUMBAT_PHASE the moment ITS last pileup lands, instead of waiting
+            // for every pileup in the run.
+            ch_n_libs = ch_cellsnp_in
+                .map { grp, lib, bam, bai, bc -> tuple(grp, lib) }
+                .groupTuple()
+                .map { grp, libs -> tuple(grp, libs.size()) }
+
+            // Rows are SORTED BY LIBRARY before the lists are built: groupTuple
+            // emits in arrival order, which is not deterministic, and the lists
+            // correspond to --samples positionally. Sorting makes the
+            // correspondence stable and the task hash reproducible.
+            //
+            // remainder: true, because NUMBAT_CELLSNP gives up on a library
+            // after its retries (conf/base.config). Without it, an individual
+            // missing one library would be dropped whole -- the same thing as
+            // its every library failing. With it, the individual is phased on
+            // the libraries that did pile up, and the warning says how many.
+            ch_phase_in = NUMBAT_CELLSNP.out.pileup
+                .combine(ch_n_libs, by: 0)
+                .map { grp, lib, dir, n -> tuple(groupKey(grp, n), lib, dir) }
+                .groupTuple(remainder: true)
+                .map { key, libs, dirs ->
+                    def grp = key.getGroupTarget()
+                    if (libs.size() < key.getGroupSize())
+                        println "WARNING: Numbat: individual ${grp} is phased on " +
+                            "${libs.size()} of ${key.getGroupSize()} libraries -- the " +
+                            "pileup failed for the rest. Their cells stay in the count " +
+                            "matrix with no allele data, so Numbat calls them from " +
+                            "expression alone, as inferCNV would."
+                    // .toList() first: an IntRange is immutable and Groovy's
+                    // sort() is in-place, so sorting the range directly throws
+                    // UnsupportedOperationException at runtime -- which surfaces
+                    // only as a bare java.lang.UnsupportedOperationException with
+                    // no line number.
+                    def order = (0..<libs.size()).toList().sort { libs[it].toString() }
+                    tuple(grp, order.collect { libs[it] }, order.collect { dirs[it] })
+                }
+
+            NUMBAT_PHASE(ch_phase_in, ch_gmap, ch_snpvcf, ch_paneldir)
+
+            ch_run_in = NUMBAT_PHASE.out.alleles
                 .join(ch_counts,  remainder: false)
                 .join(ch_cellmap, remainder: false)
                 .join(ch_refcells, remainder: false)
