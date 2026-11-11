@@ -17,6 +17,13 @@ process CELLRANGER_COUNT {
     script:
         def args = task.ext.args ?: ''
         """
+            # FASTQs reach this task under their ORIGINAL names, and cellranger
+            # finds reads only as <sample>_S<n>_L<nnn>_R<1|2>_001.fastq.gz. Names
+            # already in that form are left alone; others (fetchngs SRR_1/_2, a
+            # prefix that differs from the sample) are renamed, and a name the
+            # script cannot read stops the task instead of losing a read file.
+            cellranger_renaming.py "${sample}" .
+
             cellranger \\
                 count \\
                 --id="${sample}" \\
@@ -38,6 +45,8 @@ process CELLRANGER_COUNT {
     stub:
         def args = task.ext.args ?: ''
         """
+            cellranger_renaming.py "${sample}" .
+
             mkdir -p ${sample}/outs/filtered_feature_bc_matrix
 
             touch ${sample}/outs/filtered_feature_bc_matrix/barcodes.tsv.gz

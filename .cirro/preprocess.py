@@ -7,7 +7,9 @@ Three jobs, in order of how badly their absence bites:
 1. Build the cellranger samplesheet when the run starts at `align`. Cirro
    annotates a FASTQ dataset one row per file; cellranger wants one row per
    sample with R1 and R2 in columns. Without this, `--from align` fails on a
-   samplesheet that was never written.
+   samplesheet that was never written. R1/R2 are taken from the file names
+   (also SRR_1/SRR_2 from a fetchngs "Public Dataset (FASTQ)"), never from
+   table order -- see normalise_files().
 
 2. Translate `alignment_mode` into the two booleans main.nf actually reads, and
    drop entry-point paths left blank in the form. The form offers three entry
@@ -368,6 +370,75 @@ def _log_exp_table(ds: PreprocessDataset, path: str, body: str) -> None:
         ds.logger.info(f"  {line}")
 
 
+import re as _re
+
+_R_TOKEN = _re.compile(r'_R([12])(?=[_.])')
+_END_DIGIT = _re.compile(r'[_.]([12])\.f(?:ast)?q\.gz$')
+_LANE = _re.compile(r'_L(\d{3})_')
+
+
+def read_number_from_name(path: str):
+    """1 or 2 from a FASTQ name, or None. Same rule as bin/cellranger_renaming.py:
+    the LAST _R1/_R2 token, else a _1/_2 ending (fetchngs: SRR123_1.fastq.gz)."""
+    name = os.path.basename(str(path))
+    tokens = _R_TOKEN.findall(name)
+    if tokens:
+        return int(tokens[-1])
+    m = _END_DIGIT.search(name)
+    return int(m.group(1)) if m else None
+
+
+def normalise_files(files: pd.DataFrame) -> pd.DataFrame:
+    """Give every file a trustworthy `read`, `lane` and `sampleIndex`. Pure.
+
+    Cirro's pivot pairs files on these. A FASTQ dataset annotated from
+    Illumina names has them; a fetchngs "Public Dataset (FASTQ)" may not, and
+    then pivot_files() numbers each sample's files in TABLE ORDER -- which can
+    put R2 in fastq_1 -- and pivots on a blank lane. So:
+
+      read   kept when it is 1 or 2 AND agrees with the file name; filled from
+             the name when missing; a disagreement or an unreadable name stops
+             the launch, because guessing is how reads get swapped.
+      lane   kept when present, else parsed from _L00n_, else 1.
+      sampleIndex  kept when present, else the sample name.
+    """
+    f = files.copy()
+    from_name = f["file"].map(read_number_from_name)
+
+    if "read" in f.columns:
+        given = pd.to_numeric(f["read"], errors="coerce")
+        clash = given.notna() & from_name.notna() & (given != from_name)
+        if clash.any():
+            bad = f.loc[clash, "file"].map(os.path.basename).tolist()
+            raise ValueError(f"Read number in the dataset disagrees with the file name for: {bad}")
+        f["read"] = given.where(given.isin([1, 2]), from_name)
+    else:
+        f["read"] = from_name
+
+    unreadable = f["read"].isna()
+    if unreadable.any():
+        bad = f.loc[unreadable, "file"].map(os.path.basename).tolist()
+        raise ValueError(
+            "Cannot tell R1 from R2 for: " + ", ".join(bad) + ". Expected names like "
+            "..._R1_001.fastq.gz / ..._R2_001.fastq.gz or ..._1.fastq.gz / ..._2.fastq.gz."
+        )
+    f["read"] = f["read"].astype(int)
+
+    lane_from_name = f["file"].map(
+        lambda p: int(m.group(1)) if (m := _LANE.search(os.path.basename(str(p)))) else 1)
+    if "lane" in f.columns:
+        given = pd.to_numeric(f["lane"], errors="coerce")
+        f["lane"] = given.where(given.notna(), lane_from_name).astype(int)
+    else:
+        f["lane"] = lane_from_name
+
+    if "sampleIndex" not in f.columns:
+        f["sampleIndex"] = f["sample"]
+    else:
+        f["sampleIndex"] = f["sampleIndex"].where(f["sampleIndex"].notna(), f["sample"])
+    return f
+
+
 def build_samplesheet(ds: PreprocessDataset) -> pd.DataFrame:
     """One row per sample, R1/R2 in columns — cellranger's layout, not Cirro's.
 
@@ -382,8 +453,14 @@ def build_samplesheet(ds: PreprocessDataset) -> pd.DataFrame:
     if missing:
         raise ValueError(
             f"Dataset samplesheet is missing required column(s): {', '.join(missing)}. "
-            f"Present: {', '.join(ds.samplesheet.columns)}"
+            f"Present: {', '.join(ds.samplesheet.columns)}. For a public (fetchngs) "
+            f"dataset, add them to the samples' metadata in Cirro."
         )
+
+    # A fetchngs "Public Dataset (FASTQ)" names files SRR_1/SRR_2 with no lane,
+    # and may carry no `read` column -- then Cirro pairs files in table order.
+    ds.logger.info(f"File table columns: {', '.join(map(str, ds.files.columns))}")
+    ds.files = normalise_files(ds.files)
 
     table = ds.pivot_samplesheet(
         index=["sampleIndex", "sample", "lane"],
@@ -391,6 +468,16 @@ def build_samplesheet(ds: PreprocessDataset) -> pd.DataFrame:
         metadata_columns=REQUIRED + have_optional,
         column_prefix="fastq_",
     ).sort_values(by="sample")
+
+    # Every row must be a complete pair. A missing mate would otherwise reach
+    # cellranger as a path of "nan".
+    for col in ("fastq_1", "fastq_2"):
+        if col not in table.columns:
+            raise ValueError(f"No {col} column after pairing files; columns: {list(table.columns)}")
+    incomplete = table[table["fastq_1"].isna() | table["fastq_2"].isna()]
+    if len(incomplete):
+        raise ValueError("Samples without both R1 and R2: "
+                         + ", ".join(incomplete["sample"].astype(str).unique()))
 
     ds.logger.info("Pivoted samplesheet:")
     ds.logger.info(table.to_csv(index=None))

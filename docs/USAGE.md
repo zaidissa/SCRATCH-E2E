@@ -72,6 +72,23 @@ either an `s3://` path, or a path inside this repository starting with
 is read from the revision being launched, so the file must be committed and
 pushed.
 
+### Public data (Cirro "Public Dataset (FASTQ)", nf-core/fetchngs)
+
+Start at `align`. A fetchngs dataset carries SRA metadata, not this
+pipeline's, so first add **modality** (GEX or TCR) and **patient_id** to its
+samples' metadata in Cirro; the launch stops and says so if either is missing.
+The sample is the SRX accession and the files are `SRR…_1.fastq.gz` /
+`SRR…_2.fastq.gz`:
+
+- R1/R2 are read from the file names, and every sample must end up with
+  exactly one of each; anything else stops the launch with the file named.
+- `cellranger count` and `cellranger vdj` rename the files to
+  `<sample>_S1_L001_R<1|2>_001.fastq.gz` before running. Names already in
+  that form are left alone.
+
+Not handled: an experiment (SRX) with several runs (SRR) and no lane numbers.
+The rename refuses to put two runs on one name, so that launch stops.
+
 ## Worked examples
 
 ```bash
