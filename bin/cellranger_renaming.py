@@ -9,7 +9,7 @@ import re
 def is_already_10x_format(sample_name, filename):
     """
     Determine if the filename matches the expected 10x Genomics format.
-    {sample_name}_S\d+_L\d{3}_R[12]_001\.fastq\.gz
+    {sample_name}_S<n>_L<lane>_R<1|2>_001.fastq.gz
 
     Args:
         filename (str): The name of the file to check.
@@ -39,9 +39,22 @@ def rename_fastqs(sample_name, fastq_dir):
 
                 print(f"Renaming {sample_name} {filename}")
 
-                # Extract R1/R2 from _R1_ or _R2_ in the filename
-                r_match = re.search(r'_R([12])_', filename)
-                pair_number = r_match.group(1) if r_match else '1'
+                # Read number from _R1_/_R2_, and also _R1./_R2. and _1./_2. endings
+                # (X_R1.fastq.gz, fetchngs' SRR_1.fastq.gz). The original matched only
+                # _R1_ and defaulted to 1, so a pair named X_R1.fastq.gz / X_R2.fastq.gz
+                # BOTH became ..._R1_001 and R2 overwrote R1 -- half the reads gone, exit 0.
+                # The LAST read token wins: the read number sits at the end of the name,
+                # and a sample name may itself contain _R1_ (pt_R1_tcr_S1_L001_R2_001).
+                # Never guess: an unreadable read number is an error.
+                r_tokens = re.findall(r'_R([12])(?=[_.])', filename)
+                if r_tokens:
+                    pair_number = r_tokens[-1]
+                else:
+                    end_match = re.search(r'[_.]([12])\.f(?:ast)?q\.gz$', filename)
+                    if not end_match:
+                        sys.exit(f"ERROR: cannot tell R1 from R2 in '{filename}'. Name it "
+                                 f"..._R1_001.fastq.gz / ..._R2_001.fastq.gz (or _R1/_R2).")
+                    pair_number = end_match.group(1)
 
                 # Extract lane number (e.g. L001, L002)
                 l_match = re.search(r'_L(\d{3})_', filename)
@@ -55,6 +68,11 @@ def rename_fastqs(sample_name, fastq_dir):
 
                 old_path = os.path.join(fastq_dir, filename)
                 new_path = os.path.join(fastq_dir, new_filename)
+                # Two inputs mapping to one name (e.g. lanes from different flowcells both
+                # L001) would silently drop a file. Refuse instead.
+                if os.path.lexists(new_path):
+                    sys.exit(f"ERROR: renaming '{filename}' -> '{new_filename}' would overwrite "
+                             f"an existing file. Give the FASTQs distinct lane numbers.")
                 os.rename(old_path, new_path)
 
             else:
