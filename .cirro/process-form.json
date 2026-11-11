@@ -319,6 +319,12 @@
                         "title": "Download Numbat references",
                         "default": false,
                         "description": "Off by default because the Numbat image already carries a copy. Enable only if the in-image references are missing or the wrong genome build."
+                    },
+                    "numbat_germline_vcfs": {
+                        "type": "string",
+                        "title": "Germline WGS VCFs for Numbat (CSV, optional)",
+                        "default": "",
+                        "description": "s3:// path to a CSV with columns patient_id, vcf, sample (sample only when a VCF holds several people). Each listed patient is phased on its WGS het and hom-alt SNPs (hg38, PASS, DP>=10, GQ>=20) instead of hets inferred from the scRNA, which loses germline hets inside tumour LOH. Checked against the scRNA before use: a VCF from the wrong person stops that patient. Blank = infer from the scRNA for everyone."
                     }
                 }
             },

@@ -10,6 +10,7 @@
 include { asBool } from '../../lib/booleans.nf'
 include { NUMBAT_FETCH_REFS } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_PREP   } from '../../modules/local/numbat/main.nf'
+include { NUMBAT_GERMLINE } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_CELLSNP } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_PHASE   } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_RUN    } from '../../modules/local/numbat/main.nf'
@@ -330,7 +331,67 @@ workflow NUMBAT {
                           "or set --numbat_sample_col to the column that matches them."
                 }
 
-            NUMBAT_CELLSNP(ch_cellsnp_in, ch_snpvcf)
+            // ---- Germline genotypes (optional, per individual) --------------
+            // --numbat_germline_vcfs: a CSV with columns patient_id, vcf and an
+            // optional sample (the VCF's sample column; required when the VCF
+            // holds more than one). patient_id values are --numbat_group_col
+            // values. An individual with no row keeps the scRNA-inferred
+            // genotype, so a cohort can be covered partially.
+            def nf_germ = file("${projectDir}/assets/NO_FILE_germline")
+            ch_germline = Channel.empty()
+            if (params.numbat_germline_vcfs) {
+                ch_germ_rows = Channel
+                    .fromPath(params.numbat_germline_vcfs, checkIfExists: true)
+                    .splitCsv(header: true, strip: true)
+                    .map { r ->
+                        if (!r.patient_id || !r.vcf)
+                            error "--numbat_germline_vcfs needs columns 'patient_id' and 'vcf' " +
+                                  "(and optionally 'sample'); got: ${r.keySet().join(', ')}"
+                        tuple(r.patient_id.toString(), file(r.vcf, checkIfExists: true),
+                              (r.sample ?: '').toString())
+                    }
+                NUMBAT_GERMLINE(ch_germ_rows, ch_snpvcf)
+                ch_germline = NUMBAT_GERMLINE.out.targets.join(NUMBAT_GERMLINE.out.germline)
+
+                // Say which individuals got a germline genotype and which did
+                // not. A patient_id typo would otherwise mean "silently the old
+                // behaviour" for that patient.
+                ch_cellsnp_in.map { it[0].toString() }.unique().map { ['data', it] }
+                    .mix(ch_germ_rows.map { ['germ', it[0]] })
+                    .collect(flat: false)
+                    .subscribe { rows ->
+                        def data = rows.findAll { it[0] == 'data' }.collect { it[1] } as Set
+                        def germ = rows.findAll { it[0] == 'germ' }.collect { it[1] } as Set
+                        println "Numbat: germline WGS genotype for ${(data.intersect(germ)).size()} " +
+                            "of ${data.size()} individual(s); the rest infer it from the scRNA."
+                        def unknown = germ - data
+                        if (unknown)
+                            println "WARNING: --numbat_germline_vcfs names individual(s) not in " +
+                                "this run's --numbat_group_col (${params.numbat_group_col}): " +
+                                "${unknown.sort().join(', ')}. Their VCFs are prepared but used " +
+                                "by nothing -- check the spelling against the metadata."
+                        def without = data - germ
+                        if (without && germ)
+                            println "Numbat: no germline VCF for: ${without.sort().join(', ')}."
+                    }
+            }
+            // One map, group -> [targets, germline dir], as a value: every
+            // pileup row looks its individual up in it. toList() of an empty
+            // channel is [], so without germline VCFs this is an empty map and
+            // every row falls back to the 1000G SNP VCF.
+            ch_germ_map = ch_germline.toList().map { rows ->
+                rows.collectEntries { r -> [ (r[0].toString()): [ r[1], r[2] ] ] }
+            }
+
+            ch_cellsnp_rows = ch_cellsnp_in
+                .combine(ch_germ_map)
+                .combine(ch_snpvcf)
+                .map { grp, lib, bam, bai, bc, gmapping, snp ->
+                    def g = gmapping[grp.toString()]
+                    tuple(grp, lib, bam, bai, bc, g ? g[0] : snp)
+                }
+
+            NUMBAT_CELLSNP(ch_cellsnp_rows)
 
             // How many libraries each individual sent to the pileup. Known as
             // soon as the inputs are, so groupKey can release an individual to
@@ -370,6 +431,11 @@ workflow NUMBAT {
                     // no line number.
                     def order = (0..<libs.size()).toList().sort { libs[it].toString() }
                     tuple(grp, order.collect { libs[it] }, order.collect { dirs[it] })
+                }
+                .combine(ch_germ_map)
+                .map { grp, libs, dirs, gmapping ->
+                    def g = gmapping[grp.toString()]
+                    tuple(grp, libs, dirs, g ? g[1] : nf_germ)
                 }
 
             NUMBAT_PHASE(ch_phase_in, ch_gmap, ch_snpvcf, ch_paneldir)

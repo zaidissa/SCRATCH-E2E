@@ -147,6 +147,62 @@ process NUMBAT_PREP {
 }
 
 
+process NUMBAT_GERMLINE {
+
+    tag "Numbat germline: ${group_id}"
+    label 'process_low'
+
+    // OPTIONAL, per individual: that individual's germline genotypes from a WGS
+    // VCF (--numbat_germline_vcfs), in place of the het sites numbat:::genotype
+    // would otherwise infer from the scRNA. bin/numbat_germline.R says why --
+    // in short, tumour LOH makes a germline het look homozygous in the scRNA,
+    // so inference throws away exactly the sites that show LOH.
+    //
+    // Individuals with no row in that table keep the scRNA-inferred genotype;
+    // nothing about them changes.
+    //
+    // Fails (not ignored) on a VCF on the wrong build, on a multi-sample VCF
+    // whose sample is not named, and on a VCF with no site left after the
+    // filters. Each is a configuration error, it fails within minutes of the
+    // start, and running on would phase a tumour against the wrong genome.
+
+    input:
+        tuple val(group_id), path(vcf), val(vcf_sample)
+        path  snpvcf
+
+    output:
+        tuple val(group_id), path("germline_${group_id}/${group_id}_germline_targets.vcf"), emit: targets
+        tuple val(group_id), path("germline_${group_id}", type: 'dir'),                    emit: germline
+        // A top-level copy: a file inside an emitted directory is not published
+        // on its own, even when declared as a separate output (stub-tested).
+        path  "${group_id}_germline_report.tsv",                                           emit: report
+
+    when:
+        task.ext.when == null || task.ext.when
+
+    script:
+        """
+        set -euo pipefail
+        SNPVCF="${snpvcf}"
+        case "\$SNPVCF" in *NO_FILE*) SNPVCF=\$(ls /data/genome1K.phase3.SNP_AF5e2.chr1toX.${params.numbat_genome}.vcf* 2>/dev/null | head -1) ;; esac
+        [ -s "\$SNPVCF" ] || { echo "numbat SNP VCF '\$SNPVCF' is missing or empty." >&2; exit 1; }
+
+        numbat_germline.R ${vcf} '${vcf_sample}' ${group_id} germline_${group_id} \\
+            ${params.numbat_germline_min_dp} ${params.numbat_germline_min_gq} "\$SNPVCF"
+        cp germline_${group_id}/${group_id}_germline_report.tsv .
+        """
+
+    stub:
+        """
+        mkdir -p germline_${group_id}/phasing
+        printf '##fileformat=VCFv4.2\\n#CHROM\\tPOS\\tID\\tREF\\tALT\\tQUAL\\tFILTER\\tINFO\\n' > germline_${group_id}/${group_id}_germline_targets.vcf
+        printf 'CHROM\\tPOS\\tREF\\tALT\\tGT\\n' | gzip > germline_${group_id}/${group_id}_germline_sites.tsv.gz
+        printf 'step\\tn\\tdetail\\nstub\\t0\\t\\n' > germline_${group_id}/${group_id}_germline_report.tsv
+        cp germline_${group_id}/${group_id}_germline_report.tsv .
+        """
+}
+
+
 process NUMBAT_CELLSNP {
 
     tag "Numbat pileup: ${lib} (${group_id})"
@@ -170,8 +226,10 @@ process NUMBAT_CELLSNP {
     // ones the single-task version would have produced.
 
     input:
-        tuple val(group_id), val(lib), path(bam), path(bai), path(barcodes)
-        path  snpvcf
+        // `targets` is per row: the individual's germline sites when
+        // NUMBAT_GERMLINE made them, otherwise the 1000G SNP VCF (or its
+        // NO_FILE placeholder, meaning the copy inside the image).
+        tuple val(group_id), val(lib), path(bam), path(bai), path(barcodes), path(targets)
 
     output:
         // A directory named after the library. NUMBAT_PHASE puts it where
@@ -187,10 +245,13 @@ process NUMBAT_CELLSNP {
 
         # A staged NO_FILE placeholder means "not supplied -- use the image copy".
         # The resolution and the checks are the same as in NUMBAT_PHASE.
-        SNPVCF="${snpvcf}"
+        SNPVCF="${targets}"
         case "\$SNPVCF" in *NO_FILE*) SNPVCF=\$(ls /data/genome1K.phase3.SNP_AF5e2.chr1toX.${params.numbat_genome}.vcf* 2>/dev/null | head -1) ;; esac
-        [ -s "\$SNPVCF" ] || { echo "numbat SNP VCF '\$SNPVCF' is missing or empty." >&2; exit 1; }
-        echo "[numbat] individual=${group_id} library=${lib} snpvcf=\$SNPVCF"
+        [ -s "\$SNPVCF" ] || { echo "numbat pileup target VCF '\$SNPVCF' is missing or empty." >&2; exit 1; }
+        case "\$SNPVCF" in
+            *_germline_targets.vcf) echo "[numbat] individual=${group_id} library=${lib} targets=germline WGS sites (\$SNPVCF)" ;;
+            *)                      echo "[numbat] individual=${group_id} library=${lib} targets=1000G common SNPs (\$SNPVCF)" ;;
+        esac
 
         # Re-indexing an 80 GB BAM costs more than the pileup, so the .bai is
         # staged alongside it; only build one if it genuinely is not there.
@@ -286,7 +347,10 @@ process NUMBAT_PHASE {
     // library, so the order -- and the task hash -- are stable across runs.
 
     input:
-        tuple val(group_id), val(libs), path(pileups, stageAs: 'snp??/*')
+        // `germline` is NUMBAT_GERMLINE's directory for this individual, or the
+        // NO_FILE_germline placeholder when there is no germline VCF for them.
+        tuple val(group_id), val(libs), path(pileups, stageAs: 'snp??/*'),
+              path(germline, stageAs: 'germline_in/*')
         path  gmap
         path  snpvcf
         path  paneldir
@@ -295,6 +359,8 @@ process NUMBAT_PHASE {
         // One allele table PER LIBRARY, jointly phased. numbat_run.R
         // concatenates them, namespacing each cell as "<library>_<barcode>".
         tuple val(group_id), path("pileup/*_allele_counts.tsv.gz"), emit: alleles
+        // Germline mode only: does the WGS VCF belong to this person?
+        path  "${group_id}_germline_identity.tsv", emit: identity, optional: true
 
     when:
         task.ext.when == null || task.ext.when
@@ -346,7 +412,27 @@ process NUMBAT_PHASE {
         [ -n "\$PILEUP" ] && [ -s "\$PILEUP" ] || {
             echo "pileup_and_phase.R not found on PATH or in the numbat R package." >&2; exit 1; }
         echo "[numbat] pileup_and_phase.R=\$PILEUP"
-        numbat_phase_only.sh "\$PILEUP" phase_only.R
+
+        # Germline mode. The Eagle2 targets come from the WGS VCF instead of
+        # numbat:::genotype, so that one call is cut as well as the pileup.
+        # First, the identity check: a VCF from the wrong person would phase
+        # without complaint (bin/numbat_germline_check.R). It exits 3 on a
+        # mismatch, which conf/base.config does not retry.
+        GERM="${germline}"
+        SKIP_GT=""
+        case "\$GERM" in
+            *NO_FILE*)
+                echo "[numbat] genotype: inferred from the scRNA (numbat:::genotype)" ;;
+            *)
+                echo "[numbat] genotype: germline WGS (\$GERM)"
+                numbat_germline_check.R ${group_id} "\$GERM/${group_id}_germline_sites.tsv.gz" \
+                    ${group_id}_germline_identity.tsv ${params.numbat_germline_min_concordance} \
+                    ${dirList.join(' ')}
+                mkdir -p pileup/phasing
+                cp "\$GERM"/phasing/${group_id}_chr*.vcf.gz* pileup/phasing/
+                SKIP_GT="--skip-genotype" ;;
+        esac
+        numbat_phase_only.sh "\$PILEUP" phase_only.R \$SKIP_GT
 
         # Each library's pileup goes where the script reads it,
         # {outdir}/pileup/{sample}/, and gets a placeholder BAM and barcode file

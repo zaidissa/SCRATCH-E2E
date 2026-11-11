@@ -316,6 +316,66 @@ including the ones the floor dropped:
 
 Without it the only trace of a dropped column is a line in `.command.log`.
 
+## Germline genotypes from WGS (optional)
+
+By default the individual's heterozygous SNPs are **inferred from the scRNA**:
+`numbat:::genotype` pools the individual's reads at 1000G common SNPs and calls a
+site het when 0.1 ≤ AR ≤ 0.9 (hom-alt when AR = 1 and DP ≥ 10). That loses two
+kinds of site: anything not expressed or not covered, and — the one that
+matters — **germline hets inside tumour LOH**, where the tumour reads carry one
+allele and the site looks homozygous. Those are the sites with Numbat's
+strongest LOH evidence.
+
+When a normal-tissue WGS VCF exists (here PBMC, GATK HaplotypeCaller), give it:
+
+```
+--numbat_germline_vcfs germline.csv
+```
+
+```
+patient_id,vcf,sample
+GBM1-DFCI3,s3://.../GBM1-DFCI3_PBMC.hc.vcf.gz,GBM1-DFCI3_PBMC
+```
+
+`patient_id` values are `--numbat_group_col` values; `sample` is needed only
+when a VCF holds several people. Patients with no row keep the scRNA-inferred
+genotype.
+
+What changes for a listed patient:
+
+| Step | Default | With a germline VCF |
+|---|---|---|
+| `NUMBAT_GERMLINE` | — | VCF → PASS (or unfiltered VCF, said so), biallelic SNPs, chr1–22, GT 0/1 or 1/1, DP ≥ 10, GQ ≥ 20 |
+| `NUMBAT_CELLSNP` target | 1000G common SNPs | the patient's germline 0/1 + 1/1 sites |
+| Eagle2 target | `numbat:::genotype` output | the germline sites, written in the same shape |
+| `numbat:::genotype` | runs | cut (`numbat_phase_only.sh --skip-genotype`) |
+| Everything after | | unchanged |
+
+Three checks stop a bad VCF from phasing anything:
+
+- **Build** — most of a person's het SNPs sit on 1000G common-SNP positions with
+  the same REF. Below 30% the run stops and says to check hg38. A test VCF
+  shifted by 137 bp scored 0.1%.
+- **Which sample** — a multi-sample VCF with no `sample` named stops and lists
+  its samples.
+- **Same person** — before phasing, at germline 1/1 sites with pooled scRNA
+  DP ≥ 10, the share reading ≥ 90% ALT. LOH cannot make a true 1/1 site show
+  REF reads; another person's 1/1 sites often are 0/0 or 0/1 in this one.
+  Below `--numbat_germline_min_concordance` (0.8) that patient is dropped from
+  Numbat (exit 3, not retried) and the cohort goes on. HGSOC test: the true
+  pair scored 1.000 (its sites came from the same scRNA, so that is an upper
+  bound), the swapped pair 0.647. The threshold is a starting point — read the
+  published `numbat_<patient>_germline_identity.tsv` on the first real VCF.
+
+Published per patient: `numbat_<patient>_germline_report.tsv` (what each
+filter kept, and the build overlap) and `numbat_<patient>_germline_identity.tsv`.
+
+**Caveat.** Eagle2 phases against the 1000G panel, and a target site absent
+from the panel comes out unphased and is then dropped by Numbat's own
+`GT %in% c("0|1","1|0")` filter. So rare private hets in the WGS are still
+lost; the gain is in common hets — expressed or not, LOH or not. On HGSOC
+HRS371755, 92–93% of target sites came out phased (chr1, chr22).
+
 ## Parameters
 
 | Parameter | Default | Notes |
@@ -337,6 +397,9 @@ Without it the only trace of a dropped column is a line in `.command.log`.
 | `--numbat_max_iter` | `2` | phylogeny refinement iterations |
 | `--numbat_min_llr` | `5` | log-likelihood-ratio floor for keeping a CNV. Numbat's own default; raising it is the maintainer's first lever against false positives in normal cells |
 | `--numbat_max_entropy` | `0.5` | single-cell entropy ceiling. Numbat's own default; lowering it is the second lever. Neither has been calibrated on this cohort, so both are left where Numbat puts them |
+| `--numbat_germline_vcfs` | — | CSV `patient_id,vcf[,sample]`; see *Germline genotypes from WGS* |
+| `--numbat_germline_min_dp` / `--numbat_germline_min_gq` | `10` / `20` | WGS genotype filters |
+| `--numbat_germline_min_concordance` | `0.8` | identity check before phasing; `0` turns it off |
 | `--skip_numbat_figures` | `false` | turn off `NUMBAT_REPORT` |
 | `--numbat_figures_ncut` | `4` | clone counts to re-cut the phylogeny at; `0` skips that panel |
 | `--numbat_figures_min_clone_cells` | `50` | smaller clones are left out of the pseudobulk figure |
