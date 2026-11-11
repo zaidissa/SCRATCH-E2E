@@ -39,6 +39,7 @@
     "alignment_mode": "$.params.dataset.paramJson.reference.alignment_mode",
     "input_bam_path": "$.params.dataset.paramJson.entry_point.input_bam_path",
     "input_vdj_contigs": "$.params.dataset.paramJson.entry_point.input_vdj_contigs",
+    "exp_table_override": "$.params.dataset.paramJson.entry_point.input_exp_table",
     "numbat_fetch_refs": "$.params.dataset.paramJson.cnv_parameters.numbat_fetch_refs",
     "numbat_germline_vcfs": "$.params.dataset.paramJson.cnv_parameters.numbat_germline_vcfs",
     "tumor_type": "$.params.dataset.paramJson.reference.tumor_type",

@@ -149,6 +149,67 @@ def resolve_numbat_bam(ds: PreprocessDataset, start: str) -> None:
     ds.logger.info(f"Numbat: derived --input_bam_path from the input dataset: {bam_glob}")
 
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def resolve_exp_table_override(value) -> str:
+    """Turn the form's "Sample metadata table" into an --input_exp_table value.
+
+    Pure, so it can be tested off-platform. Returns "" for blank (keep the
+    default). Accepts two shapes and refuses everything else, because a path
+    Nextflow cannot open fails only at DAG build -- after the launch looks
+    accepted:
+
+      s3://bucket/key.csv           passed through unchanged
+      assets/metadata/<name>.csv    a file shipped in this repository,
+                                    returned as ${projectDir}/assets/...
+                                    (Nextflow interpolates projectDir in the
+                                    params file, as it does launchDir for the
+                                    align samplesheet).
+
+    Why the field exists: from `qc` onward process-input.json points
+    input_exp_table at the input dataset's pipeline_info/samplesheet.valid.csv,
+    and for GBM1-DFCI3 that file has no patient_id. Nothing on the form could
+    replace it, so per-patient Numbat silently fell back to per library.
+    """
+    v = str(value if value is not None else "").strip()
+    if not v:
+        return ""
+    if v.startswith("s3://"):
+        if not v.lower().endswith(".csv"):
+            raise ValueError(f"Sample metadata table must be a .csv file; got {v!r}")
+        return v
+    rel = v[2:] if v.startswith("./") else v
+    if rel.startswith("assets/") and ".." not in rel.split("/"):
+        if not rel.lower().endswith(".csv"):
+            raise ValueError(f"Sample metadata table must be a .csv file; got {v!r}")
+        return "${projectDir}/" + rel
+    raise ValueError(
+        f"Sample metadata table {v!r} is neither an s3:// path nor a path inside "
+        "this repository starting with assets/ (e.g. "
+        "assets/metadata/gbm1_dfci3_exp_table.csv)."
+    )
+
+
+def apply_exp_table_override(ds: PreprocessDataset) -> bool:
+    """Replace input_exp_table with the form's table, if one was given.
+
+    Runs for every start stage, align included: a table typed into the form is
+    an explicit choice and wins over both defaults. Returns whether it applied.
+    """
+    raw = ds.params.get("exp_table_override", "")
+    if "exp_table_override" in ds.params:
+        ds.remove_param("exp_table_override")   # not a pipeline parameter
+    resolved = resolve_exp_table_override(raw)
+    if not resolved:
+        return False
+    previous = ds.params.get("input_exp_table", "(unset)")
+    ds.add_param("input_exp_table", resolved, overwrite=True)
+    ds.logger.info(f"--input_exp_table from the form: {resolved}")
+    ds.logger.info(f"  (replaces {previous})")
+    return True
+
+
 def describe_exp_table(body: str, run_numbat: bool = False) -> list:
     """Lines describing a metadata CSV. Pure, so it can be tested off-platform.
 
@@ -214,7 +275,8 @@ def describe_exp_table(body: str, run_numbat: bool = False) -> list:
         out.append("  back with neoplastic calls anyway. Pooling an individual's")
         out.append("  libraries is what gives the phylogeny a real normal anchor.")
         out.append("")
-        out.append("  Fix it WITHOUT re-running alignment: point --input_exp_table at a")
+        out.append("  Fix it WITHOUT re-running alignment: fill the form's 'Sample metadata")
+        out.append("  table' field (Entry point object) -- it replaces --input_exp_table -- with a")
         out.append("  CSV of `sample,patient_id[,timepoint]` whose `sample` values are")
         out.append("  exactly the strings listed above. QC's merge joins them to")
         out.append("  orig.ident with an INNER join, so every library must appear.")
@@ -228,7 +290,8 @@ def describe_exp_table(body: str, run_numbat: bool = False) -> list:
     return out
 
 
-def log_exp_table_columns(ds: PreprocessDataset, start: str) -> None:
+def log_exp_table_columns(ds: PreprocessDataset, start: str,
+                          overridden: bool = False) -> None:
     """Print the columns of the metadata table QC's merge step will read.
 
     Starting at `align` the table is the samplesheet written above, and
@@ -251,10 +314,29 @@ def log_exp_table_columns(ds: PreprocessDataset, start: str) -> None:
     only -- it never changes a parameter and never fails a launch, because a
     cohort with no patient_id is still a legitimate run.
     """
-    if start == "align":
+    if start == "align" and not overridden:
         return
 
     path = str(ds.params.get("input_exp_table", "")).strip()
+    if path.startswith("${projectDir}/"):
+        local = os.path.join(REPO_ROOT, path[len("${projectDir}/"):])
+        if not os.path.isfile(os.path.join(REPO_ROOT, "main.nf")):
+            # preprocess.py is not running inside a checkout, so the repo
+            # cannot be looked at from here. Nextflow will still open it.
+            ds.logger.info(f"--input_exp_table: {path} (no repo checkout beside "
+                           "preprocess.py; not inspected)")
+            return
+        if not os.path.isfile(local):
+            # A repo path that is not in the repo fails at DAG build with a bare
+            # "No such file"; say which file and where it was looked for, now.
+            raise FileNotFoundError(
+                f"Sample metadata table {path} not found in this checkout "
+                f"(looked for {local}). Is it committed and pushed?"
+            )
+        with open(local, encoding="utf-8", errors="replace") as fh:
+            body = fh.read(65536)
+        _log_exp_table(ds, path, body)
+        return
     if not path.startswith("s3://"):
         ds.logger.info(f"--input_exp_table is not an S3 path ({path!r}); not inspected.")
         return
@@ -275,10 +357,12 @@ def log_exp_table_columns(ds: PreprocessDataset, start: str) -> None:
         ds.logger.info(f"--input_exp_table could not be read ({exc}); not inspected.")
         return
 
+    _log_exp_table(ds, path, body)
+
+
+def _log_exp_table(ds: PreprocessDataset, path: str, body: str) -> None:
     # run_numbat is a form checkbox, so it arrives as a bool or as a string.
-    numbat_on = str(ds.params.get("run_numbat", False)).strip().lower() in (
-        "true", "yes", "y", "on", "1"
-    )
+    numbat_on = _truthy(ds.params.get("run_numbat", False))
     ds.logger.info(f"--input_exp_table: {path}")
     for line in describe_exp_table(body, run_numbat=numbat_on):
         ds.logger.info(f"  {line}")
@@ -376,7 +460,10 @@ def setup_parameters(ds: PreprocessDataset):
     resolve_numbat_bam(ds, start)
 
     # ---- the metadata table ---------------------------------------------
-    log_exp_table_columns(ds, start)
+    # After the align block, so a table typed into the form also replaces the
+    # samplesheet align just wrote.
+    overridden = apply_exp_table_override(ds)
+    log_exp_table_columns(ds, start, overridden=overridden)
 
     # ---- blanks ---------------------------------------------------------
     dropped = [

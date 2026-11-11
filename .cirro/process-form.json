@@ -105,6 +105,12 @@
                         "title": "VDJ contigs glob (optional)",
                         "description": "s3:// glob of filtered_contig_annotations.csv. Required for the TCR stage when not starting from align.",
                         "default": ""
+                    },
+                    "input_exp_table": {
+                        "type": "string",
+                        "title": "Sample metadata table (optional)",
+                        "description": "CSV with a `sample` column plus patient_id (and optionally timepoint, condition, batch, sample_type). Its `sample` values must equal the cellranger output directory names. Either an s3:// path, or a path inside this pipeline's repository starting with assets/ (for GBM1-DFCI3: assets/metadata/gbm1_dfci3_exp_table.csv). Blank = the input dataset's pipeline_info/samplesheet.valid.csv, which for a run started after align usually has NO patient_id -- and without patient_id Numbat runs per library instead of per patient.",
+                        "default": ""
                     }
                 }
             },

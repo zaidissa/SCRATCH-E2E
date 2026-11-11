@@ -59,6 +59,19 @@ S2,pat02,post,Case,b2
 The column names here are what you point `--cc_sample_col`,
 `--cc_condition_col` and `--bc_target_variables` at.
 
+`sample` must equal the cellranger output directory names exactly; the join
+is an inner join on `orig.ident`. Numbat groups libraries by `patient_id`.
+Without that column it runs per library, and a library with no tumour still
+comes back with neoplastic calls.
+
+**On Cirro**, a run that starts after `align` defaults this table to the
+input dataset's `pipeline_info/samplesheet.valid.csv`, which usually has no
+`patient_id`. Override it with **Entry point object → Sample metadata table**:
+either an `s3://` path, or a path inside this repository starting with
+`assets/`, e.g. `assets/metadata/gbm1_dfci3_exp_table.csv`. A repository path
+is read from the revision being launched, so the file must be committed and
+pushed.
+
 ## Worked examples
 
 ```bash
