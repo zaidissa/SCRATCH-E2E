@@ -213,6 +213,7 @@ the QC image plus celda) and publishes per-cell contamination estimates to
 | `--tumor_type` | `ovarian` (or `glioblastoma`) — presets the four settings below that must agree |
 | `--annot_db` | per tumour type: `assets/cell_markers_database.csv` / `assets/gbm_cell_markers_database.csv` |
 | `--annot_state_exclude` | per tumour type: major classes with no state-level pass |
+| `--annot_state_min_cells` | `100`: classes with fewer cells skip the state pass and keep their major label |
 | `--skip_celltypist` / `--skip_sctype` / `--skip_azimuth` | `false` |
 
 Azimuth only runs when `--input_reference_object` is set to a real file;

@@ -99,6 +99,18 @@ workflow ANNOTATION {
                 // excluding Plasma_Cells also excluded B_Plasma_Cells — one class
                 // named in the list silently took every class containing it.
                 .filter { state_exclude ? !(it[0].trim() ==~ state_exclude) : true }
+                // Each line is "<class>:<cell count>". A class too small to
+                // re-cluster skips the state pass and keeps its major label (the
+                // aggregate notebook falls back to it for any class without a
+                // state CSV). A line with no count (the stub) is kept.
+                .filter {
+                    def name  = it[0].trim()
+                    def count = it.size() > 1 && it[1].trim().isInteger() ? it[1].trim().toInteger() : null
+                    def keep  = count == null || count >= (params.annot_state_min_cells as int)
+                    if (!keep)
+                        log.warn "scType states: skipping ${name} (${count} cells < --annot_state_min_cells ${params.annot_state_min_cells}); it keeps its major label."
+                    keep
+                }
                 .map    { it[0].trim() }
 
             SCYTPE_STATE_ANNOTATION(ch_notebook_sctype_st, ch_major_object, ch_database, ch_major_list, ch_page_config)
