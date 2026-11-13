@@ -26,7 +26,7 @@ params:
   seurat_object: "data/project_Azimuth_annotation_object.RDS"
   # reference_table: "data/Ovarian_reference_table.csv"
   organism: "human"
-  input_analysis_mode: 'samples'
+  input_analysis_mode: 'subclusters'
   bayes_max_p_normal: 0
   # Same parameters STRATIFY and CNV_CONCORDANCE read, so all three build on one
   # baseline. Supplied from --celltype_col / --stratify_reference_labels.
@@ -308,7 +308,11 @@ seurat_counts <- GetAssayData(
 infercnv_genes <- annotables::grch38 %>%
   filter(biotype == "protein_coding") %>%
   filter(chr %in% 1:22) %>%
-  arrange(chr, start) %>%
+  # NUMERIC chromosome order. `chr` is character here, and arrange() on it gave
+  # 1, 10, 11, ..., 19, 2, 20, ... -- inferCNV keeps the gene-order file's order,
+  # so every heatmap ran chr1, chr10 ... chr19, chr2. Smoothing is per
+  # chromosome, so the calls were unaffected; the figures were not.
+  arrange(as.integer(chr), start) %>%
   distinct(symbol, chr, start, end) %>%
   mutate(
     chr = paste0('chr', chr)
@@ -399,6 +403,38 @@ n_affected_chromosomes <- infercnv_summarise_cnv$n_affected_chromosomes
 seurat_infercnv_object[['genomwide_cnv_proportion']] <- log1p(genomwide_cnv_proportion)
 seurat_infercnv_object[['n_affected_chromosomes']] <- n_affected_chromosomes
 
+```
+
+### inferCNV heatmaps
+
+inferCNV's own figures, as it wrote them. Rows are cells (references on top,
+observations below, grouped by cell type and, within a type, by inferCNV
+subcluster); columns are genes in genome order. Red is relatively higher
+expression than the reference over that stretch of genome (a likely gain), blue
+lower (a likely loss). A real clonal CNV shows up as a block that runs the length
+of a chromosome arm and is shared by many cells; thin, scattered stripes are noise.
+
+```{r infercnv-heatmaps, results = 'asis'}
+# The final heatmap (infercnv.png, after denoising) and the HMM state calls
+# (17_HMM_pred*.png) were written to data/infercnv but never shown in the
+# report. Copied into figures/ so they are also published with the stage.
+.hm <- c(
+  "Final inferCNV heatmap (denoised)" = "infercnv.png",
+  "HMM-predicted CNV states"          = list.files("data/infercnv",
+                                          pattern = "^infercnv\\.17_HMM_pred.*\\.png$")[1],
+  "Preliminary heatmap (before denoising)" = "infercnv.preliminary.png")
+dir.create("figures", showWarnings = FALSE)
+for (nm in names(.hm)) {
+  f <- .hm[[nm]]
+  src <- if (!is.na(f)) file.path("data/infercnv", f) else NA_character_
+  if (is.na(src) || !file.exists(src)) {
+    cat(sprintf("\n\n*%s: not produced by this run.*\n\n", nm))
+    next
+  }
+  dst <- file.path("figures", paste0("infercnv_", basename(src)))
+  file.copy(src, dst, overwrite = TRUE)
+  cat(sprintf("\n\n#### %s\n\n![](%s){width=100%%}\n\n", nm, dst))
+}
 ```
 
 ### inferCNV UMAP
@@ -510,7 +546,9 @@ if (!is.na(.col_ct) && "genomwide_cnv_proportion" %in% names(.md)) {
     scale_size_continuous(name = "cells", range = c(2.5, 8), labels = scales::comma) +
     scale_x_continuous(expand = expansion(mult = c(0, .12))) +
     labs(title = "Genome-wide CNV burden by cell type",
-         subtitle = "One value per group: inferCNV ran per group, so every cell in a population shares its score",
+         subtitle = if (uniqueN(d$b) <= 2 * uniqueN(d$celltype))
+                      "One value per group: inferCNV ran per group, so every cell in a population shares its score"
+                    else "Median per population; cells within a population now differ by inferCNV subcluster",
          x = "genome-wide CNV proportion (log1p)", y = NULL) +
     theme_scratch() +
     theme(panel.grid.major.y = element_line(colour = "grey93", linewidth = .3))
