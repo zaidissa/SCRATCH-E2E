@@ -100,21 +100,57 @@ for (jf in jsons) {
 }
 
 # 2. An explicit status column is a verdict the stage already reached.
-status_tab <- NULL
+# EVERY table, not the first one found: QC publishes one metrics table per
+# sample, and stopping at the first meant only that sample was ever read. QC's
+# column is `status_flag`, which was not in the list, so a library dropped as
+# SAMPLE:FIXABLE still produced "completed with nothing flagged".
+st_v <- character(0); st_src <- character(0)
 for (nm in names(tabs)) {
   d <- tabs[[nm]]
-  sc <- intersect(c(params$status_col, "status", "verdict", "qc_status", "pass"), names(d))
-  if (length(sc)) { status_tab <- list(name = nm, d = d, col = sc[1]); break }
+  sc <- intersect(c(params$status_col, "status", "status_flag", "verdict", "qc_status", "pass"), names(d))
+  if (length(sc)) {
+    st_v   <- c(st_v, tolower(as.character(d[[sc[1]]])))
+    st_src <- c(st_src, sprintf("`%s`", nm))
+  }
 }
-if (!is.null(status_tab)) {
-  v <- tolower(as.character(status_tab$d[[status_tab$col]]))
-  nbad <- sum(grepl("fail|critical|error", v)); nwarn <- sum(grepl("warn|caution", v))
+if (length(st_v)) {
+  src  <- sprintf("From the status column of %s.", paste(unique(st_src), collapse = ", "))
+  nbad <- sum(grepl("fail|critical|error", st_v))
+  nwarn <- sum(grepl("warn|caution|fixable", st_v))
   if (nbad)  scratch_register("stage_fail", "critical",
-      sprintf("%d of %d entries failed", nbad, length(v)),
-      sprintf("From `%s` in `%s`.", status_tab$col, status_tab$name), stage = params$stage, value = nbad)
+      sprintf("%d of %d entries failed", nbad, length(st_v)), src, stage = params$stage, value = nbad)
   if (nwarn) scratch_register("stage_warn", "warning",
-      sprintf("%d of %d entries flagged", nwarn, length(v)),
-      sprintf("From `%s` in `%s`.", status_tab$col, status_tab$name), stage = params$stage, value = nwarn)
+      sprintf("%d of %d entries flagged (warning / fixable)", nwarn, length(st_v)), src,
+      stage = params$stage, value = nwarn)
+}
+
+# A CNV caller that returned nothing is a result someone must see, not a pass.
+# Numbat writes a header-only <group>_numbat_calls.tsv (which read_any() drops)
+# when no CNV survives its filters; inferCNV's absence shows as no score column.
+nb_calls <- find_all("_numbat_calls\\.tsv$")
+for (f in nb_calls) {
+  n <- tryCatch(length(readLines(f, warn = FALSE)) - 1L, error = function(e) NA_integer_)
+  if (!is.na(n) && n <= 0) {
+    grp <- sub("_numbat_calls\\.tsv$", "", basename(f))
+    why <- file.path(dirname(f), paste0(grp, "_numbat_nocalls.txt"))
+    scratch_register(paste0("numbat_empty_", grp), "warning",
+      sprintf("Numbat made no calls for %s", grp),
+      if (file.exists(why)) paste(readLines(why, warn = FALSE), collapse = " ")
+      else "Its calls table is empty.", stage = params$stage)
+  }
+}
+cmp <- tabs[grepl("cnv_caller_comparison", names(tabs))]
+if (length(cmp)) {
+  d <- cmp[[1]]
+  if (!"infercnv_score" %in% names(d) && !"numbat_call" %in% names(d))
+    scratch_register("cnv_no_callers", "critical",
+      "No CNV caller produced per-cell calls",
+      "The comparison table carries neither inferCNV scores nor Numbat calls, so STRATIFY has only the annotation label to split on.",
+      stage = params$stage)
+  else if ("numbat_call" %in% names(d) && !any(!is.na(d$numbat_call)) || !"numbat_call" %in% names(d))
+    scratch_register("cnv_no_numbat", "warning", "Numbat contributed no per-cell calls",
+      "Every cell's Numbat call is missing; the split falls back to inferCNV and the annotation label.",
+      stage = params$stage)
 }
 
 # 3. Outliers: any numeric column with a value >= 3 SD from its mean. This is

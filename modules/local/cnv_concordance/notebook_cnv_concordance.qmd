@@ -267,9 +267,16 @@ if (!is.null(segs) && nrow(segs)) {
                 text = sprintf("%s %s\n%s\n%.1f Mb, LLR %.0f",
                                sample, seg, state, (seg_end - seg_start) / 1e6, LLR))) +
     geom_col(width = .72) +
-    scale_fill_scratch(name = NULL) +
+    # Fixed colours with copy-neutral in GREY. The categorical palette gave
+    # "neu" the first colour (orange), so a genome with no CNV at all read as a
+    # wall of events. Numbat's own figures use the same convention.
+    scale_fill_manual(name = NULL, drop = TRUE,
+                      values = c(neu = "grey80", amp = "#b2182b", bamp = "#d6604d",
+                                 del = "#2166ac", bdel = "#4393c3", loh = "#1b7837"),
+                      labels = c(neu = "neutral (no change)", amp = "gain", bamp = "balanced gain",
+                                 del = "loss", bdel = "balanced loss", loh = "copy-neutral LOH")) +
     labs(title = "Numbat CNV segments by chromosome",
-         subtitle = "Bar height is segment size; colour is the inferred state",
+         subtitle = "Bar height is segment length; grey is copy-neutral, colour is a called change",
          x = NULL, y = "Mb") +
     theme_scratch()
 }

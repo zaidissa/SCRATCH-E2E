@@ -128,6 +128,16 @@ if (!is.null(nb)) {
   hc             <- rd_rds(p("hc.rds"))
 }
 
+# No final clones on a no-call sample, but Numbat still wrote the pseudobulk
+# profiles of its iteration-<i> expression groups. They are the same kind of
+# figure -- expression log-ratio over phased allele frequency per group -- and
+# on a sample with no call they are where a sub-threshold event would show.
+bulk_from_iter <- FALSE
+if (is.null(bulk_clones) && file.exists(p("bulk_clones_", i, ".tsv.gz"))) {
+  bulk_clones <- relevel_chrom(rd_tsv(p("bulk_clones_", i, ".tsv.gz")))
+  bulk_from_iter <- !is.null(bulk_clones)
+}
+
 n_cells <- if (!is.null(joint_post) && "cell" %in% names(joint_post)) uniqueN(joint_post$cell) else NA_integer_
 n_segs  <- if (!is.null(segs_consensus)) nrow(segs_consensus) else 0L
 message(sprintf("[%s] %s cell(s), %d consensus segment(s)",
@@ -147,10 +157,10 @@ have <- function(x) !is.null(x) && (!is.data.frame(x) || nrow(x) > 0)
 # copy is dropped.
 dense <- !is.na(n_cells) && n_cells > max_vec
 
-save_fig <- function(name, plt, width, height, vector = TRUE) {
+save_fig <- function(name, plt, width, height, vector = TRUE, dpi = 200) {
   png_path <- file.path(figdir, sprintf("%s_%s.png", sample_id, name))
   dev_png  <- if (requireNamespace("ragg", quietly = TRUE)) ragg::agg_png else "png"
-  ggsave(png_path, plt, width = width, height = height, dpi = 200,
+  ggsave(png_path, plt, width = width, height = height, dpi = dpi,
          device = dev_png, limitsize = FALSE)
   if (vector) {
     # A PDF that fails to write must not discard the PNG that already did.
@@ -162,11 +172,19 @@ save_fig <- function(name, plt, width, height, vector = TRUE) {
   invisible(png_path)
 }
 
-fig <- function(name, need, width, height, expr, vector = TRUE) {
+fig <- function(name, need, width, height, expr, vector = TRUE, dpi = 200) {
   missing <- names(need)[!vapply(need, have, logical(1))]
   if (length(missing)) {
+    why <- paste("missing:", paste(missing, collapse = ", "))
+    # The tree-based figures are skipped on a no-call sample BY DESIGN: Numbat
+    # builds the clone tree only from CNVs that pass its LLR / entropy filters,
+    # so with none there is no tree, no clones and no mutation history to draw.
+    # Say that, rather than leave "missing: gtree" for the reader to decode.
+    if (is.null(clone_post) && any(missing %in% c("gtree", "bulk_clones", "mut_graph", "numbat_object")))
+      why <- paste0(why, " -- Numbat kept no CNV after its filters, so it built no clone tree;",
+                    " this figure needs one (see the expression_rolling figure instead)")
     manifest[[name]] <<- data.table(sample = sample_id, figure = name, status = "skipped",
-                                    reason = paste("missing:", paste(missing, collapse = ", ")))
+                                    reason = why)
     message(sprintf("[%s] %-24s SKIPPED (missing %s)", sample_id, name, paste(missing, collapse = ", ")))
     return(invisible(NULL))
   }
@@ -178,7 +196,7 @@ fig <- function(name, need, width, height, expr, vector = TRUE) {
                     trimws(gsub("\\s+", " ", as.character(res)))))
     return(invisible(NULL))
   }
-  ok <- try(save_fig(name, res, width, height, vector = vector), silent = TRUE)
+  ok <- try(save_fig(name, res, width, height, vector = vector, dpi = dpi), silent = TRUE)
   if (inherits(ok, "try-error")) {
     manifest[[name]] <<- data.table(sample = sample_id, figure = name, status = "failed",
                                     reason = trimws(gsub("\\s+", " ", as.character(ok))))
@@ -238,15 +256,35 @@ if (n_cut_max >= 2L) {
 
 # 3. Consensus segments along the genome: the EVENTS Numbat resolved, as
 #    opposed to the cells carrying them.
+# Numbat draws copy-neutral as grey and adds no legend or title, so a genome
+# with no CNV (GBM1-DFCI1) looked like an empty figure. Wider, so chr19-22 are
+# not cut off at the right edge, and captioned with what grey means.
+.n_changed <- if (have(segs_consensus) && "cnv_state" %in% names(segs_consensus))
+                sum(segs_consensus[["cnv_state"]] != "neu", na.rm = TRUE) else NA
 fig("consensus_segments", list(segs_consensus = segs_consensus),
-    width = 11, height = 3,
-    plot_consensus(segs = segs_consensus))
+    width = 15, height = 2.6,
+    plot_consensus(segs = segs_consensus) +
+      labs(title = sprintf("%s: Numbat consensus segments", sample_id),
+           caption = paste0(
+             "Grey = copy-neutral. Red = gain, blue = loss, green = copy-neutral LOH. ",
+             if (!is.na(.n_changed))
+               sprintf("%d segment(s) called as changed; the rest of the genome is neutral.",
+                       .n_changed) else "")) +
+      theme(plot.title = element_text(size = 11, face = "bold"),
+            plot.caption = element_text(size = 9, hjust = 0)))
 
 # 4. The same segments as a genome-wide heatmap, one row per group, which is
 #    how a reader compares two clones' profiles side by side.
+# cnv_heatmap() draws one row per `group`, and segs_consensus has no such
+# column -- it is Numbat's consensus across ALL cells, so it is one group. The
+# figure failed on every sample with "object 'group' not found".
 fig("segment_heatmap", list(segs_consensus = segs_consensus),
-    width = 11, height = max(2.5, 1 + 0.4 * uniqueN(segs_consensus[["group"]])),
-    cnv_heatmap(segs = segs_consensus, genome = genome))
+    width = 11, height = 2.5,
+    {
+      .sh <- data.table::copy(data.table::as.data.table(segs_consensus))
+      if (!"group" %in% names(.sh)) .sh[, group := sample_id]
+      cnv_heatmap(segs = .sh, genome = genome)
+    })
 
 # 5. Pseudobulk profiles per clone: expression log-ratio on top, phased allele
 #    frequency underneath. This is where the ALLELIC evidence is visible, and
@@ -263,7 +301,12 @@ fig("bulk_clone_profiles", list(bulk_clones = bulk_clones),
       b <- bulk_clones
       if ("n_cells" %in% names(b)) b <- b %>% filter(n_cells > min_cells)
       if (!nrow(b)) stop(sprintf("no clone has more than %d cells", min_cells))
-      plot_bulks(b, min_LLR = min_llr, legend = TRUE)
+      pl <- plot_bulks(b, min_LLR = min_llr, legend = TRUE)
+      if (bulk_from_iter)
+        pl <- pl + patchwork::plot_annotation(
+          title = sprintf("%s: pseudobulk profiles of Numbat's iteration-%d expression groups", sample_id, i),
+          subtitle = "No final clones (no CNV passed the filters); these are the groups Numbat tested, not clones.")
+      pl
     })
 
 # 6. The single-cell phylogeny on its own, with each CNV placed on the branch
@@ -281,11 +324,107 @@ fig("mutation_history", list(mut_graph = mut_graph),
 # 8. Window-smoothed expression, clustered. This is the EXPRESSION channel on
 #    its own, so a reader can see how much of the call it carried -- and,
 #    where it disagrees with the allelic channel, which one Numbat followed.
+#
+#    Drawn from the files when the Numbat object cannot be built. That is
+#    exactly the no-call case (GBM1-DFCI1: Numbat stopped before the clone
+#    tree), and there this is the MOST useful figure -- it shows whether any
+#    group of cells carries an expression-level arm change (+7/-10 in GBM) that
+#    the later filters threw away. gexp_roll_wide and hc are written on the
+#    init_k > 1 path regardless of how the fit ends.
+# The file is cells x genes and large (2.4 GB gzipped for 35k cells). Every
+# cell is used: the file is streamed once in chunks, cells are ordered by
+# Numbat's own expression tree (hc), and neighbouring cells are averaged into
+# `n_rows` rows. n_rows is the figure's pixel height: below that every cell is
+# its own row (true single-cell resolution); above it, rows finer than a pixel
+# would not be visible anyway, so neighbouring cells share one. Neighbours in
+# hc are transcriptionally similar, so a rare population of ~N/n_rows cells or
+# more keeps rows of its own -- numbat's plot_exp_roll() instead draws 300
+# random cells per cluster (<3% of DFCI1) and can miss a small clone. Cost is
+# one streaming pass: measured 1.5 min / 9.6 GB peak at 35k cells and 5,000
+# rows, and it does not grow with the row count. Genes are
+# averaged in blocks of `gene_block` within a chromosome; the values are
+# already smoothed over 101-gene windows, so that loses no resolution.
+exp_roll_binned <- function(path, hc, k, gtf, n_rows = 1500L, gene_block = 5L, chunk = 2000L) {
+  cells <- hc$labels[hc$order]
+  cl    <- stats::cutree(hc, k = k)[cells]
+  N     <- length(cells)
+  # rows per cluster in proportion to its size, at least 3, never more than its cells
+  per   <- vapply(split(cells, factor(cl, levels = unique(cl))), function(x)
+             as.integer(min(length(x), max(3L, round(n_rows * length(x) / N)))), integer(1))
+  bin_of <- integer(N); names(bin_of) <- cells; offset <- 0L; bin_cl <- integer(0)
+  for (c in names(per)) {
+    x <- cells[cl == as.integer(c)]
+    b <- offset + ceiling(seq_along(x) * per[[c]] / length(x))
+    bin_of[x] <- b; bin_cl <- c(bin_cl, rep(as.integer(c), per[[c]])); offset <- offset + per[[c]]
+  }
+  con <- gzfile(path, "r"); on.exit(close(con), add = TRUE)
+  header <- readLines(con, n = 1L)
+  genes  <- strsplit(header, "\t", fixed = TRUE)[[1]][-1]
+  pos <- as.data.table(gtf)[, .(gene, CHROM = as.integer(as.character(CHROM)), gene_start)]
+  pos <- pos[gene %in% genes & !duplicated(gene)][order(CHROM, gene_start)]
+  pos[, block := paste(CHROM, (seq_len(.N) - 1L) %/% gene_block, sep = "_"), by = CHROM]
+  keep_idx <- match(pos$gene, genes)
+  S <- matrix(0, offset, length(keep_idx)); n <- numeric(offset)
+  repeat {
+    ln <- readLines(con, n = chunk)
+    if (!length(ln)) break
+    m  <- fread(text = c(header, ln), header = TRUE, showProgress = FALSE)
+    b  <- bin_of[m$cell]; ok <- !is.na(b)
+    if (any(ok)) {
+      X <- as.matrix(m[ok, -1, with = FALSE])[, keep_idx, drop = FALSE]
+      X[!is.finite(X)] <- 0
+      r <- rowsum(X, b[ok]); idx <- as.integer(rownames(r))
+      S[idx, ] <- S[idx, ] + r; n[idx] <- n[idx] + tabulate(b[ok], offset)[idx]
+    }
+  }
+  M  <- S / pmax(n, 1)
+  MB <- t(rowsum(t(M), factor(pos$block, levels = unique(pos$block))))
+  bl <- unique(pos[, .(block, CHROM)])
+  long <- data.table(row = rep(seq_len(offset), ncol(MB)),
+                     block = rep(colnames(MB), each = offset), lfc = as.vector(MB) / 
+                       rep(as.vector(table(factor(pos$block, levels = colnames(MB)))), each = offset))
+  long <- merge(long, bl, by = "block")
+  long[, block := factor(block, levels = colnames(MB))]
+  long[, cluster := factor(bin_cl[row])]
+  list(long = long, n_cells = N, n_rows = offset, cells_per_row = round(N / offset, 1))
+}
+plot_exp_roll_files <- function(path, hc, k, gtf, n_rows = 1500L) {
+  r <- exp_roll_binned(path, hc, k, gtf, n_rows = n_rows)
+  lim <- 0.8
+  ggplot(r$long, aes(x = block, y = row, fill = pmax(pmin(lfc, lim), -lim))) +
+    geom_raster() +
+    scale_y_reverse(expand = c(0, 0)) +
+    facet_grid(cluster ~ CHROM, scales = "free", space = "free", switch = "y") +
+    scale_fill_gradient2(low = "#2166ac", mid = "white", high = "#b2182b",
+                         limits = c(-lim, lim), name = "smoothed\nlog-ratio") +
+    labs(title = sprintf("%s: window-smoothed expression, all %s cells", sample_id,
+                         format(r$n_cells, big.mark = ",")),
+         subtitle = sprintf(paste("Cells ordered by Numbat's expression tree, %s;",
+                                  "clusters = tree cut at k = %d.",
+                                  "Red = higher than the reference, blue = lower."),
+                            if (r$cells_per_row <= 1) "one row per cell"
+                            else sprintf("%d rows of ~%s neighbouring cells each", r$n_rows, r$cells_per_row),
+                            k),
+         x = NULL, y = "expression cluster") +
+    theme_minimal(base_size = 9) +
+    theme(axis.text = element_blank(), panel.spacing = grid::unit(0.5, "pt"),
+          panel.grid = element_blank(), strip.text.y.left = element_text(angle = 0),
+          # theme_minimal() draws no background; the PNG came out transparent
+          # and showed black in viewers that do not assume white.
+          plot.background = element_rect(fill = "white", colour = NA))
+}
+# Always drawn from the files, with or without the Numbat object, so every
+# sample gets the all-cells figure rather than numbat's 300-per-cluster one.
+.roll_h <- 14; .roll_dpi <- 300                     # 4,200 pixel rows
+plot_exp_roll_files_n <- function(path, hc, k, gtf) {
+  N <- length(hc$order)
+  plot_exp_roll_files(path, hc, k, gtf, n_rows = min(N, as.integer(.roll_h * .roll_dpi)))
+}
 fig("expression_rolling",
-    list(gexp_roll = if (!is.null(nb)) TRUE else NULL, hc = hc),
-    width = 11, height = 6,
+    list(gexp_roll = if (file.exists(p("gexp_roll_wide.tsv.gz"))) TRUE else NULL, hc = hc),
+    width = 14, height = .roll_h, dpi = .roll_dpi,
     vector = FALSE,
-    nb$plot_exp_roll(k = exp_roll_k, n_sample = min(300L, if (is.na(n_cells)) 300L else n_cells)))
+    plot_exp_roll_files_n(p("gexp_roll_wide.tsv.gz"), hc, exp_roll_k, gtf_use))
 
 # ---- manifest -------------------------------------------------------------
 man <- rbindlist(manifest, fill = TRUE)
