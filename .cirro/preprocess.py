@@ -119,6 +119,111 @@ def _s3_lists_bam(bam_glob: str, ds: PreprocessDataset, max_pages: int = 5) -> b
         return False
 
 
+def _input_dataset_ids(ds: PreprocessDataset) -> list:
+    """IDs of every input dataset, in the order Cirro lists them."""
+    inputs = (getattr(ds, "metadata", None) or {}).get("inputs") or []
+    return [d["id"] for d in inputs if isinstance(d, dict) and d.get("id")]
+
+
+def _per_input(path, ids: list) -> list:
+    """One copy of `path` per input dataset.
+
+    process-input.json can only address ONE input (`$.params.inputs[0]`), so the
+    paths it builds name the first dataset. Every other input has the same
+    layout under its own ID, so its path is the first one with the ID swapped.
+    """
+    if not isinstance(path, str) or not ids or ids[0] not in path:
+        return []
+    return [path.replace(ids[0], i) for i in ids]
+
+
+def _read_s3_csv(path: str) -> pd.DataFrame:
+    import io
+    import boto3
+    bucket, _, key = path[len("s3://"):].partition("/")
+    body = boto3.client("s3").get_object(Bucket=bucket, Key=key)["Body"].read()
+    return pd.read_csv(io.BytesIO(body))
+
+
+def merge_exp_tables(tables: dict) -> pd.DataFrame:
+    """Stack the per-dataset metadata tables. Pure, so it can be tested off-platform.
+
+    `tables` maps dataset id -> DataFrame. A sample name that appears in two
+    datasets is an error: QC joins metadata to cells by sample name, so the
+    second copy would silently take the first one's patient_id.
+    """
+    frames = []
+    for ds_id, df in tables.items():
+        if "sample" not in df.columns:
+            raise ValueError(f"The metadata table of input dataset {ds_id} has no `sample` column.")
+        frames.append(df)
+    merged = pd.concat(frames, ignore_index=True, sort=False)
+    # One row per lane in an align samplesheet; the merge notebook keeps one per
+    # sample, so only a sample claimed by two DIFFERENT datasets is a conflict.
+    owners = {}
+    for ds_id, df in tables.items():
+        for smp in df["sample"].astype(str).unique():
+            owners.setdefault(smp, []).append(ds_id)
+    clash = {k: v for k, v in owners.items() if len(v) > 1}
+    if clash:
+        raise ValueError(
+            "These sample names appear in more than one input dataset, so their "
+            "metadata cannot be told apart: "
+            + "; ".join(f"{k} ({', '.join(v)})" for k, v in sorted(clash.items())))
+    return merged
+
+
+def expand_to_all_inputs(ds: PreprocessDataset, start: str) -> None:
+    """Use EVERY input dataset, not only the first.
+
+    process-input.json builds input_gex_matrices_path and input_exp_table from
+    `$.params.inputs[0]`. A run launched on two aligned datasets (GBM1-DFCI1 and
+    DFCI-7, Cirro 7c3bed7a) listed all 13 libraries in its file table and then
+    ran QC on DFCI1's 7 alone: DFCI-7 was dropped without a word. Starting at
+    align is unaffected -- the samplesheet is built from ds.files, which already
+    spans every input.
+    """
+    if start == "align":
+        return
+    ids = _input_dataset_ids(ds)
+    if len(ids) <= 1:
+        return
+    ds.logger.info(f"{len(ids)} input datasets: {', '.join(ids)}")
+
+    gex = _per_input(ds.params.get("input_gex_matrices_path"), ids)
+    if gex:
+        # A LIST: Channel.fromPath() takes a list of patterns, and checkIfExists
+        # still fails the run if any one of them matches nothing.
+        ds.add_param("input_gex_matrices_path", gex, overwrite=True)
+        for g in gex:
+            ds.logger.info(f"  count matrices: {g}")
+    else:
+        ds.logger.info("  input_gex_matrices_path does not name the first input; left as is.")
+
+    tbls = _per_input(ds.params.get("input_exp_table"), ids)
+    if tbls:
+        tables = {}
+        for ds_id, path in zip(ids, tbls):
+            try:
+                tables[ds_id] = _read_s3_csv(path)
+            except Exception as exc:
+                raise ValueError(
+                    f"Input dataset {ds_id} has no readable metadata table at {path} ({exc}). "
+                    "Use the form's 'Sample metadata table' to supply one table for all inputs."
+                ) from exc
+        merged = merge_exp_tables(tables)
+        merged.to_csv("exp_table_all_inputs.csv", index=False)
+        ds.add_param("input_exp_table", "${launchDir}/exp_table_all_inputs.csv", overwrite=True)
+        n_smp = merged["sample"].nunique()
+        ds.logger.info(f"  metadata: {len(tables)} tables merged, {n_smp} samples "
+                       f"-> ${{launchDir}}/exp_table_all_inputs.csv")
+        if "patient_id" in merged.columns and merged["patient_id"].isna().any():
+            missing = sorted(merged.loc[merged["patient_id"].isna(), "sample"].astype(str).unique())
+            ds.logger.info("  WARNING: no patient_id for: " + ", ".join(missing)
+                           + ". Numbat groups by patient_id.")
+        _log_exp_table(ds, "${launchDir}/exp_table_all_inputs.csv", merged.to_csv(index=False))
+
+
 def resolve_numbat_bam(ds: PreprocessDataset, start: str) -> None:
     """Fill --input_bam_path from the input dataset when the form left it blank.
 
@@ -132,7 +237,22 @@ def resolve_numbat_bam(ds: PreprocessDataset, start: str) -> None:
     if str(ds.params.get("input_bam_path", "")).strip():
         return  # an explicit path always wins
 
-    bam_glob = _bam_glob_from_matrices(ds.params.get("input_gex_matrices_path", ""))
+    gex = ds.params.get("input_gex_matrices_path", "")
+    if isinstance(gex, list):
+        # One BAM pattern per input dataset; keep only datasets that have BAMs.
+        globs = [g for g in (_bam_glob_from_matrices(x) for x in gex) if g]
+        globs = [g for g in globs if _s3_lists_bam(g, ds)] if globs else []
+        if not globs:
+            ds.logger.info(f"Numbat: no {BAM_NAME} under any input dataset; Numbat will self-disable.")
+            return
+        if len(globs) < len(gex):
+            ds.logger.info(f"Numbat: only {len(globs)} of {len(gex)} input datasets carry BAMs; "
+                           "libraries in the others get no Numbat call.")
+        ds.add_param("input_bam_path", globs, overwrite=True)
+        for g in globs:
+            ds.logger.info(f"Numbat: derived --input_bam_path: {g}")
+        return
+    bam_glob = _bam_glob_from_matrices(gex)
     if not bam_glob:
         ds.logger.info(
             "Numbat: input_gex_matrices_path is not a cellranger layout, so no BAM "
@@ -551,6 +671,10 @@ def setup_parameters(ds: PreprocessDataset):
     ds.add_param("run_numbat", True, overwrite=True)
     ds.add_param("skip_infercnv", False, overwrite=True)
     ds.add_param("numbat_fetch_refs", False, overwrite=True)
+
+    # ---- every input dataset, not just the first ---------------------------
+    # Before the BAM step, which derives its paths from the matrices paths.
+    expand_to_all_inputs(ds, start)
 
     # ---- Numbat's BAM ----------------------------------------------------
     # Must run BEFORE the blank-dropping below: a derived path is non-blank and
