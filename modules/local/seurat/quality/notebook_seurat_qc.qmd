@@ -330,6 +330,15 @@ n_observed_fmt <- format(n_observed_cells, big.mark = ",", scientific = FALSE)
 
 #
 
+# FIXABLE (under-sequenced but saturation <= 70%, i.e. more reads would help)
+# goes through the same cell-count check as SUCCESS: its cells are judged on
+# their own metrics below. It keeps the FIXABLE label so qc.nf can warn about it.
+if(status_flag == 'SAMPLE:FIXABLE' && n_observed_cells < thr_n_observed_cells) {
+
+  status_flag <- "CELL:FAILURE"
+
+}
+
 if(status_flag == 'SAMPLE:SUCCESS') {
 
   if(n_observed_cells >= thr_n_observed_cells) {

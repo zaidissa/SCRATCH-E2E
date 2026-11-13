@@ -141,7 +141,8 @@ for (cc in setdiff(names(.m), c("sample_id", "status_flag")))
 ```
 
 ```{r cohort-findings, results = 'asis'}
-.failed <- if (.has("status_flag")) .m[!grepl("SUCCESS", status_flag)]$sample_id else character(0)
+.fixable <- if (.has("status_flag")) .m[grepl("FIXABLE", status_flag)]$sample_id else character(0)
+.failed <- if (.has("status_flag")) .m[!grepl("SUCCESS|FIXABLE", status_flag)]$sample_id else character(0)
 .tot <- if (.has("n_observed_cells")) sum(.m$n_observed_cells, na.rm = TRUE) else NA
 
 msg <- sprintf("**%d sample%s** processed%s.", .n_samp, ifelse(.n_samp == 1, "", "s"),
@@ -156,7 +157,15 @@ if (length(.failed)) {
 } else {
   msg <- paste(msg, "All samples passed the QC gate.")
 }
-scratch_finding(msg, type = if (length(.failed)) "caution" else "note",
+if (length(.fixable)) {
+  msg <- paste(msg, sprintf(paste(
+    "**Sample(s) %s are FIXABLE**: the library is under-sequenced (a sample-level",
+    "depth metric is below its cutoff), but its cells passed the per-cell filters",
+    "and are kept unless the run set `--qc_keep_fixable false`. Expect lower gene",
+    "counts per cell in these libraries than in the rest."),
+    paste(.fixable, collapse = ", ")))
+}
+scratch_finding(msg, type = if (length(.failed) || length(.fixable)) "caution" else "note",
                 title = "Cohort status")
 
 # --- which filter is doing the work -----------------------------------------

@@ -210,9 +210,28 @@ workflow QC {
             ch_page_config
         )
 
-        // Keep only samples whose QC status file is SUCCESS.
+        // Keep SUCCESS, and FIXABLE unless --qc_keep_fixable false.
+        //
+        // FIXABLE means the LIBRARY is under-sequenced (a sample-level metric such
+        // as mean reads per cell is below its qc_thr_*, with saturation <= 70%),
+        // not that its cells are bad: the cells have passed the same per-cell
+        // filters as everyone else. Dropping it threw away GBM1-DFCI1
+        // S4-70-S4 whole -- 27,849 cells at 1,566 genes / 3,363 UMIs per cell,
+        // 44% of that patient -- because it averaged 12,564 reads per cell
+        // against a 25,000 cutoff. Its cells are kept and the run says so.
+        def keep_fixable = asBool(params.qc_keep_fixable)
         ch_qc_approved = SEURAT_QUALITY.out.status
-            .filter { sample, object, status -> status.toString().endsWith('SUCCESS.txt') }
+            .filter { sample, object, status ->
+                def s = status.toString()
+                if (s.endsWith('FIXABLE.txt')) {
+                    if (keep_fixable)
+                        log.warn "QC: ${sample} is FIXABLE (under-sequenced library: a sample-level depth metric is below its qc_thr_* cutoff). Its cells passed the per-cell filters and are KEPT; see its QC report. --qc_keep_fixable false drops such libraries."
+                    else
+                        log.warn "QC: ${sample} is FIXABLE and is DROPPED (--qc_keep_fixable false)."
+                    return keep_fixable
+                }
+                s.endsWith('SUCCESS.txt')
+            }
             .map    { sample, object, status -> object }
             .collect()
 
