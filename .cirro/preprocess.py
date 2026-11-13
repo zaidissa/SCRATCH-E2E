@@ -666,11 +666,12 @@ def setup_parameters(ds: PreprocessDataset):
     # rather than left to nextflow.config so a launch made with "Copy
     # parameters" from an older run cannot carry an old off-switch through.
     # Numbat still self-disables, with a warning, when there is no BAM. The
-    # references are read from the Numbat image (/data); the upstream download
-    # host now answers with an HTML page instead of the phasing panel.
+    # references are read from the Numbat image (/data); the download option
+    # no longer exists in the pipeline.
     ds.add_param("run_numbat", True, overwrite=True)
     ds.add_param("skip_infercnv", False, overwrite=True)
-    ds.add_param("numbat_fetch_refs", False, overwrite=True)
+    if "numbat_fetch_refs" in ds.params:     # from a "Copy parameters" launch
+        ds.remove_param("numbat_fetch_refs")
 
     # ---- every input dataset, not just the first ---------------------------
     # Before the BAM step, which derives its paths from the matrices paths.

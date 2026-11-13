@@ -407,7 +407,7 @@ flowchart TD
     <article class="stage" style="--arm: var(--optin)">
       <div class="stage-head"><span class="stage-id">NUMBAT</span><span class="stage-role">allele-aware · opt-in</span></div>
       <p>The only caller that reads allele frequencies rather than expression alone, so it can separate a real copy-number event from a transcriptional programme. Needs a genome BAM.</p>
-      <ul class="procs"><li class="gated">NUMBAT_FETCH_REFS</li><li>NUMBAT_PREP</li><li>NUMBAT_CELLSNP</li><li>NUMBAT_PHASE</li><li>NUMBAT_RUN</li></ul>
+      <ul class="procs"><li>NUMBAT_PREP</li><li>NUMBAT_CELLSNP</li><li>NUMBAT_PHASE</li><li>NUMBAT_RUN</li></ul>
       <div class="meta"><span><b>image</b> scratch-cnv · scratch-numbat</span><span><b>gate</b> run_numbat (default false)</span></div>
     </article>
 
@@ -502,7 +502,7 @@ flowchart TD
     <article class="chain" style="--arm: var(--spine)">
       <div class="chain-head"><span class="stage-id">CNV</span><span class="stage-role">backbone · 5</span></div>
       <p>Expression-based callers run in parallel. Numbat is a separate, opt-in path that reads allele frequencies and needs a genome BAM.</p>
-      <div class="flow"><span class="grp"><span class="grp-tag">expression-based · parallel</span><span class="ln"><span class="p opt">INFERCNV</span> <span class="cm">continuous CNV load</span></span><span class="ln"><span class="p opt">COPYKAT_PROCESS</span> <span class="cm">aneuploid / diploid</span></span></span><span class="ar">+</span><span class="grp"><span class="grp-tag">allele-aware · opt-in</span><span class="ln"><span class="p opt">NUMBAT_FETCH_REFS</span> <span class="cm">skipped when the image ships refs</span></span><span class="ln"><span class="p">NUMBAT_PREP</span><span class="ar">&rarr;</span><span class="p">NUMBAT_CELLSNP</span><span class="ar">&rarr;</span><span class="p">NUMBAT_PHASE</span><span class="ar">&rarr;</span><span class="p">NUMBAT_RUN</span> <span class="cm">on by default · needs BAM · auto-skips without one</span></span></span></div>
+      <div class="flow"><span class="grp"><span class="grp-tag">expression-based · parallel</span><span class="ln"><span class="p opt">INFERCNV</span> <span class="cm">continuous CNV load</span></span><span class="ln"><span class="p opt">COPYKAT_PROCESS</span> <span class="cm">aneuploid / diploid</span></span></span><span class="ar">+</span><span class="grp"><span class="grp-tag">allele-aware · opt-in</span><span class="ln"><span class="p">NUMBAT_PREP</span><span class="ar">&rarr;</span><span class="p">NUMBAT_CELLSNP</span><span class="ar">&rarr;</span><span class="p">NUMBAT_PHASE</span><span class="ar">&rarr;</span><span class="p">NUMBAT_RUN</span> <span class="cm">on by default · needs BAM · auto-skips without one</span></span></span></div>
     </article>
     <article class="chain" style="--arm: var(--spine)">
       <div class="chain-head"><span class="stage-id">STRATIFY</span><span class="stage-role">backbone · 6</span></div>

@@ -337,7 +337,7 @@ process CELLCOMM_NICHENET {
     should be. On a laptop that is a one-line fix; on Cirro or AWS Batch, where
     the checkout is done for you, it sinks the run at the ninth of eleven stages.
 
-    Mirrors NUMBAT_FETCH_REFS: `storeDir` means the download happens once and is
+    `storeDir` means the download happens once and is
     reused by every later run, including across resumes.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */

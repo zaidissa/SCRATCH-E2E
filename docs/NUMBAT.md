@@ -38,9 +38,12 @@ consensus then has three or four independent opinions instead of two.
 
 ### Where the reference files come from
 
-Not vendored here — they are large external downloads. Fetch once to a shared
-location (on HPC put them somewhere group-readable) and point the three
-`--numbat_*` parameters at them. `bin/fetch_numbat_refs.sh` does all of this.
+The Numbat image (`syedsazaidi/scratch-numbat`) ships all three under `/data`,
+and the pipeline uses those whenever `--numbat_gmap`, `--numbat_snpvcf` and
+`--numbat_paneldir` are left unset. There is no download step: the panel host
+below now answers automated requests with an HTML page instead of the zip. For
+a different image or build, download the files by hand (sources below) and set
+all three parameters.
 
 | File | Source | Size |
 |---|---|---|

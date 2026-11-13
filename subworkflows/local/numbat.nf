@@ -8,7 +8,6 @@
 */
 
 include { asBool } from '../../lib/booleans.nf'
-include { NUMBAT_FETCH_REFS } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_PREP   } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_GERMLINE } from '../../modules/local/numbat/main.nf'
 include { NUMBAT_CELLSNP } from '../../modules/local/numbat/main.nf'
@@ -94,11 +93,11 @@ workflow NUMBAT {
             // download, and discovering it is missing after the pileup has
             // burned hours on a BAM is the worst time to find out.
             // The numbat image ships all three references, so "not supplied" means
-            // "use the image copy" -- NOT "go and download 10 GB". The download
-            // path stays available via --numbat_fetch_refs for anyone running a
-            // different image, but it is no longer the default, because the
-            // upstream panel URL is behind a WAF that serves a 212-byte HTML
-            // challenge with HTTP 200. curl saves that AS the zip and unzip fails.
+            // "use the image copy". There is no download path any more: the
+            // upstream panel URL is behind a WAF that serves a 212-byte HTML page
+            // with HTTP 200, so the old NUMBAT_FETCH_REFS could only fail (Cirro
+            // 7c3bed7a died on it in 3 minutes). A different image or build is
+            // supported by pointing --numbat_gmap/_snpvcf/_paneldir at copies.
             // THREE distinct placeholders, not one file passed three times:
             // Nextflow stages each `path` input by its own basename, so reusing a
             // single NO_FILE makes all three land as "NO_FILE" in the task dir and
@@ -121,11 +120,6 @@ workflow NUMBAT {
                 ch_gmap     = Channel.value(file(params.numbat_gmap,     checkIfExists: true))
                 ch_snpvcf   = Channel.value(file(params.numbat_snpvcf,   checkIfExists: true))
                 ch_paneldir = Channel.value(file(params.numbat_paneldir, type: 'dir', checkIfExists: true))
-            } else if (params.numbat_fetch_refs) {
-                NUMBAT_FETCH_REFS()
-                ch_gmap     = NUMBAT_FETCH_REFS.out.gmap
-                ch_snpvcf   = NUMBAT_FETCH_REFS.out.snpvcf
-                ch_paneldir = NUMBAT_FETCH_REFS.out.paneldir
             } else {
                 // Placeholders: NUMBAT_CELLSNP / NUMBAT_PHASE resolve these to the in-image paths.
                 ch_gmap     = Channel.value(nf_gmap)

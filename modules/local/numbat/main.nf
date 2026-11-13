@@ -30,53 +30,6 @@
 ----------------------------------------------------------------------------------------
 */
 
-// Fetches the three external references Numbat needs (~10 GB) when they were
-// not supplied. `storeDir` is what makes this safe to leave on: the files live
-// OUTSIDE work/, so they survive -resume, a cleaned work directory, and every
-// later run -- the download happens exactly once per destination, and the
-// process is skipped entirely whenever the outputs are already there.
-//
-// The build is part of the stored path on purpose. An hg19 panel against hg38
-// BAMs does not error, it silently produces wrong calls, so hg19 and hg38 must
-// never be able to occupy the same cache slot.
-process NUMBAT_FETCH_REFS {
-
-    tag "Numbat refs (${params.numbat_genome})"
-    label 'process_low'
-    storeDir "${params.numbat_refs_dir}/${params.numbat_genome}"
-
-    output:
-        path "genetic_map_${params.numbat_genome}_withX.txt.gz", emit: gmap
-        path "genome1K.phase3.SNP_AF5e2.chr1toX.${params.numbat_genome}.vcf.gz", emit: snpvcf
-        path "1000G_${params.numbat_genome}", type: 'dir', emit: paneldir
-
-    when:
-        task.ext.when == null || task.ext.when
-
-    script:
-        """
-        set -euo pipefail
-        fetch_numbat_refs.sh . ${params.numbat_genome}
-        # The fetch script is idempotent and verifies each file exists, but a
-        # truncated download would still satisfy `-f`. Fail here rather than let
-        # a partial panel produce quietly wrong phasing.
-        for f in genetic_map_${params.numbat_genome}_withX.txt.gz \
-                 genome1K.phase3.SNP_AF5e2.chr1toX.${params.numbat_genome}.vcf.gz; do
-            [ -s "\$f" ] || { echo "numbat reference \$f is missing or empty" >&2; exit 1; }
-        done
-        [ -d "1000G_${params.numbat_genome}" ] || {
-            echo "numbat phasing panel directory is missing" >&2; exit 1; }
-        """
-
-    stub:
-        """
-        touch genetic_map_${params.numbat_genome}_withX.txt.gz
-        touch genome1K.phase3.SNP_AF5e2.chr1toX.${params.numbat_genome}.vcf.gz
-        mkdir -p 1000G_${params.numbat_genome}
-        """
-}
-
-
 process NUMBAT_PREP {
 
     tag "Numbat: per-individual inputs"
