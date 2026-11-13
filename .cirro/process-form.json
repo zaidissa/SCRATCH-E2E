@@ -293,17 +293,6 @@
                 "title": "CNV and stratification",
                 "type": "object",
                 "properties": {
-                    "run_numbat": {
-                        "type": "boolean",
-                        "title": "Run Numbat",
-                        "default": true,
-                        "description": "Allele-aware and the only caller that sees copy-neutral LOH. Needs the aligned BAM, so it self-disables when starting from counts without one."
-                    },
-                    "skip_infercnv": {
-                        "type": "boolean",
-                        "default": false,
-                        "title": "Skip inferCNV"
-                    },
                     "cnv_caller_priority": {
                         "type": "string",
                         "title": "Preferred caller",
@@ -319,12 +308,6 @@
                         "title": "inferCNV threshold (SDs above reference)",
                         "default": 2,
                         "description": "Calibrated against Numbat on HGSOC. At 3 the cutoff sat above the entire epithelial block and inferCNV called nothing malignant."
-                    },
-                    "numbat_fetch_refs": {
-                        "type": "boolean",
-                        "title": "Download Numbat references",
-                        "default": false,
-                        "description": "Off by default because the Numbat image already carries a copy. Enable only if the in-image references are missing or the wrong genome build."
                     },
                     "numbat_germline_vcfs": {
                         "type": "string",

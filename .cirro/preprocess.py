@@ -540,6 +540,18 @@ def setup_parameters(ds: PreprocessDataset):
     if "tcr_analysis" in ds.params:
         ds.remove_param("tcr_analysis")
 
+    # ---- both CNV callers, always ----------------------------------------
+    # inferCNV and Numbat are not optional on Cirro: the form no longer offers
+    # "Run Numbat", "Skip inferCNV" or "Download Numbat references". Set here
+    # rather than left to nextflow.config so a launch made with "Copy
+    # parameters" from an older run cannot carry an old off-switch through.
+    # Numbat still self-disables, with a warning, when there is no BAM. The
+    # references are read from the Numbat image (/data); the upstream download
+    # host now answers with an HTML page instead of the phasing panel.
+    ds.add_param("run_numbat", True, overwrite=True)
+    ds.add_param("skip_infercnv", False, overwrite=True)
+    ds.add_param("numbat_fetch_refs", False, overwrite=True)
+
     # ---- Numbat's BAM ----------------------------------------------------
     # Must run BEFORE the blank-dropping below: a derived path is non-blank and
     # therefore survives it, while a dataset with no BAMs leaves the field blank
